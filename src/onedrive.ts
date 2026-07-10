@@ -45,21 +45,34 @@ const contentPath = () => {
     : ownPath;
 };
 let initialization: Promise<void> | undefined;
+let redirectHandling: Promise<unknown> | undefined;
 let tokenInFlight: Promise<string> | undefined;
 
-async function acquireToken() {
+async function prepareAuth() {
   if (!msal) throw new Error("Configure VITE_MS_CLIENT_ID.");
   initialization ??= msal.initialize();
   await initialization;
-  let account = msal.getAllAccounts()[0];
+  redirectHandling ??= msal.handleRedirectPromise();
+  await redirectHandling;
+}
+
+export async function resumeSignIn(): Promise<AccountInfo | undefined> {
+  await prepareAuth();
+  return msal!.getAllAccounts()[0];
+}
+
+async function acquireToken() {
+  await prepareAuth();
+  let account = msal!.getAllAccounts()[0];
   if (!account) {
-    const r = await msal.loginPopup({ scopes });
-    account = r.account!;
+    await msal!.loginRedirect({ scopes, redirectStartPage: location.href });
+    throw new Error("Redirecionando para a Microsoft…");
   }
   try {
-    return (await msal.acquireTokenSilent({ scopes, account })).accessToken;
+    return (await msal!.acquireTokenSilent({ scopes, account })).accessToken;
   } catch {
-    return (await msal.acquireTokenPopup({ scopes, account })).accessToken;
+    await msal!.acquireTokenRedirect({ scopes, account });
+    throw new Error("Renovando a autorização…");
   }
 }
 
@@ -72,8 +85,11 @@ async function token() {
   return tokenInFlight;
 }
 export async function signIn(): Promise<AccountInfo> {
-  await token();
-  return msal!.getAllAccounts()[0];
+  await prepareAuth();
+  const account = msal!.getAllAccounts()[0];
+  if (account) return account;
+  await msal!.loginRedirect({ scopes, redirectStartPage: location.href });
+  throw new Error("Redirecionando para a Microsoft…");
 }
 export function isConfigured() {
   return Boolean(msal);
@@ -115,8 +131,12 @@ export async function saveCloud(data: FamilyData) {
 }
 export async function signOut() {
   if (msal) {
-    await msal.initialize();
+    await prepareAuth();
     const a = msal.getAllAccounts()[0];
-    if (a) await msal.logoutPopup({ account: a });
+    if (a)
+      await msal.logoutRedirect({
+        account: a,
+        postLogoutRedirectUri: redirectUri,
+      });
   }
 }

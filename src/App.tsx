@@ -50,6 +50,7 @@ import {
   setCloudLocation,
   signIn,
   signOut,
+  resumeSignIn,
 } from "./onedrive";
 import { createSeed } from "./seed";
 import {
@@ -105,25 +106,33 @@ export default function App() {
   useEffect(() => {
     if (authenticated && data) saveLocal(data);
   }, [authenticated, data]);
+  const allowAccount = async (account: { username: string }) => {
+    const email = account.username.toLowerCase();
+    const allowed = String(import.meta.env.VITE_ALLOWED_EMAILS || "")
+      .toLowerCase()
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean);
+    if (!allowed.includes(email)) {
+      await signOut();
+      throw new Error(`O e-mail ${email} não está autorizado.`);
+    }
+    const remote = await loadCloud();
+    setData(remote ?? (await loadLocal()));
+    setAuthenticated(true);
+    setCloud("connected");
+  };
+  useEffect(() => {
+    resumeSignIn()
+      .then((account) => account && allowAccount(account))
+      .catch((error) => setAuthError((error as Error).message));
+  }, []);
   const login = async () => {
     setAuthBusy(true);
     setAuthError("");
     try {
       const account = await signIn();
-      const email = account.username.toLowerCase();
-      const allowed = String(import.meta.env.VITE_ALLOWED_EMAILS || "")
-        .toLowerCase()
-        .split(",")
-        .map((value) => value.trim())
-        .filter(Boolean);
-      if (!allowed.includes(email)) {
-        await signOut();
-        throw new Error(`O e-mail ${email} não está autorizado.`);
-      }
-      const remote = await loadCloud();
-      setData(remote ?? (await loadLocal()));
-      setAuthenticated(true);
-      setCloud("connected");
+      await allowAccount(account);
     } catch (error) {
       setAuthError((error as Error).message);
     } finally {
