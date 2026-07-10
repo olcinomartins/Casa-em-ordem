@@ -15,6 +15,7 @@ import {
   Save,
   Trash2,
   CheckCircle2,
+  TrendingUp,
 } from "lucide-react";
 import {
   Account,
@@ -46,9 +47,12 @@ import {
   saveCloud,
   setCloudLocation,
   signIn,
+  signOut,
 } from "./onedrive";
 import { createSeed } from "./seed";
 import {
+  budgetApplies,
+  budgetValue,
   personalBalance,
   realized,
   recurringCheck,
@@ -65,6 +69,7 @@ type Page =
   | "pagamentos"
   | "metas"
   | "tarefas"
+  | "analises"
   | "config";
 const nav: [Page, string, typeof BarChart3][] = [
   ["painel", "Painel", BarChart3],
@@ -74,6 +79,7 @@ const nav: [Page, string, typeof BarChart3][] = [
   ["pagamentos", "Pagamentos", ReceiptText],
   ["metas", "Metas", Target],
   ["tarefas", "Tarefas", CheckSquare],
+  ["analises", "Análises", TrendingUp],
   ["config", "Configurações", Settings],
 ];
 const currentMonth = () => new Date().toISOString().slice(0, 7);
@@ -81,6 +87,9 @@ const dateOnly = (d: Date) => d.toISOString().slice(0, 10);
 
 export default function App() {
   const [data, setData] = useState<FamilyData>();
+  const [authenticated, setAuthenticated] = useState(false);
+  const [authError, setAuthError] = useState("");
+  const [authBusy, setAuthBusy] = useState(false);
   const [page, setPage] = useState<Page>("painel");
   const [month, setMonth] = useState(currentMonth());
   const [view, setView] = useState<CashView>("cash");
@@ -89,11 +98,33 @@ export default function App() {
     "local",
   );
   useEffect(() => {
-    loadLocal().then(setData);
-  }, []);
-  useEffect(() => {
-    if (data) saveLocal(data);
-  }, [data]);
+    if (authenticated && data) saveLocal(data);
+  }, [authenticated, data]);
+  const login = async () => {
+    setAuthBusy(true);
+    setAuthError("");
+    try {
+      const account = await signIn();
+      const email = account.username.toLowerCase();
+      const allowed = String(import.meta.env.VITE_ALLOWED_EMAILS || "")
+        .toLowerCase()
+        .split(",")
+        .map((value) => value.trim())
+        .filter(Boolean);
+      if (!allowed.includes(email)) {
+        await signOut();
+        throw new Error(`O e-mail ${email} não está autorizado.`);
+      }
+      const remote = await loadCloud();
+      setData(remote ?? (await loadLocal()));
+      setAuthenticated(true);
+      setCloud("connected");
+    } catch (error) {
+      setAuthError((error as Error).message);
+    } finally {
+      setAuthBusy(false);
+    }
+  };
   const mutate = (fn: (draft: FamilyData) => void) =>
     setData((old) => {
       if (!old) return old;
@@ -116,9 +147,15 @@ export default function App() {
   };
   const configureShared = () => {
     const current = getCloudLocation();
-    const driveId = prompt("ID do drive compartilhado:", current?.driveId || "");
+    const driveId = prompt(
+      "ID do drive compartilhado:",
+      current?.driveId || "",
+    );
     if (!driveId) return;
-    const itemId = prompt("ID do arquivo compartilhado:", current?.itemId || "");
+    const itemId = prompt(
+      "ID do arquivo compartilhado:",
+      current?.itemId || "",
+    );
     if (!itemId) return;
     setCloudLocation({ driveId, itemId });
     setMessage("Base compartilhada configurada. Conecte novamente.");
@@ -137,6 +174,27 @@ export default function App() {
       setMessage((e as Error).message);
     }
   };
+  if (!authenticated)
+    return (
+      <div className="login-page">
+        <section className="login-card">
+          <div className="login-mark">⌂</div>
+          <p className="eyebrow">FINANÇAS DA FAMÍLIA</p>
+          <h1>Casa em Ordem</h1>
+          <p>Um espaço privado para Olcino e Mariana planejarem juntos.</p>
+          <button
+            className="primary login-button"
+            disabled={authBusy}
+            onClick={login}
+          >
+            <Cloud size={19} />
+            {authBusy ? "Conectando…" : "Entrar com a Microsoft"}
+          </button>
+          {authError && <div className="auth-error">{authError}</div>}
+          <small>Somente os dois e-mails autorizados podem acessar.</small>
+        </section>
+      </div>
+    );
   if (!data) return <div className="splash">Preparando a casa…</div>;
   return (
     <div className="app">
@@ -221,6 +279,7 @@ export default function App() {
         {page === "pagamentos" && <Payments data={data} mutate={mutate} />}{" "}
         {page === "metas" && <Goals data={data} mutate={mutate} />}{" "}
         {page === "tarefas" && <Tasks data={data} mutate={mutate} />}{" "}
+        {page === "analises" && <Analytics data={data} />}{" "}
         {page === "config" && (
           <Config
             data={data}
@@ -433,9 +492,7 @@ function BudgetBars({
   const rows = data.categories
     .filter((c) => c.nature === "expense")
     .map((c) => {
-      const planned = data.budgets
-        .filter((b) => b.month === month && b.categoryId === c.id)
-        .reduce((s, b) => s + b.amount, 0);
+      const planned = budgetValue(data, month, (b) => b.categoryId === c.id);
       const actual = data.transactions
         .filter((t) => t.categoryId === c.id)
         .reduce((s, t) => s + Math.abs(realized(t, month, view)), 0);
@@ -734,20 +791,48 @@ function Budgets({
   setView: (v: CashView) => void;
   mutate: (f: (d: FamilyData) => void) => void;
 }) {
-  const setBudget = (categoryId: string, amount: number) =>
-    mutate((d) => {
-      let b = d.budgets.find(
-        (x) => x.month === month && x.categoryId === categoryId && !x.member,
-      );
-      if (b) b.amount = amount;
-      else d.budgets.push({ ...audit(), month, categoryId, amount });
+  const [editing, setEditing] = useState<Budget>();
+  const saveBudget = (form: FormData) => {
+    const target = String(form.get("target"));
+    mutate((draft) => {
+      const existing =
+        editing && draft.budgets.find((item) => item.id === editing.id);
+      const item: Budget = existing || {
+        ...audit(),
+        month: String(form.get("startMonth")),
+        amount: 0,
+      };
+      item.amount = Number(form.get("amount"));
+      item.month = String(form.get("startMonth"));
+      item.startMonth = String(form.get("startMonth"));
+      item.endMonth = String(form.get("endMonth") || "") || undefined;
+      item.categoryId = target.startsWith("category:")
+        ? target.slice(9)
+        : undefined;
+      item.accountId = target.startsWith("account:")
+        ? target.slice(8)
+        : undefined;
+      item.member = target.startsWith("member:")
+        ? (target.slice(7) as "Olcino" | "Mari")
+        : undefined;
+      item.reason = String(form.get("reason") || "");
+      item.updatedAt = now();
+      item.version++;
+      if (!existing) draft.budgets.push(item);
     });
-  const setPersonal = (member: "Olcino" | "Mari", amount: number) =>
-    mutate((d) => {
-      let b = d.budgets.find((x) => x.month === month && x.member === member);
-      if (b) b.amount = amount;
-      else d.budgets.push({ ...audit(), month, member, amount });
+    setEditing(undefined);
+  };
+  const remove = (id: string) =>
+    mutate((draft) => {
+      draft.budgets = draft.budgets.filter((item) => item.id !== id);
     });
+  const label = (item: Budget) =>
+    item.member
+      ? `Pessoal — ${item.member}`
+      : item.categoryId
+        ? data.categories.find((c) => c.id === item.categoryId)?.name
+        : data.accounts.find((a) => a.id === item.accountId)?.name ||
+          "Orçamento";
   return (
     <>
       <div className="toolbar">
@@ -755,49 +840,117 @@ function Budgets({
       </div>
       <section className="grid two">
         <div className="panel">
-          <h2>Orçamento por categoria</h2>
-          {data.categories
-            .filter((c) => c.nature === "expense")
-            .map((c) => {
-              const b = data.budgets.find(
-                (x) => x.month === month && x.categoryId === c.id && !x.member,
-              );
-              return (
-                <label className="budget-line" key={c.id}>
-                  <span>{c.name}</span>
-                  <input
-                    type="number"
-                    min="0"
-                    value={b?.amount || ""}
-                    placeholder="0,00"
-                    onChange={(e) => setBudget(c.id, +e.target.value)}
-                  />
-                </label>
-              );
-            })}
+          <h2>
+            {editing ? "Editar orçamento" : "Novo orçamento com vigência"}
+          </h2>
+          <form
+            className="budget-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              saveBudget(new FormData(event.currentTarget));
+              event.currentTarget.reset();
+            }}
+          >
+            <select
+              name="target"
+              required
+              defaultValue={
+                editing?.member
+                  ? `member:${editing.member}`
+                  : editing?.categoryId
+                    ? `category:${editing.categoryId}`
+                    : editing?.accountId
+                      ? `account:${editing.accountId}`
+                      : ""
+              }
+            >
+              <option value="">Categoria, conta ou pessoa</option>
+              <optgroup label="Orçamentos pessoais">
+                <option value="member:Olcino">Pessoal — Olcino</option>
+                <option value="member:Mari">Pessoal — Mari</option>
+              </optgroup>
+              <optgroup label="Categorias">
+                {data.categories
+                  .filter((c) => c.nature === "expense")
+                  .map((c) => (
+                    <option key={c.id} value={`category:${c.id}`}>
+                      {c.name}
+                    </option>
+                  ))}
+              </optgroup>
+              <optgroup label="Contas e cartões">
+                {data.accounts.map((a) => (
+                  <option key={a.id} value={`account:${a.id}`}>
+                    {a.name}
+                  </option>
+                ))}
+              </optgroup>
+            </select>
+            <input
+              name="amount"
+              required
+              type="number"
+              min="0"
+              step="0.01"
+              placeholder="Valor mensal"
+              defaultValue={editing?.amount}
+            />
+            <label>
+              Início
+              <input
+                name="startMonth"
+                required
+                type="month"
+                defaultValue={editing?.startMonth || editing?.month || month}
+              />
+            </label>
+            <label>
+              Fim opcional
+              <input
+                name="endMonth"
+                type="month"
+                defaultValue={editing?.endMonth || ""}
+              />
+            </label>
+            <input
+              name="reason"
+              placeholder="Observação"
+              defaultValue={editing?.reason}
+            />
+            <div className="actions">
+              <button className="primary" type="submit">
+                {editing ? "Salvar alteração" : "Criar orçamento"}
+              </button>
+              {editing && (
+                <button type="button" onClick={() => setEditing(undefined)}>
+                  Cancelar
+                </button>
+              )}
+            </div>
+          </form>
+          <p className="muted">
+            Sem mês final, o valor se repete indefinidamente.
+          </p>
         </div>
         <div>
           <section className="panel">
-            <h2>Orçamentos pessoais</h2>
-            {(["Olcino", "Mari"] as const).map((m) => (
-              <label className="budget-line" key={m}>
-                <span>
-                  {m}
+            <h2>Orçamentos cadastrados</h2>
+            {data.budgets.map((item) => (
+              <div className="budget-item" key={item.id}>
+                <div>
+                  <b>{label(item)}</b>
                   <small>
-                    Saldo acumulado: {money(personalBalance(data, m, month))}
+                    {money(item.amount)} · {item.startMonth || item.month} até{" "}
+                    {item.endMonth || "indefinido"}
                   </small>
-                </span>
-                <input
-                  type="number"
-                  min="0"
-                  value={
-                    data.budgets.find(
-                      (b) => b.month === month && b.member === m,
-                    )?.amount || ""
-                  }
-                  onChange={(e) => setPersonal(m, +e.target.value)}
-                />
-              </label>
+                </div>
+                <div className="actions">
+                  <button onClick={() => setEditing(item)}>Editar</button>
+                  <button onClick={() => remove(item.id)}>
+                    <Trash2 size={15} />
+                  </button>
+                </div>
+              </div>
             ))}
           </section>
           <section className="panel">
@@ -1255,12 +1408,7 @@ function Config({
           {data.categories.length} categorias · {data.rules.length} regras
           aprendidas
         </p>
-        {data.categories.map((c) => (
-          <details key={c.id}>
-            <summary>{c.name}</summary>
-            <p>{c.subcategories.join(" · ")}</p>
-          </details>
-        ))}
+        <CategoryEditor data={data} mutate={mutate} />
       </section>
       <section className="panel danger-zone">
         <h2>Recomeçar localmente</h2>
@@ -1274,6 +1422,212 @@ function Config({
         </button>
       </section>
     </div>
+  );
+}
+
+function CategoryEditor({
+  data,
+  mutate,
+}: {
+  data: FamilyData;
+  mutate: (f: (d: FamilyData) => void) => void;
+}) {
+  const addCategory = (fd: FormData) =>
+    mutate((d) =>
+      d.categories.push({
+        ...audit(),
+        name: String(fd.get("name")),
+        nature: String(fd.get("nature")) as
+          "expense" | "income" | "transfer" | "goal",
+        subcategories: [],
+      }),
+    );
+  const rename = (id: string, current: string) => {
+    const name = prompt("Novo nome da categoria:", current);
+    if (name)
+      mutate((d) => {
+        const c = d.categories.find((x) => x.id === id)!;
+        c.name = name;
+        c.updatedAt = now();
+        c.version++;
+      });
+  };
+  const addSub = (id: string) => {
+    const name = prompt("Nome da nova subcategoria:");
+    if (name)
+      mutate((d) => {
+        const c = d.categories.find((x) => x.id === id)!;
+        if (!c.subcategories.includes(name)) c.subcategories.push(name);
+      });
+  };
+  const renameSub = (id: string, old: string) => {
+    const name = prompt("Novo nome da subcategoria:", old);
+    if (name)
+      mutate((d) => {
+        const c = d.categories.find((x) => x.id === id)!;
+        c.subcategories = c.subcategories.map((s) => (s === old ? name : s));
+        d.transactions
+          .filter((t) => t.categoryId === id && t.subcategory === old)
+          .forEach((t) => (t.subcategory = name));
+      });
+  };
+  return (
+    <>
+      <QuickForm
+        onSubmit={addCategory}
+        fields={[["name", "Nova categoria", "text"]]}
+        extras={
+          <select name="nature">
+            <option value="expense">Despesa</option>
+            <option value="income">Receita</option>
+            <option value="transfer">Transferência</option>
+            <option value="goal">Meta</option>
+          </select>
+        }
+      />
+      {data.categories.map((c) => (
+        <details key={c.id}>
+          <summary>{c.name}</summary>
+          <div className="actions">
+            <button onClick={() => rename(c.id, c.name)}>Renomear</button>
+            <button onClick={() => addSub(c.id)}>Adicionar subcategoria</button>
+          </div>
+          <div className="subcategories">
+            {c.subcategories.map((s) => (
+              <button key={s} onClick={() => renameSub(c.id, s)}>
+                {s}
+              </button>
+            ))}
+          </div>
+        </details>
+      ))}
+    </>
+  );
+}
+
+function Analytics({ data }: { data: FamilyData }) {
+  const months = [
+    ...new Set(data.transactions.map((t) => monthOf(t.paymentDate || t.date))),
+  ]
+    .sort()
+    .slice(-18);
+  const rows = months.map((month) => {
+    const income = data.transactions
+      .filter((t) => !t.transfer && t.amount < 0)
+      .reduce((s, t) => s + Math.abs(realized(t, month, "cash")), 0);
+    const expense = data.transactions
+      .filter((t) => !t.transfer && t.amount > 0)
+      .reduce((s, t) => s + Math.abs(realized(t, month, "cash")), 0);
+    const planned = budgetValue(data, month, (b) => !b.member);
+    return { month, income, expense, planned };
+  });
+  const max = Math.max(
+    1,
+    ...rows.flatMap((r) => [r.income, r.expense, r.planned]),
+  );
+  return (
+    <>
+      <section className="cards">
+        <Card
+          label="Entradas no período"
+          value={money(rows.reduce((s, r) => s + r.income, 0))}
+          hint={`${rows.length} competências`}
+        />
+        <Card
+          label="Saídas no período"
+          value={money(rows.reduce((s, r) => s + r.expense, 0))}
+          hint="Sem transferências internas"
+        />
+        <Card
+          label="Resultado acumulado"
+          value={money(rows.reduce((s, r) => s + r.income - r.expense, 0))}
+          hint="Entradas menos saídas"
+        />
+        <Card
+          label="Média mensal"
+          value={money(
+            rows.reduce((s, r) => s + r.expense, 0) / (rows.length || 1),
+          )}
+          hint="Média de saídas"
+        />
+      </section>
+      <section className="panel analytics">
+        <div className="panel-head">
+          <div>
+            <h2>Histórico mensal</h2>
+            <p className="muted">Entradas, saídas e orçamento vigente.</p>
+          </div>
+          <div className="legend">
+            <span className="income">Entradas</span>
+            <span className="expense">Saídas</span>
+            <span className="planned">Orçado</span>
+          </div>
+        </div>
+        <div className="chart">
+          {rows.map((r) => (
+            <div className="chart-column" key={r.month}>
+              <div className="chart-bars">
+                <i
+                  className="income"
+                  style={{ height: `${(r.income / max) * 100}%` }}
+                  title={`Entradas ${money(r.income)}`}
+                />
+                <i
+                  className="expense"
+                  style={{ height: `${(r.expense / max) * 100}%` }}
+                  title={`Saídas ${money(r.expense)}`}
+                />
+                <i
+                  className="planned"
+                  style={{ height: `${(r.planned / max) * 100}%` }}
+                  title={`Orçado ${money(r.planned)}`}
+                />
+              </div>
+              <small>
+                {r.month.slice(5)}/{r.month.slice(2, 4)}
+              </small>
+            </div>
+          ))}
+        </div>
+        {!rows.length && <Empty />}
+      </section>
+      <section className="panel">
+        <h2>Orçado × realizado por competência</h2>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Mês</th>
+                <th>Entradas</th>
+                <th>Saídas</th>
+                <th>Orçado</th>
+                <th>Diferença</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows
+                .slice()
+                .reverse()
+                .map((r) => (
+                  <tr key={r.month}>
+                    <td>{r.month}</td>
+                    <td>{money(r.income)}</td>
+                    <td>{money(r.expense)}</td>
+                    <td>{money(r.planned)}</td>
+                    <td
+                      className={
+                        r.planned - r.expense >= 0 ? "positive" : "negative"
+                      }
+                    >
+                      {money(r.planned - r.expense)}
+                    </td>
+                  </tr>
+                ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </>
   );
 }
 
