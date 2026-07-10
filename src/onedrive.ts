@@ -11,7 +11,9 @@ const msal = clientId
         authority: "https://login.microsoftonline.com/consumers",
         redirectUri,
       },
-      cache: { cacheLocation: "localStorage" },
+      // O estado transitório da autenticação fica limitado à aba. Isso evita que
+      // um popup interrompido no celular bloqueie sessões futuras.
+      cache: { cacheLocation: "sessionStorage" },
     })
   : null;
 let etag: string | undefined;
@@ -42,9 +44,13 @@ const contentPath = () => {
     ? `/drives/${encodeURIComponent(x.driveId)}/items/${encodeURIComponent(x.itemId)}/content`
     : ownPath;
 };
-async function token() {
+let initialization: Promise<void> | undefined;
+let tokenInFlight: Promise<string> | undefined;
+
+async function acquireToken() {
   if (!msal) throw new Error("Configure VITE_MS_CLIENT_ID.");
-  await msal.initialize();
+  initialization ??= msal.initialize();
+  await initialization;
   let account = msal.getAllAccounts()[0];
   if (!account) {
     const r = await msal.loginPopup({ scopes });
@@ -55,6 +61,15 @@ async function token() {
   } catch {
     return (await msal.acquireTokenPopup({ scopes, account })).accessToken;
   }
+}
+
+async function token() {
+  // Salvar e conectar podem ser acionados quase juntos no celular. Todos os
+  // chamadores compartilham a mesma interação em vez de abrir dois popups.
+  tokenInFlight ??= acquireToken().finally(() => {
+    tokenInFlight = undefined;
+  });
+  return tokenInFlight;
 }
 export async function signIn(): Promise<AccountInfo> {
   await token();
