@@ -1,0 +1,3 @@
+import {Task} from './domain';
+const esc=(s:string)=>(s||'').replace(/([,;\\])/g,'\\$1').replace(/\n/g,'\\n'); const stamp=(d:string)=>new Date(d).toISOString().replace(/[-:]/g,'').replace(/\.\d{3}/,'');
+export function tasksToIcs(tasks:Task[]){const events=tasks.filter(t=>t.status!=='Concluída').map(t=>['BEGIN:VEVENT',`UID:${t.id}@casa-em-ordem`,`DTSTAMP:${stamp(new Date().toISOString())}`,`DTSTART:${stamp(t.due)}`,`SUMMARY:${esc(t.title)}`,`DESCRIPTION:${esc(t.description||`Responsável: ${t.assignee}`)}`,t.repeat!=='none'?`RRULE:FREQ=${t.repeat.toUpperCase()}`:'','END:VEVENT'].filter(Boolean).join('\r\n'));return ['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//Casa em Ordem//PT-BR',...events,'END:VCALENDAR'].join('\r\n');}
