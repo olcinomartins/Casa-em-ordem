@@ -62,8 +62,9 @@ export async function previewFile(
     throw new Error("Este arquivo já foi importado.");
   const wb = XLSX.read(buffer, { type: "array", cellDates: true });
   const transactionSheet =
-    wb.SheetNames.find((name) => normalize(name).includes("EXTRATO E CARTAO")) ??
-    wb.SheetNames[0];
+    wb.SheetNames.find((name) =>
+      normalize(name).includes("EXTRATO E CARTAO"),
+    ) ?? wb.SheetNames[0];
   let raw = XLSX.utils.sheet_to_json<Record<string, unknown>>(
     wb.Sheets[transactionSheet],
     { defval: "" },
@@ -135,6 +136,12 @@ export async function previewFile(
       transfer: /PAGAMENTO.*FATURA|FATURA.*CART[AÃ]O|TRANSFERENCIA ENTRE/i.test(
         normalize(descString),
       ),
+      movement: /PAGAMENTO.*FATURA|FATURA.*CART[AÃ]O|TRANSFERENCIA ENTRE/i.test(
+        normalize(descString),
+      )
+        ? ("transfer" as const)
+        : ("expense_income" as const),
+      sourceKind: invoice ? ("card" as const) : ("statement" as const),
       dedupeKey: "",
       batchId: hash,
     };
@@ -156,7 +163,11 @@ export async function previewFile(
       dedupeKey: key,
       categoryId: matchedCategory?.id ?? rule?.categoryId,
       subcategory: historicalSub.join("-") || rule?.subcategory,
-      classification: matchedCategory ? "confirmed" : rule ? "suggested" : "pending",
+      classification: matchedCategory
+        ? "confirmed"
+        : rule
+          ? "suggested"
+          : "pending",
     });
   }
   return { filename: file.name, hash, institution, rows, duplicates, errors };

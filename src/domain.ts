@@ -46,6 +46,8 @@ export interface Transaction extends Audit {
   batchId?: string;
   dedupeKey: string;
   transfer: boolean;
+  movement?: "expense_income" | "reserve" | "transfer";
+  sourceKind?: "card" | "statement";
   notes?: string;
 }
 export interface Rule extends Audit {

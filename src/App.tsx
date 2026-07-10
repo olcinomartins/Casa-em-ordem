@@ -1506,102 +1506,240 @@ function CategoryEditor({
 }
 
 function Analytics({ data }: { data: FamilyData }) {
-  const months = [
+  const available = [
     ...new Set(data.transactions.map((t) => monthOf(t.paymentDate || t.date))),
-  ]
-    .sort()
-    .slice(-18);
+  ].sort();
+  const [start, setStart] = useState(available[0] || currentMonth());
+  const [end, setEnd] = useState(available.at(-1) || currentMonth());
+  const [mode, setMode] = useState<"cash" | "accrual">("accrual");
+  const [report, setReport] = useState<"budget" | "reserve" | "final">(
+    "budget",
+  );
+  const months = available.filter((month) => month >= start && month <= end);
+  const belongs = (t: Transaction, kind: "budget" | "reserve" | "final") =>
+    kind === "final"
+      ? t.movement !== "transfer" && !t.transfer
+      : kind === "reserve"
+        ? t.movement === "reserve"
+        : (t.movement || "expense_income") === "expense_income" && !t.transfer;
   const rows = months.map((month) => {
-    const income = data.transactions
-      .filter((t) => !t.transfer && t.amount < 0)
-      .reduce((s, t) => s + Math.abs(realized(t, month, "cash")), 0);
-    const expense = data.transactions
-      .filter((t) => !t.transfer && t.amount > 0)
-      .reduce((s, t) => s + Math.abs(realized(t, month, "cash")), 0);
-    const planned = budgetValue(data, month, (b) => !b.member);
-    return { month, income, expense, planned };
+    const relevant = data.transactions.filter((t) => belongs(t, report));
+    const income = relevant
+      .filter((t) => t.amount < 0)
+      .reduce((s, t) => s + Math.abs(realized(t, month, mode)), 0);
+    const expense = relevant
+      .filter((t) => t.amount > 0)
+      .reduce((s, t) => s + Math.abs(realized(t, month, mode)), 0);
+    const budgetPlan = budgetValue(data, month, (b) => !b.member);
+    const reservePlan = data.goals
+      .filter((g) => g.active)
+      .reduce((s, g) => s + g.minimum, 0);
+    const planned =
+      report === "reserve"
+        ? reservePlan
+        : report === "final"
+          ? budgetPlan + reservePlan
+          : budgetPlan;
+    const realizedValue = report === "budget" ? expense - income : expense;
+    return {
+      month,
+      income,
+      expense,
+      planned,
+      realized: realizedValue,
+      result: planned - realizedValue,
+    };
   });
   const max = Math.max(
     1,
-    ...rows.flatMap((r) => [r.income, r.expense, r.planned]),
+    ...rows.flatMap((r) => [r.realized, r.planned, Math.abs(r.result)]),
   );
+  const categoryRows = data.categories
+    .map((category) => {
+      const actual = data.transactions
+        .filter((t) => t.categoryId === category.id && belongs(t, report))
+        .reduce(
+          (s, t) =>
+            months.reduce(
+              (m, month) => m + Math.abs(realized(t, month, mode)),
+              s,
+            ),
+          0,
+        );
+      return { name: category.name, actual };
+    })
+    .filter((x) => x.actual)
+    .sort((a, b) => b.actual - a.actual)
+    .slice(0, 10);
+  const totalPlanned = rows.reduce((s, r) => s + r.planned, 0),
+    totalRealized = rows.reduce((s, r) => s + r.realized, 0),
+    totalResult = totalPlanned - totalRealized;
   return (
     <>
+      <section className="bi-controls">
+        <div className="segmented">
+          <button
+            className={report === "budget" ? "on" : ""}
+            onClick={() => setReport("budget")}
+          >
+            Orçamento mensal
+          </button>
+          <button
+            className={report === "reserve" ? "on" : ""}
+            onClick={() => setReport("reserve")}
+          >
+            Reservas
+          </button>
+          <button
+            className={report === "final" ? "on" : ""}
+            onClick={() => setReport("final")}
+          >
+            Resultado final
+          </button>
+        </div>
+        <label>
+          De
+          <input
+            type="month"
+            value={start}
+            onChange={(e) => setStart(e.target.value)}
+          />
+        </label>
+        <label>
+          Até
+          <input
+            type="month"
+            value={end}
+            onChange={(e) => setEnd(e.target.value)}
+          />
+        </label>
+        <select
+          value={mode}
+          onChange={(e) => setMode(e.target.value as "cash" | "accrual")}
+        >
+          <option value="accrual">Data da compra</option>
+          <option value="cash">Data da parcela</option>
+        </select>
+      </section>
       <section className="cards">
         <Card
-          label="Entradas no período"
-          value={money(rows.reduce((s, r) => s + r.income, 0))}
+          label="Planejado"
+          value={money(totalPlanned)}
           hint={`${rows.length} competências`}
         />
         <Card
-          label="Saídas no período"
-          value={money(rows.reduce((s, r) => s + r.expense, 0))}
+          label="Realizado"
+          value={money(totalRealized)}
+          hint={mode === "cash" ? "Por parcela" : "Na compra"}
+        />
+        <Card
+          label="Resultado"
+          value={money(totalResult)}
+          hint="Planejado menos realizado"
+          tone={totalResult >= 0 ? "good" : "bad"}
+        />
+        <Card
+          label="Entradas"
+          value={money(rows.reduce((s, r) => s + r.income, 0))}
           hint="Sem transferências internas"
         />
-        <Card
-          label="Resultado acumulado"
-          value={money(rows.reduce((s, r) => s + r.income - r.expense, 0))}
-          hint="Entradas menos saídas"
-        />
-        <Card
-          label="Média mensal"
-          value={money(
-            rows.reduce((s, r) => s + r.expense, 0) / (rows.length || 1),
-          )}
-          hint="Média de saídas"
-        />
       </section>
-      <section className="panel analytics">
-        <div className="panel-head">
-          <div>
-            <h2>Histórico mensal</h2>
-            <p className="muted">Entradas, saídas e orçamento vigente.</p>
+      <section className="grid bi-grid">
+        <div className="panel analytics">
+          <div className="panel-head">
+            <div>
+              <h2>Por mês</h2>
+              <p className="muted">Planejado, realizado e resultado.</p>
+            </div>
+            <div className="legend">
+              <span className="planned">Planejado</span>
+              <span className="realized">Realizado</span>
+              <span className="result">Resultado</span>
+            </div>
           </div>
-          <div className="legend">
-            <span className="income">Entradas</span>
-            <span className="expense">Saídas</span>
-            <span className="planned">Orçado</span>
-          </div>
-        </div>
-        <div className="chart">
-          {rows.map((r) => (
-            <div className="chart-column" key={r.month}>
-              <div className="chart-bars">
-                <i
-                  className="income"
-                  style={{ height: `${(r.income / max) * 100}%` }}
-                  title={`Entradas ${money(r.income)}`}
-                />
-                <i
-                  className="expense"
-                  style={{ height: `${(r.expense / max) * 100}%` }}
-                  title={`Saídas ${money(r.expense)}`}
-                />
-                <i
-                  className="planned"
-                  style={{ height: `${(r.planned / max) * 100}%` }}
-                  title={`Orçado ${money(r.planned)}`}
-                />
+          <div className="chart">
+            {rows.map((r) => (
+              <div className="chart-column" key={r.month}>
+                <div className="chart-bars">
+                  <i
+                    className="planned"
+                    style={{ height: `${(r.planned / max) * 100}%` }}
+                    title={`Planejado ${money(r.planned)}`}
+                  />
+                  <i
+                    className="realized"
+                    style={{ height: `${(r.realized / max) * 100}%` }}
+                    title={`Realizado ${money(r.realized)}`}
+                  />
+                  <i
+                    className={`result ${r.result < 0 ? "bad" : ""}`}
+                    style={{ height: `${(Math.abs(r.result) / max) * 100}%` }}
+                    title={`Resultado ${money(r.result)}`}
+                  />
+                </div>
+                <small>
+                  {r.month.slice(5)}/{r.month.slice(2, 4)}
+                </small>
               </div>
-              <small>
-                {r.month.slice(5)}/{r.month.slice(2, 4)}
-              </small>
+            ))}
+          </div>
+          {!rows.length && <Empty />}
+        </div>
+        <div className="panel category-ranking">
+          <h2>Acumulado por categoria</h2>
+          {categoryRows.map((row) => (
+            <div key={row.name}>
+              <label>
+                <span>{row.name}</span>
+                <b>{money(row.actual)}</b>
+              </label>
+              <progress value={row.actual} max={categoryRows[0]?.actual || 1} />
             </div>
           ))}
         </div>
-        {!rows.length && <Empty />}
       </section>
+      {report === "reserve" && (
+        <section className="panel goals-bi">
+          <h2>Acumulado × meta</h2>
+          <div className="goal-columns">
+            {data.goals
+              .filter((g) => g.active)
+              .map((g) => {
+                const accumulated = g.movements.reduce(
+                  (s, m) => s + m.amount,
+                  0,
+                );
+                const maxGoal = Math.max(g.target, accumulated, 1);
+                return (
+                  <div key={g.id}>
+                    <div>
+                      <i
+                        style={{ height: `${(accumulated / maxGoal) * 100}%` }}
+                      />
+                      <em
+                        style={{ bottom: `${(g.target / maxGoal) * 100}%` }}
+                      />
+                    </div>
+                    <small>{g.name}</small>
+                    <b>
+                      {money(accumulated)} / {money(g.target)}
+                    </b>
+                  </div>
+                );
+              })}
+          </div>
+        </section>
+      )}
       <section className="panel">
-        <h2>Orçado × realizado por competência</h2>
+        <h2>Planejado × realizado por competência</h2>
         <div className="table-wrap">
           <table>
             <thead>
               <tr>
                 <th>Mês</th>
-                <th>Entradas</th>
-                <th>Saídas</th>
-                <th>Orçado</th>
-                <th>Diferença</th>
+                <th>Planejado</th>
+                <th>Realizado</th>
+                <th>Resultado</th>
               </tr>
             </thead>
             <tbody>
@@ -1611,15 +1749,10 @@ function Analytics({ data }: { data: FamilyData }) {
                 .map((r) => (
                   <tr key={r.month}>
                     <td>{r.month}</td>
-                    <td>{money(r.income)}</td>
-                    <td>{money(r.expense)}</td>
                     <td>{money(r.planned)}</td>
-                    <td
-                      className={
-                        r.planned - r.expense >= 0 ? "positive" : "negative"
-                      }
-                    >
-                      {money(r.planned - r.expense)}
+                    <td>{money(r.realized)}</td>
+                    <td className={r.result >= 0 ? "positive" : "negative"}>
+                      {money(r.result)}
                     </td>
                   </tr>
                 ))}

@@ -3,14 +3,14 @@
 Nenhum dado gerado por este script é enviado ao GitHub.
 """
 from __future__ import annotations
-import json, hashlib, re, shutil, unicodedata, uuid
+import json, hashlib, os, re, shutil, unicodedata, uuid
 from collections import Counter
 from datetime import datetime, date
 from pathlib import Path
 from openpyxl import load_workbook
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE = next(p for p in (ROOT / "Acompanhamento").glob("*.xlsm") if "backup" not in p.name.lower())
+SOURCE = Path(os.environ["CASA_EM_ORDEM_MIGRATION_SOURCE"]) if os.environ.get("CASA_EM_ORDEM_MIGRATION_SOURCE") else next(p for p in (ROOT / "Acompanhamento").glob("*.xlsm") if "backup" not in p.name.lower())
 TARGET = Path.home() / "OneDrive" / "CasaEmOrdem-familia.json"
 NOW = datetime.now().astimezone().isoformat()
 
@@ -27,7 +27,15 @@ def iso(value):
 data = json.loads(TARGET.read_text(encoding="utf-8"))
 backup = TARGET.with_name(f"CasaEmOrdem-familia-backup-{datetime.now():%Y%m%d-%H%M%S}.json")
 shutil.copy2(TARGET, backup)
-wb = load_workbook(SOURCE, read_only=True, data_only=True, keep_vba=True)
+try:
+    wb = load_workbook(SOURCE, read_only=True, data_only=True, keep_vba=True)
+except PermissionError:
+    # O Excel pode manter o arquivo do OneDrive bloqueado. Uma cópia de leitura
+    # preserva o livro aberto e permite a migração sem executá-lo.
+    import tempfile
+    snapshot = Path(tempfile.gettempdir()) / "CasaEmOrdem-Financas-snapshot.xlsm"
+    shutil.copyfile(SOURCE, snapshot)
+    wb = load_workbook(snapshot, read_only=True, data_only=True, keep_vba=True)
 
 categories = {norm(c["name"]): c for c in data["categories"]}
 def category(name, sub=""):
@@ -82,11 +90,13 @@ for row in ws.iter_rows(min_row=2, values_only=True):
     if key in seen: ignored += 1; continue
     seen.add(key)
     transfer = "TRANSFERENCIAENTRECONTAS" in norm(cat_text) or "TRANSFER" in movement or "PAGAMENTO ON LINE" in norm(description) or "FATURA CARTAO" in norm(description)
+    movement_kind = "transfer" if transfer else "reserve" if "RESERVA" in movement else "expense_income"
+    source_kind = "card" if "CARTAO" in norm(origin) else "statement"
     is_income = cat["nature"] == "income" or "RECEITA" in norm(sub)
     amount = -abs(float(value)) if is_income else abs(float(value))
     operator = acc["operator"]
     scope = "Transferência interna" if transfer else "Familiar" if operator == "Ambos" else f"Pessoal — {operator}"
-    t = {**audit(), "date": d, "competence": d[:7], "description": str(description), "normalized": norm(description), "amount": amount, "accountId": acc["id"], "operator": operator, "scope": scope, "categoryId": cat["id"], "subcategory": sub or "Compras diversas", "classification": "confirmed" if cat_text else "pending", "dedupeKey": key, "transfer": transfer}
+    t = {**audit(), "date": d, "competence": d[:7], "description": str(description), "normalized": norm(description), "amount": amount, "accountId": acc["id"], "operator": operator, "scope": scope, "categoryId": cat["id"], "subcategory": sub or "Compras diversas", "classification": "confirmed" if cat_text else "pending", "dedupeKey": key, "transfer": transfer, "movement": movement_kind, "sourceKind": source_kind}
     if isinstance(installment, (int, float)) and installment > 0: t["installment"] = int(installment)
     data["transactions"].append(t)
     if cat_text: rule_counts[(t["normalized"], acc["id"], operator, cat["id"], t["subcategory"])] += 1

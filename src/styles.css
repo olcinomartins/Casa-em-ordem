@@ -635,6 +635,91 @@ code {
 .chart-bars .planned {
   background: #d3a153;
 }
+.legend .realized::before,
+.chart-bars .realized {
+  background: #172a91;
+}
+.legend .result::before,
+.chart-bars .result {
+  background: #e86c37;
+}
+.chart-bars .result.bad {
+  background: #d64550;
+}
+.bi-controls {
+  display: flex;
+  gap: 0.7rem;
+  align-items: end;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+.bi-controls label {
+  color: #718078;
+  font-size: 0.75rem;
+}
+.bi-controls input {
+  display: block;
+  margin-top: 0.25rem;
+}
+.bi-grid {
+  grid-template-columns: 2fr 1fr;
+}
+.category-ranking > div {
+  margin: 0.85rem 0;
+}
+.category-ranking label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.8rem;
+  margin-bottom: 0.25rem;
+}
+.category-ranking progress::-webkit-progress-value {
+  background: #d64550;
+}
+.goals-bi {
+  margin-top: 1rem;
+  overflow: auto;
+}
+.goal-columns {
+  height: 360px;
+  display: flex;
+  gap: 1rem;
+  align-items: end;
+  min-width: max-content;
+}
+.goal-columns > div {
+  width: 74px;
+  text-align: center;
+}
+.goal-columns > div > div {
+  height: 240px;
+  position: relative;
+  display: flex;
+  align-items: end;
+  justify-content: center;
+  border-bottom: 1px dotted #bbb;
+}
+.goal-columns i {
+  display: block;
+  width: 38px;
+  background: #d64550;
+}
+.goal-columns em {
+  position: absolute;
+  width: 55px;
+  border-top: 3px dashed #111;
+}
+.goal-columns small {
+  display: block;
+  writing-mode: vertical-rl;
+  height: 70px;
+  margin: 0.5rem auto;
+  font-size: 0.68rem;
+}
+.goal-columns b {
+  font-size: 0.65rem;
+  font-weight: 500;
+}
 .chart {
   height: 310px;
   display: flex;
@@ -672,6 +757,9 @@ code {
     grid-template-columns: repeat(2, 1fr);
   }
   .grid.two {
+    grid-template-columns: 1fr;
+  }
+  .bi-grid {
     grid-template-columns: 1fr;
   }
   .transaction-edit {
