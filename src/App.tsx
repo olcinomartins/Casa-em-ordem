@@ -16,6 +16,8 @@ import {
   Trash2,
   CheckCircle2,
   TrendingUp,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 import {
   Account,
@@ -90,6 +92,9 @@ export default function App() {
   const [authenticated, setAuthenticated] = useState(false);
   const [authError, setAuthError] = useState("");
   const [authBusy, setAuthBusy] = useState(false);
+  const [hideValues, setHideValues] = useState(
+    () => localStorage.getItem("casa-em-ordem-hide-values") === "true",
+  );
   const [page, setPage] = useState<Page>("painel");
   const [month, setMonth] = useState(currentMonth());
   const [view, setView] = useState<CashView>("cash");
@@ -160,6 +165,11 @@ export default function App() {
     setCloudLocation({ driveId, itemId });
     setMessage("Base compartilhada configurada. Conecte novamente.");
   };
+  const toggleValues = () =>
+    setHideValues((current) => {
+      localStorage.setItem("casa-em-ordem-hide-values", String(!current));
+      return !current;
+    });
   const connect = async () => {
     try {
       setCloud("syncing");
@@ -197,7 +207,7 @@ export default function App() {
     );
   if (!data) return <div className="splash">Preparando a casa…</div>;
   return (
-    <div className="app">
+    <div className={`app ${hideValues ? "values-hidden" : ""}`}>
       <aside>
         <div className="brand">
           <span>⌂</span>
@@ -245,6 +255,15 @@ export default function App() {
               value={month}
               onChange={(e) => setMonth(e.target.value)}
             />
+            <button
+              className="privacy-toggle"
+              onClick={toggleValues}
+              title={hideValues ? "Mostrar valores" : "Esconder valores"}
+              aria-label={hideValues ? "Mostrar valores" : "Esconder valores"}
+            >
+              {hideValues ? <EyeOff size={18} /> : <Eye size={18} />}
+              <span>{hideValues ? "Mostrar" : "Esconder"}</span>
+            </button>
             {page === "config" && (
               <button onClick={configureShared}>Base compartilhada</button>
             )}
@@ -622,7 +641,7 @@ function TransactionTable({
 }) {
   return (
     <div className="table-wrap">
-      <table>
+      <table className="transactions-table">
         <thead>
           <tr>
             <th>Data</th>
@@ -1733,7 +1752,7 @@ function Analytics({ data }: { data: FamilyData }) {
       <section className="panel">
         <h2>Planejado × realizado por competência</h2>
         <div className="table-wrap">
-          <table>
+          <table className="analysis-table">
             <thead>
               <tr>
                 <th>Mês</th>

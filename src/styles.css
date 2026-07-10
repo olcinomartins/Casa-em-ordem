@@ -720,6 +720,30 @@ code {
   font-size: 0.65rem;
   font-weight: 500;
 }
+.values-hidden .card strong,
+.values-hidden .bars label span:last-child,
+.values-hidden .personal strong,
+.values-hidden .goal-mini b,
+.values-hidden .goal-foot span,
+.values-hidden .payment strong,
+.values-hidden .tx-main small,
+.values-hidden .budget-item small,
+.values-hidden .category-ranking b,
+.values-hidden .goal-columns b,
+.values-hidden .transactions-table td:nth-child(3),
+.values-hidden .analysis-table td:nth-child(n + 2) {
+  visibility: hidden;
+}
+.values-hidden .chart-bars i {
+  pointer-events: none;
+}
+.values-hidden .summary span {
+  color: transparent;
+  user-select: none;
+}
+.privacy-toggle span {
+  white-space: nowrap;
+}
 .chart {
   height: 310px;
   display: flex;
@@ -818,6 +842,9 @@ code {
   header .primary {
     font-size: 0;
     padding: 0.65rem;
+  }
+  .privacy-toggle span {
+    display: none;
   }
   .cards {
     grid-template-columns: 1fr 1fr;
