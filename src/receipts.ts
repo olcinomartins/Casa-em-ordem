@@ -7,6 +7,6 @@ export async function readReceipt(file:File):Promise<ReadReceipt>{
   if(file.size>12_000_000)throw new Error("A fotografia deve ter no máximo 12 MB.");
   const response=await fetch(endpoint,{method:"POST",headers:{"Content-Type":"application/json","Authorization":`Bearer ${await getMicrosoftAccessToken()}`},body:JSON.stringify({mimeType:file.type,image:await toBase64(file)})});
   const result=await response.json().catch(()=>({}));
-  if(!response.ok)throw new Error(result.error||"Não foi possível analisar a nota. Autorize o leitor e tente novamente.");
+  if(!response.ok)throw new Error([result.error,result.detail].filter(Boolean).join(" — ")||`Falha na leitura (${response.status}).`);
   return result.receipt;
 }
