@@ -32,6 +32,10 @@ describe("regimes financeiros", () => {
     expect(realized(t, "2026-07", "accrual")).toBe(1200);
     expect(realized({ ...t, installment: 2 }, "2026-07", "accrual")).toBe(0);
   });
+  it("reconhece como integral uma parcela intermediária marcada como âncora", () => {
+    const t = tx({amount:100,totalAmount:1200,installment:3,installments:12,integralAnchor:true,purchaseDate:"2026-03-01"});
+    expect(realized(t,"2026-03","accrual")).toBe(1200);
+  });
   it("ignora transferência", () =>
     expect(realized(tx({ transfer: true }), "2026-07", "cash")).toBe(0));
 });

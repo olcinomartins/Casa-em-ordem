@@ -18,7 +18,8 @@ const msal = clientId
   : null;
 let etag: string | undefined;
 const scopes = ["Files.ReadWrite", "User.Read"];
-const ownPath = "/me/drive/root:/CasaEmOrdem-familia.json:/content";
+const ownPath = "/me/drive/root:/Casa em ordem/CasaEmOrdem-familia.json:/content";
+const familyShareUrl = "https://1drv.ms/u/c/f55991dc870e2ff6/IQDzSgFJjs81SZM-o0Azn3oDAVCzNszRi85T6rrUrVVjMzs?e=QUS2Jl";
 export interface CloudLocation {
   driveId: string;
   itemId: string;
@@ -104,9 +105,21 @@ export function isConfigured() {
 }
 export async function loadCloud(): Promise<FamilyData | null> {
   const t = await token();
-  const r = await fetch(`https://graph.microsoft.com/v1.0${contentPath()}`, {
+  let r = await fetch(`https://graph.microsoft.com/v1.0${contentPath()}`, {
     headers: { Authorization: `Bearer ${t}` },
   });
+  if (r.status === 404 && !getCloudLocation()) {
+    const encoded = btoa(familyShareUrl).replace(/=/g, "").replace(/\//g, "_").replace(/\+/g, "-");
+    const meta = await fetch(`https://graph.microsoft.com/v1.0/shares/u!${encoded}/driveItem`, {headers:{Authorization:`Bearer ${t}`}});
+    if (meta.ok) {
+      const item = await meta.json();
+      const driveId = item.parentReference?.driveId;
+      if (driveId && item.id) {
+        setCloudLocation({driveId,itemId:item.id});
+        r = await fetch(`https://graph.microsoft.com/v1.0${contentPath()}`, {headers:{Authorization:`Bearer ${t}`}});
+      }
+    }
+  }
   if (r.status === 404) return null;
   if (!r.ok) throw new Error(`OneDrive: ${r.status}`);
   etag = r.headers.get("ETag") ?? undefined;

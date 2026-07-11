@@ -74,7 +74,9 @@ export async function previewFile(
     for (const item of parsed.rows) {
       const paymentDate = parsed.dueDate ?? item.date;
       const isTransfer = /PAGAMENTO.*(?:FATURA|ON LINE)|FATURA.*CART/i.test(normalize(item.description));
-      const base = {...audit(operator),date:paymentDate,competence:monthOf(item.date),purchaseDate:item.date,description:item.description,normalized:normalize(item.description),amount:item.amount,accountId,operator,scope:(operator === "Ambos" ? "Familiar" : `Pessoal — ${operator}`) as Transaction["scope"],classification:"pending" as const,installment:item.installment,installments:item.installments,totalAmount:item.installments&&item.amount>0?item.amount*item.installments:undefined,paymentDate,transfer:isTransfer,movement:isTransfer?("transfer" as const):("expense_income" as const),sourceKind:"card" as const,dedupeKey:"",batchId:hash};
+      const purchaseKey = `${normalize(item.description)}|${item.date}|${item.installments || 1}`;
+      const alreadyAnchored = [...data.transactions,...rows].some(t=>`${normalize(t.description)}|${t.purchaseDate || t.date}|${t.installments || 1}`===purchaseKey && (t.integralAnchor || t.installment===1));
+      const base = {...audit(operator),date:paymentDate,competence:monthOf(item.date),purchaseDate:item.date,description:item.description,normalized:normalize(item.description),amount:item.amount,accountId,operator,scope:(operator === "Ambos" ? "Familiar" : `Pessoal — ${operator}`) as Transaction["scope"],classification:"pending" as const,installment:item.installment,installments:item.installments,totalAmount:item.installments&&item.amount>0?item.amount*item.installments:undefined,integralAnchor:Boolean(item.installments&&item.amount>0&&!alreadyAnchored),paymentDate,transfer:isTransfer,movement:isTransfer?("transfer" as const):("expense_income" as const),sourceKind:"card" as const,dedupeKey:"",batchId:hash};
       const key = await dedupeKey(base);
       if (data.transactions.some(t=>t.dedupeKey===key)||rows.some(t=>t.dedupeKey===key)){duplicates++;continue;}
       const rule=suggest(item.description,accountId,operator,data.rules);

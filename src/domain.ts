@@ -41,6 +41,7 @@ export interface Transaction extends Audit {
   installment?: number;
   installments?: number;
   totalAmount?: number;
+  integralAnchor?: boolean;
   purchaseDate?: string;
   paymentDate?: string;
   batchId?: string;

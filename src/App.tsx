@@ -347,19 +347,19 @@ function ViewSwitch({
         className={view === "cash" ? "on" : ""}
         onClick={() => setView("cash")}
       >
-        Data da parcela
+        Fluxo das parcelas
       </button>
       <button
         className={view === "accrual" ? "on" : ""}
         onClick={() => setView("accrual")}
       >
-        Data da compra
+        Compra integral
       </button>
       <button
         className={view === "compare" ? "on" : ""}
         onClick={() => setView("compare")}
       >
-        Comparar
+        Comparar integral × parcelas
       </button>
     </div>
   );
@@ -435,11 +435,12 @@ function Dashboard({
       <section className="grid two">
         <div className="panel">
           <h2>Orçado × realizado</h2>
-          <BudgetBars
-            data={data}
-            month={month}
-            view={view === "accrual" ? "accrual" : "cash"}
-          />
+          {view === "compare" ? (
+            <div className="grid two">
+              <div><h3>Fluxo das parcelas</h3><BudgetBars data={data} month={month} view="cash" /></div>
+              <div><h3>Compra integral</h3><BudgetBars data={data} month={month} view="accrual" /></div>
+            </div>
+          ) : <BudgetBars data={data} month={month} view={view} />}
         </div>
         <div className="panel">
           <h2>Orçamentos pessoais acumulados</h2>
