@@ -288,7 +288,7 @@ export default function App() {
           </div>
         )}
         {page === "visao" && <><Collapsible title="Painel" open><Dashboard data={data} month={month} view={view} setView={setView} /></Collapsible><Collapsible title="Análises históricas"><Analytics data={data} /></Collapsible></>}
-        {page === "rotinas" && <><Collapsible title="Responsabilidades da casa" open><Chores data={data} mutate={mutate} /></Collapsible><Collapsible title="Tarefas e agenda"><Tasks data={data} mutate={mutate} /></Collapsible><Collapsible title="Central de pagamentos"><Payments data={data} mutate={mutate} /></Collapsible></>}
+        {page === "rotinas" && <><Collapsible title="Responsabilidades, tarefas e agenda" open><Chores data={data} mutate={mutate} /><Tasks data={data} mutate={mutate} /></Collapsible><Collapsible title="Central de pagamentos"><Payments data={data} mutate={mutate} /></Collapsible></>}
         {page === "planejamento" && <><Collapsible title="Categorias, contas e configurações" open><Config data={data} setData={setData} mutate={mutate} connect={connect} setMessage={setMessage} /></Collapsible><Collapsible title="Orçamentos"><Budgets data={data} month={month} view={view} setView={setView} mutate={mutate} /></Collapsible><Collapsible title="Metas e reservas"><Goals data={data} mutate={mutate} /></Collapsible></>}
         {page === "importar" && <><Collapsible title="Importar extratos e faturas" open><ImportPage data={data} mutate={mutate} setMessage={setMessage} /></Collapsible><Collapsible title="Transações e revisão"><Transactions data={data} month={month} mutate={mutate} /></Collapsible><Collapsible title="Notas e compras"><Receipts data={data} mutate={mutate} setMessage={setMessage} /></Collapsible></>}
       </main>
@@ -1155,6 +1155,7 @@ function Payments({
       )}
       <div className="payment-grid">
         {data.obligations
+          .slice()
           .sort((a, b) => a.dueDate.localeCompare(b.dueDate))
           .map((o) => {
             const actual = o.pattern

@@ -17,7 +17,8 @@
 .collapsible > summary::-webkit-details-marker { display: none; }
 .collapsible > summary span { transition: transform .2s ease; font-size: 1.4rem; }
 .collapsible[open] > summary span { transform: rotate(180deg); }
-.collapsible-content { padding: 0 .8rem .8rem; }
+.collapsible-content { padding: 0 .8rem .8rem; min-width: 0; overflow: hidden; }
+.collapsible-content > *, .grid > *, .panel { min-width: 0; max-width: 100%; }
 * {
   box-sizing: border-box;
 }
@@ -939,7 +940,7 @@ code {
     display: none;
   }
   .cards {
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: 1fr;
     gap: 0.6rem;
   }
   .card {
@@ -974,4 +975,20 @@ code {
     width: 100%;
     flex: none !important;
   }
+  .collapsible { border-radius: 14px; }
+  .collapsible > summary { padding: .85rem 1rem; }
+  .collapsible-content { padding: 0 .35rem .35rem; }
+  .collapsible-content .panel { padding: 1rem; }
+  .bi-controls, .segmented, .legend { width: 100%; flex-wrap: wrap; }
+  .bi-controls > *, .bi-controls label, .bi-controls input, .bi-controls select { width: 100%; }
+  .segmented button { flex: 1 1 auto; }
+  .chart { width: 100%; overflow: hidden; gap: 2px; height: 260px; }
+  .chart-column { min-width: 0; flex: 1 1 0; }
+  .chart-bars { height: 215px; gap: 1px; justify-content: center; }
+  .chart-bars i { width: clamp(3px, 1.3vw, 7px); }
+  .chart-column small { font-size: .56rem; writing-mode: vertical-rl; height: 34px; }
+  .payment { grid-template-columns: 1fr; }
+  .payment > strong, .payment-actions, .payment button { grid-column: 1; }
+  .task-list article { grid-template-columns: auto minmax(0,1fr); }
+  .task-list article > .badge, .task-actions { grid-column: 2; }
 }
