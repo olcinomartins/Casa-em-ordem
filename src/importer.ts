@@ -8,6 +8,7 @@ import {
   monthOf,
 } from "./domain";
 import { dedupeKey, hashText, suggest } from "./finance";
+import { readInterPdf } from "./interPdf";
 export interface Preview {
   filename: string;
   hash: string;
@@ -58,6 +59,7 @@ export async function previewFile(
   data: FamilyData,
   accountId: string,
   operator: Member,
+  pdfPassword?: string,
 ): Promise<Preview> {
   const buffer = await file.arrayBuffer();
   const hash = await hashText(
@@ -65,6 +67,21 @@ export async function previewFile(
   );
   if (data.imports.some((i) => i.hash === hash))
     throw new Error("Este arquivo já foi importado.");
+  if (/\.pdf$/i.test(file.name)) {
+    const parsed = await readInterPdf(file, pdfPassword);
+    const rows: Transaction[] = [];
+    let duplicates = 0;
+    for (const item of parsed.rows) {
+      const paymentDate = parsed.dueDate ?? item.date;
+      const isTransfer = /PAGAMENTO.*(?:FATURA|ON LINE)|FATURA.*CART/i.test(normalize(item.description));
+      const base = {...audit(operator),date:paymentDate,competence:monthOf(item.date),purchaseDate:item.date,description:item.description,normalized:normalize(item.description),amount:item.amount,accountId,operator,scope:(operator === "Ambos" ? "Familiar" : `Pessoal — ${operator}`) as Transaction["scope"],classification:"pending" as const,installment:item.installment,installments:item.installments,totalAmount:item.installments&&item.amount>0?item.amount*item.installments:undefined,paymentDate,transfer:isTransfer,movement:isTransfer?("transfer" as const):("expense_income" as const),sourceKind:"card" as const,dedupeKey:"",batchId:hash};
+      const key = await dedupeKey(base);
+      if (data.transactions.some(t=>t.dedupeKey===key)||rows.some(t=>t.dedupeKey===key)){duplicates++;continue;}
+      const rule=suggest(item.description,accountId,operator,data.rules);
+      rows.push({...base,dedupeKey:key,categoryId:rule?.categoryId,subcategory:rule?.subcategory,classification:rule?"suggested":"pending"});
+    }
+    return {filename:file.name,hash,institution:"Inter PDF",rows,duplicates,errors:[]};
+  }
   const wb = XLSX.read(buffer, { type: "array", cellDates: true });
   const transactionSheet =
     wb.SheetNames.find((name) =>

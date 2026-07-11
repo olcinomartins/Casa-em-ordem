@@ -572,12 +572,16 @@ function ImportPage({
   const [account, setAccount] = useState(data.accounts[0]?.id || "");
   const [operator, setOperator] = useState<Member>("Olcino");
   const [preview, setPreview] = useState<Preview>();
+  const [pdfPassword, setPdfPassword] = useState(() => sessionStorage.getItem("inter-pdf-password") || "");
+  const [rememberPassword, setRememberPassword] = useState(false);
   const input = useRef<HTMLInputElement>(null);
   const choose = async (file?: File) => {
     if (!file || !account)
       return setMessage("Cadastre e selecione uma conta antes de importar.");
     try {
-      setPreview(await previewFile(file, data, account, operator));
+      if (rememberPassword && pdfPassword) sessionStorage.setItem("inter-pdf-password", pdfPassword);
+      else sessionStorage.removeItem("inter-pdf-password");
+      setPreview(await previewFile(file, data, account, operator, pdfPassword));
     } catch (e) {
       setMessage((e as Error).message);
     }
@@ -620,9 +624,20 @@ function ImportPage({
           <option>Ambos</option>
         </select>
         <input
+          type="password"
+          value={pdfPassword}
+          onChange={(e) => setPdfPassword(e.target.value)}
+          placeholder="Senha do PDF Inter (se houver)"
+          autoComplete="off"
+        />
+        <label>
+          <input type="checkbox" checked={rememberPassword} onChange={(e) => setRememberPassword(e.target.checked)} />
+          Lembrar somente até fechar o navegador
+        </label>
+        <input
           ref={input}
           type="file"
-          accept=".csv,.xls,.xlsx,.xlsm"
+          accept=".pdf,.csv,.xls,.xlsx,.xlsm"
           hidden
           onChange={(e) => choose(e.target.files?.[0])}
         />
