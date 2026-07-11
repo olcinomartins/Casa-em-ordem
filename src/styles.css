@@ -22,6 +22,9 @@
 .weekday-picker { display: flex; flex-wrap: wrap; gap: .5rem; border: 1px solid var(--line); border-radius: 10px; padding: .55rem; }
 .weekday-picker legend { padding: 0 .3rem; color: #718078; font-size: .78rem; }
 .weekday-picker label { display: flex; align-items: center; gap: .2rem; font-size: .78rem; }
+.receipt-item-edit { display: grid; grid-template-columns: 2fr 1.2fr repeat(4,1fr) auto; gap: .55rem; align-items: end; padding: .8rem 0; border-bottom: 1px solid var(--line); }
+.receipt-item-edit label { font-size: .72rem; color: #718078; }
+.receipt-item-edit label input { width: 100%; margin-top: .2rem; }
 * {
   box-sizing: border-box;
 }
@@ -994,4 +997,6 @@ code {
   .payment > strong, .payment-actions, .payment button { grid-column: 1; }
   .task-list article { grid-template-columns: auto minmax(0,1fr); }
   .task-list article > .badge, .task-actions { grid-column: 2; }
+  .receipt-item-edit { grid-template-columns: 1fr 1fr; }
+  .receipt-item-edit > input:first-child, .receipt-item-edit > select, .receipt-item-edit > button { grid-column: 1 / -1; }
 }
