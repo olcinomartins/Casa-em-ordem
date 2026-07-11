@@ -19,6 +19,9 @@
 .collapsible[open] > summary span { transform: rotate(180deg); }
 .collapsible-content { padding: 0 .8rem .8rem; min-width: 0; overflow: hidden; }
 .collapsible-content > *, .grid > *, .panel { min-width: 0; max-width: 100%; }
+.weekday-picker { display: flex; flex-wrap: wrap; gap: .5rem; border: 1px solid var(--line); border-radius: 10px; padding: .55rem; }
+.weekday-picker legend { padding: 0 .3rem; color: #718078; font-size: .78rem; }
+.weekday-picker label { display: flex; align-items: center; gap: .2rem; font-size: .78rem; }
 * {
   box-sizing: border-box;
 }

@@ -131,6 +131,8 @@ export interface Task extends Audit {
   checklist: string[];
   linkedId?: string;
   history: string[];
+  shift?: "Manhã" | "Tarde" | "Noite" | "Livre";
+  weekdays?: number[];
 }
 export interface ImportBatch extends Audit {
   filename: string;

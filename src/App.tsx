@@ -80,6 +80,7 @@ const dateOnly = (d: Date) => d.toISOString().slice(0, 10);
 export default function App() {
   const [data, setData] = useState<FamilyData>();
   const [authenticated, setAuthenticated] = useState(false);
+  const [currentMember, setCurrentMember] = useState<"Olcino"|"Mari">("Olcino");
   const [authError, setAuthError] = useState("");
   const [authBusy, setAuthBusy] = useState(false);
   const [hideValues, setHideValues] = useState(
@@ -106,6 +107,7 @@ export default function App() {
       await signOut();
       throw new Error(`O e-mail ${email} não está autorizado.`);
     }
+    setCurrentMember(email === "mariana_camillie@hotmail.com" ? "Mari" : "Olcino");
     const remote = await loadCloud();
     setData(remote ?? (await loadLocal()));
     setAuthenticated(true);
@@ -288,8 +290,8 @@ export default function App() {
           </div>
         )}
         {page === "visao" && <><Collapsible title="Painel" open><Dashboard data={data} month={month} view={view} setView={setView} /></Collapsible><Collapsible title="Análises históricas"><Analytics data={data} /></Collapsible></>}
-        {page === "rotinas" && <><Collapsible title="Responsabilidades, tarefas e agenda" open><Chores data={data} mutate={mutate} /><Tasks data={data} mutate={mutate} /></Collapsible><Collapsible title="Central de pagamentos"><Payments data={data} mutate={mutate} /></Collapsible></>}
-        {page === "planejamento" && <><Collapsible title="Categorias, contas e configurações" open><Config data={data} setData={setData} mutate={mutate} connect={connect} setMessage={setMessage} /></Collapsible><Collapsible title="Orçamentos"><Budgets data={data} month={month} view={view} setView={setView} mutate={mutate} /></Collapsible><Collapsible title="Metas e reservas"><Goals data={data} mutate={mutate} /></Collapsible></>}
+        {page === "rotinas" && <><Collapsible title="Responsabilidades, tarefas e agenda" open><Tasks data={data} mutate={mutate} currentMember={currentMember} /></Collapsible><Collapsible title="Central de pagamentos"><Payments data={data} mutate={mutate} /></Collapsible></>}
+        {page === "planejamento" && <><Collapsible title="Contas, cartões e categorias" open><Config data={data} setData={setData} mutate={mutate} connect={connect} setMessage={setMessage} /></Collapsible><Collapsible title="Orçamentos"><Budgets data={data} month={month} view={view} setView={setView} mutate={mutate} /></Collapsible><Collapsible title="Metas e reservas"><Goals data={data} mutate={mutate} /></Collapsible></>}
         {page === "importar" && <><Collapsible title="Importar extratos e faturas" open><ImportPage data={data} mutate={mutate} setMessage={setMessage} /></Collapsible><Collapsible title="Transações e revisão"><Transactions data={data} month={month} mutate={mutate} /></Collapsible><Collapsible title="Notas e compras"><Receipts data={data} mutate={mutate} setMessage={setMessage} /></Collapsible></>}
       </main>
     </div>
@@ -1401,11 +1403,15 @@ function Goals({
 function Tasks({
   data,
   mutate,
+  currentMember,
 }: {
   data: FamilyData;
   mutate: (f: (d: FamilyData) => void) => void;
+  currentMember: "Olcino"|"Mari";
 }) {
   const [show, setShow] = useState(false);
+  const migratedResponsibilities=useRef(false);
+  useEffect(()=>{if(migratedResponsibilities.current)return;migratedResponsibilities.current=true;mutate(d=>{const existing=new Set(d.tasks.map(t=>normalize(t.title)));const source=d.chores?.length?d.chores:initialChores.map(title=>({title,assignee:"Ambos" as Member,frequency:"weekly" as const,completionHistory:[]}));for(const chore of source){if(existing.has(normalize(chore.title)))continue;d.tasks.push({...audit(),title:chore.title,assignee:chore.assignee,due:new Date().toISOString(),priority:"Média",status:"Pendente",repeat:chore.frequency==="daily"?"daily":chore.frequency==="monthly"?"monthly":"weekly",shift:"Livre",weekdays:chore.frequency==="weekly"?[1]:undefined,checklist:[],history:chore.completionHistory||[]})}d.chores=[]})},[]);
   const add = (fd: FormData) =>
     mutate((d) =>
       d.tasks.push({
@@ -1416,6 +1422,8 @@ function Tasks({
         priority: String(fd.get("priority")) as Task["priority"],
         status: "Pendente",
         repeat: String(fd.get("repeat")) as Task["repeat"],
+        shift: String(fd.get("shift")||"Livre") as Task["shift"],
+        weekdays: fd.getAll("weekday").map(Number),
         checklist: [],
         history: [],
       }),
@@ -1428,7 +1436,8 @@ function Tasks({
       else {
         const dt = new Date(t.due);
         if (t.repeat === "daily") dt.setDate(dt.getDate() + 1);
-        if (t.repeat === "weekly") dt.setDate(dt.getDate() + 7);
+        if (t.repeat === "weekly" && t.weekdays?.length) { do { dt.setDate(dt.getDate()+1); } while(!t.weekdays.includes(dt.getDay())); }
+        else if (t.repeat === "weekly") dt.setDate(dt.getDate() + 7);
         if (t.repeat === "monthly") dt.setMonth(dt.getMonth() + 1);
         if (t.repeat === "yearly") dt.setFullYear(dt.getFullYear() + 1);
         t.due = dt.toISOString();
@@ -1465,6 +1474,10 @@ function Tasks({
       item.due = new Date(due).toISOString();
       item.assignee = assignee;
       item.repeat = repeat;
+      const shift=prompt("Turno: Manhã, Tarde, Noite ou Livre",item.shift||"Livre") as Task["shift"]|null;
+      if(shift)item.shift=shift;
+      const days=prompt("Dias da semana (0=dom, 1=seg ... 6=sáb), separados por vírgula",(item.weekdays||[]).join(","));
+      if(days!==null)item.weekdays=days.split(",").map(Number).filter(n=>n>=0&&n<=6);
       item.updatedAt = now();
       item.version++;
     });
@@ -1475,6 +1488,9 @@ function Tasks({
         d.tasks = d.tasks.filter((t) => t.id !== id);
       });
   };
+  const active=data.tasks.filter(t=>t.status!=="Concluída").slice().sort((a,b)=>a.due.localeCompare(b.due));
+  const dayNames=["dom","seg","ter","qua","qui","sex","sáb"];
+  const renderTasks=(items:Task[])=><div className="task-list">{items.map(t=><article key={t.id} className={new Date(t.due)<new Date()?"overdue":""}><button className="check" onClick={()=>done(t.id)}><CheckCircle2/></button><div><h3>{t.title}</h3><small>{new Date(t.due).toLocaleString("pt-BR")} · {t.assignee} · {t.shift||"Livre"}{t.weekdays?.length?` · ${t.weekdays.map(d=>dayNames[d]).join(", ")}`:""}</small></div><Badge text={t.priority}/><div className="actions task-actions"><button onClick={()=>edit(t.id)}>Editar</button><button className="danger-button" onClick={()=>remove(t.id)}><Trash2 size={15}/> Excluir</button></div></article>)}</div>;
   return (
     <section className="panel">
       <div className="panel-head">
@@ -1530,39 +1546,16 @@ function Tasks({
                 <option value="monthly">Mensal</option>
                 <option value="yearly">Anual</option>
               </select>
+              <select name="shift"><option>Livre</option><option>Manhã</option><option>Tarde</option><option>Noite</option></select>
+              <fieldset className="weekday-picker"><legend>Dias da semana</legend>{dayNames.map((day,index)=><label key={day}><input type="checkbox" name="weekday" value={index}/>{day}</label>)}</fieldset>
             </>
           }
         />
       )}
-      <div className="task-list">
-        {data.tasks
-          .filter((t) => t.status !== "Concluída")
-          .sort((a, b) => a.due.localeCompare(b.due))
-          .map((t) => (
-            <article
-              key={t.id}
-              className={new Date(t.due) < new Date() ? "overdue" : ""}
-            >
-              <button className="check" onClick={() => done(t.id)}>
-                <CheckCircle2 />
-              </button>
-              <div>
-                <h3>{t.title}</h3>
-                <small>
-                  {new Date(t.due).toLocaleString("pt-BR")} · {t.assignee} ·{" "}
-                  {t.repeat === "none" ? "sem repetição" : t.repeat}
-                </small>
-              </div>
-              <Badge text={t.priority} />
-              <div className="actions task-actions">
-                <button onClick={() => edit(t.id)}>Editar</button>
-                <button className="danger-button" onClick={() => remove(t.id)}>
-                  <Trash2 size={15} /> Excluir
-                </button>
-              </div>
-            </article>
-          ))}
-      </div>
+      <h3>Minhas responsabilidades e tarefas</h3>
+      {renderTasks(active.filter(t=>t.assignee===currentMember||t.assignee==="Ambos"))}
+      <h3>Outras responsabilidades e tarefas</h3>
+      {renderTasks(active.filter(t=>t.assignee!==currentMember&&t.assignee!=="Ambos"))}
     </section>
   );
 }
@@ -1642,38 +1635,6 @@ function Config({
   return (
     <div className="grid two">
       <section className="panel">
-        <h2>OneDrive</h2>
-        <p>
-          A base financeira fica privada no OneDrive. O código público não
-          contém seus dados.
-        </p>
-        {isConfigured() ? (
-          <button className="primary" onClick={connect}>
-            <Cloud size={17} /> Entrar e conectar
-          </button>
-        ) : (
-          <div className="callout">
-            Copie <code>.env.example</code> para <code>.env</code> e informe o
-            Client ID do aplicativo Microsoft Entra. Veja o README.
-          </div>
-        )}
-        <h2>Backup</h2>
-        <div className="actions">
-          <button onClick={() => exportJson(data)}>
-            <Download size={16} /> Exportar JSON
-          </button>
-          <label className="button">
-            Restaurar JSON
-            <input
-              hidden
-              type="file"
-              accept=".json"
-              onChange={(e) => restore(e.target.files?.[0])}
-            />
-          </label>
-        </div>
-      </section>
-      <section className="panel">
         <h2>Contas e cartões</h2>
         <QuickForm
           onSubmit={addAccount}
@@ -1726,17 +1687,6 @@ function Config({
           aprendidas
         </p>
         <CategoryEditor data={data} mutate={mutate} />
-      </section>
-      <section className="panel danger-zone">
-        <h2>Recomeçar localmente</h2>
-        <p>Apaga somente a cópia deste navegador. Faça backup antes.</p>
-        <button
-          onClick={() => {
-            if (confirm("Recriar a base local?")) setData(createSeed());
-          }}
-        >
-          <Trash2 size={16} /> Recriar base
-        </button>
       </section>
     </div>
   );
