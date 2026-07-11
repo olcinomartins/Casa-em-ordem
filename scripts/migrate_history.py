@@ -131,7 +131,7 @@ for sheet_index, goal_kind in ((7, "Reserva de despesa"), (8, "Objetivo")):
         current = row[7] if sheet_index == 7 else row[5]
         deadline = row[9] if sheet_index == 7 else row[7]
         if not isinstance(target, (int, float)) or target <= 0: continue
-        goal = {**audit(), "name": str(name), "target": abs(float(target)), "deadline": iso(deadline) or "2030-12-31", "priority": len(data["goals"])+1, "minimum": abs(float(monthly_value)), "emergency": "EMERGENCIA" in norm(name), "active": True, "movements": []}
+        goal = {**audit(), "name": str(name), "kind": "provision" if sheet_index == 7 else "desire", "target": abs(float(target)), "startDate": "2025-07-01", "deadline": iso(deadline) or "2030-12-31", "priority": len(data["goals"])+1, "minimum": abs(float(monthly_value)), "emergency": "EMERGENCIA" in norm(name), "active": True, "movements": []}
         if isinstance(current, (int, float)) and current: goal["movements"].append({"id": ident(), "date": "2026-07-01", "kind": "ajuste", "amount": float(current), "reason": "Saldo migrado da planilha"})
         data["goals"].append(goal)
 

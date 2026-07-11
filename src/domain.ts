@@ -108,7 +108,9 @@ export interface GoalMovement {
 }
 export interface Goal extends Audit {
   name: string;
+  kind?: "provision" | "desire";
   target: number;
+  startDate?: string;
   deadline: string;
   priority: number;
   minimum: number;

@@ -717,6 +717,16 @@ function Transactions({
       Object.assign(t, patch, { updatedAt: now(), version: t.version + 1 });
       if (learn) upsertRule(d, t);
     });
+  const remove = (id: string) => {
+    if (
+      confirm(
+        "Excluir este lançamento? Esta ação será registrada apenas após salvar.",
+      )
+    )
+      mutate((d) => {
+        d.transactions = d.transactions.filter((t) => t.id !== id);
+      });
+  };
   return (
     <section className="panel">
       <div className="panel-head">
@@ -798,6 +808,13 @@ function Transactions({
             >
               <CheckCircle2 />
             </button>
+            <button
+              title="Excluir lançamento"
+              className="icon danger-button"
+              onClick={() => remove(t.id)}
+            >
+              <Trash2 size={19} />
+            </button>
           </div>
         ))}
       </div>
@@ -822,6 +839,13 @@ function Budgets({
   const [editing, setEditing] = useState<Budget>();
   const saveBudget = (form: FormData) => {
     const target = String(form.get("target"));
+    const startMonth = String(form.get("startMonth"));
+    const endMonth = String(form.get("endMonth") || "");
+    const amount = parseCurrency(form.get("amount"));
+    if (!target) return alert("Selecione uma categoria, conta ou pessoa.");
+    if (amount <= 0) return alert("O orçamento precisa ser maior que zero.");
+    if (endMonth && endMonth < startMonth)
+      return alert("O mês final não pode ser anterior ao início.");
     mutate((draft) => {
       const existing =
         editing && draft.budgets.find((item) => item.id === editing.id);
@@ -830,10 +854,10 @@ function Budgets({
         month: String(form.get("startMonth")),
         amount: 0,
       };
-      item.amount = Number(form.get("amount"));
-      item.month = String(form.get("startMonth"));
-      item.startMonth = String(form.get("startMonth"));
-      item.endMonth = String(form.get("endMonth") || "") || undefined;
+      item.amount = amount;
+      item.month = startMonth;
+      item.startMonth = startMonth;
+      item.endMonth = endMonth || undefined;
       item.categoryId = target.startsWith("category:")
         ? target.slice(9)
         : undefined;
@@ -850,10 +874,12 @@ function Budgets({
     });
     setEditing(undefined);
   };
-  const remove = (id: string) =>
+  const remove = (id: string) => {
+    if (!confirm("Excluir este orçamento?")) return;
     mutate((draft) => {
       draft.budgets = draft.budgets.filter((item) => item.id !== id);
     });
+  };
   const label = (item: Budget) =>
     item.member
       ? `Pessoal — ${item.member}`
@@ -914,12 +940,10 @@ function Budgets({
                 ))}
               </optgroup>
             </select>
-            <input
+            <MoneyInput
+              key={editing?.id || data.budgets.length}
               name="amount"
               required
-              type="number"
-              min="0"
-              step="0.01"
               placeholder="Valor mensal"
               defaultValue={editing?.amount}
             />
@@ -1014,10 +1038,10 @@ function Payments({
         ...audit(),
         name: String(fd.get("name")),
         kind: String(fd.get("kind")) as Obligation["kind"],
-        planned: +String(fd.get("planned")),
+        planned: parseCurrency(fd.get("planned")),
         dueDate: String(fd.get("due")),
         recurrence: String(fd.get("repeat")) as Obligation["recurrence"],
-        tolerance: +String(fd.get("tolerance") || 0),
+        tolerance: parseCurrency(fd.get("tolerance")),
         status: "A pagar",
       }),
     );
@@ -1028,6 +1052,44 @@ function Payments({
       o.paidAt = dateOnly(new Date());
       o.paidAmount = o.planned;
     });
+  const edit = (id: string) => {
+    const current = data.obligations.find((o) => o.id === id)!;
+    const name = prompt("Nome do compromisso:", current.name);
+    if (!name) return;
+    const planned = prompt("Valor planejado:", money(current.planned));
+    if (planned === null) return;
+    const due = prompt("Vencimento (AAAA-MM-DD):", current.dueDate);
+    if (!due || !/^\d{4}-\d{2}-\d{2}$/.test(due))
+      return alert("Use a data no formato AAAA-MM-DD.");
+    const kind = prompt("Tipo do compromisso:", current.kind) as
+      Obligation["kind"] | null;
+    if (!kind) return;
+    const recurrence = prompt(
+      "Repetição: none, monthly ou yearly",
+      current.recurrence,
+    ) as Obligation["recurrence"] | null;
+    if (!recurrence || !["none", "monthly", "yearly"].includes(recurrence))
+      return alert("Repetição inválida.");
+    const tolerance = prompt("Tolerância de valor:", money(current.tolerance));
+    if (tolerance === null) return;
+    mutate((d) => {
+      const o = d.obligations.find((x) => x.id === id)!;
+      o.name = name;
+      o.planned = parseCurrency(planned);
+      o.dueDate = due;
+      o.kind = kind;
+      o.recurrence = recurrence;
+      o.tolerance = parseCurrency(tolerance);
+      o.updatedAt = now();
+      o.version++;
+    });
+  };
+  const remove = (id: string) => {
+    if (confirm("Excluir este compromisso?"))
+      mutate((d) => {
+        d.obligations = d.obligations.filter((o) => o.id !== id);
+      });
+  };
   return (
     <section className="panel">
       <div className="panel-head">
@@ -1100,6 +1162,15 @@ function Payments({
                 {!["Paga", "Confirmada"].includes(o.status) && (
                   <button onClick={() => mark(o.id)}>Marcar como paga</button>
                 )}
+                <div className="actions payment-actions">
+                  <button onClick={() => edit(o.id)}>Editar</button>
+                  <button
+                    className="danger-button"
+                    onClick={() => remove(o.id)}
+                  >
+                    <Trash2 size={15} /> Excluir
+                  </button>
+                </div>
               </article>
             );
           })}
@@ -1117,20 +1188,31 @@ function Goals({
   mutate: (f: (d: FamilyData) => void) => void;
 }) {
   const [show, setShow] = useState(false);
-  const add = (fd: FormData) =>
+  const add = (fd: FormData) => {
+    const target = parseCurrency(fd.get("target")),
+      minimum = parseCurrency(fd.get("minimum"));
+    const startDate = String(fd.get("startDate")),
+      deadline = String(fd.get("deadline"));
+    if (target <= 0) return alert("O valor-alvo precisa ser maior que zero.");
+    if (minimum < 0) return alert("O aporte não pode ser negativo.");
+    if (deadline < startDate)
+      return alert("O prazo final precisa ser posterior à data inicial.");
     mutate((d) =>
       d.goals.push({
         ...audit(),
         name: String(fd.get("name")),
-        target: +String(fd.get("target")),
-        deadline: String(fd.get("deadline")),
-        minimum: +String(fd.get("minimum")),
+        kind: String(fd.get("kind") || "desire") as "provision" | "desire",
+        target,
+        startDate,
+        deadline,
+        minimum,
         priority: d.goals.length + 1,
         emergency: false,
         active: true,
         movements: [],
       }),
     );
+  };
   const move = (id: string) => {
     const raw = prompt("Valor do aporte:");
     if (!raw) return;
@@ -1141,10 +1223,52 @@ function Goals({
           id: uid(),
           date: dateOnly(new Date()),
           kind: "aporte",
-          amount: +raw.replace(",", "."),
+          amount: parseCurrency(raw),
         }),
     );
   };
+  const edit = (id: string) => {
+    const g = data.goals.find((x) => x.id === id)!;
+    const name = prompt("Nome:", g.name);
+    if (!name) return;
+    const target = prompt("Valor-alvo:", money(g.target));
+    if (target === null) return;
+    const minimum = prompt("Aporte mensal:", money(g.minimum));
+    if (minimum === null) return;
+    const startDate = prompt(
+      "Data inicial (AAAA-MM-DD):",
+      g.startDate || dateOnly(new Date()),
+    );
+    if (!startDate || !/^\d{4}-\d{2}-\d{2}$/.test(startDate))
+      return alert("Use a data inicial no formato AAAA-MM-DD.");
+    const deadline = prompt("Prazo final (AAAA-MM-DD):", g.deadline);
+    if (
+      !deadline ||
+      !/^\d{4}-\d{2}-\d{2}$/.test(deadline) ||
+      deadline < startDate
+    )
+      return alert("A data final precisa ser válida e posterior ao início.");
+    mutate((d) => {
+      const item = d.goals.find((x) => x.id === id)!;
+      item.name = name;
+      item.target = parseCurrency(target);
+      item.minimum = parseCurrency(minimum);
+      item.startDate = startDate;
+      item.deadline = deadline;
+      item.updatedAt = now();
+      item.version++;
+    });
+  };
+  const remove = (id: string) => {
+    if (confirm("Excluir esta meta e seu histórico de aportes?"))
+      mutate((d) => {
+        d.goals = d.goals.filter((g) => g.id !== id);
+      });
+  };
+  const setKind = (id: string, kind: "provision" | "desire") =>
+    mutate((d) => {
+      d.goals.find((g) => g.id === id)!.kind = kind;
+    });
   return (
     <section className="panel">
       <div className="panel-head">
@@ -1168,40 +1292,89 @@ function Goals({
             ["name", "Nome da meta", "text"],
             ["target", "Valor-alvo", "number"],
             ["minimum", "Aporte mínimo", "number"],
+            ["startDate", "Data inicial", "date"],
             ["deadline", "Prazo", "date"],
           ]}
+          extras={
+            <select name="kind">
+              <option value="provision">Provisão para despesa</option>
+              <option value="desire">Meta de desejo</option>
+            </select>
+          }
         />
       )}
-      <div className="goals">
-        {data.goals
-          .sort((a, b) => a.priority - b.priority)
-          .map((g) => {
-            const total = g.movements.reduce((s, m) => s + m.amount, 0);
-            return (
-              <article key={g.id}>
-                <div className="goal-top">
-                  <div>
-                    <small>
-                      Prioridade {g.priority}
-                      {g.emergency ? " · reserva de emergência" : ""}
-                    </small>
-                    <h3>{g.name}</h3>
-                  </div>
-                  <strong>
-                    {Math.max(0, Math.round((total / (g.target || 1)) * 100))}%
-                  </strong>
-                </div>
-                <progress value={total} max={g.target || 1} />
-                <div className="goal-foot">
-                  <span>
-                    {money(total)} de {money(g.target)}
-                  </span>
-                  <button onClick={() => move(g.id)}>Registrar aporte</button>
-                </div>
-              </article>
-            );
-          })}
-      </div>
+      {(["provision", "desire"] as const).map((kind) => (
+        <div key={kind} className="goal-section">
+          <h2>
+            {kind === "provision"
+              ? "Provisões para despesas"
+              : "Metas de desejos"}
+          </h2>
+          <div className="goals">
+            {data.goals
+              .filter((g) => (g.kind || "desire") === kind)
+              .sort((a, b) => a.priority - b.priority)
+              .map((g) => {
+                const total = g.movements.reduce((s, m) => s + m.amount, 0);
+                return (
+                  <article key={g.id}>
+                    <div className="goal-top">
+                      <div>
+                        <small>
+                          Prioridade {g.priority}
+                          {g.emergency ? " · reserva de emergência" : ""}
+                        </small>
+                        <h3>{g.name}</h3>
+                        <small>
+                          {g.startDate || "Início não informado"} até{" "}
+                          {g.deadline}
+                        </small>
+                      </div>
+                      <strong>
+                        {Math.max(
+                          0,
+                          Math.round((total / (g.target || 1)) * 100),
+                        )}
+                        %
+                      </strong>
+                    </div>
+                    <progress value={total} max={g.target || 1} />
+                    <div className="goal-foot">
+                      <span>
+                        {money(total)} de {money(g.target)}
+                      </span>
+                      <button onClick={() => move(g.id)}>
+                        Registrar aporte
+                      </button>
+                    </div>
+                    <div className="actions goal-actions">
+                      <button onClick={() => edit(g.id)}>Editar</button>
+                      <select
+                        aria-label="Tipo da meta"
+                        value={g.kind || "desire"}
+                        onChange={(e) =>
+                          setKind(
+                            g.id,
+                            e.target.value as "provision" | "desire",
+                          )
+                        }
+                      >
+                        <option value="provision">Provisão</option>
+                        <option value="desire">Desejo</option>
+                      </select>
+                      <button
+                        className="danger-button"
+                        onClick={() => remove(g.id)}
+                      >
+                        <Trash2 size={15} /> Excluir
+                      </button>
+                    </div>
+                  </article>
+                );
+              })}
+          </div>
+        </div>
+      ))}
     </section>
   );
 }
@@ -1361,6 +1534,45 @@ function Config({
         active: true,
       }),
     );
+  const editAccount = (id: string) => {
+    const a = data.accounts.find((x) => x.id === id)!;
+    const name = prompt("Nome da conta/cartão:", a.name);
+    if (!name) return;
+    const institution = prompt("Instituição:", a.institution);
+    if (!institution) return;
+    const kind = prompt("Tipo: checking, card, investment ou cash", a.kind) as
+      Account["kind"] | null;
+    if (!kind || !["checking", "card", "investment", "cash"].includes(kind))
+      return alert("Tipo inválido.");
+    const operator = prompt(
+      "Responsável: Olcino, Mari ou Ambos",
+      a.operator,
+    ) as Member | null;
+    if (!operator || !["Olcino", "Mari", "Ambos"].includes(operator))
+      return alert("Responsável inválido.");
+    mutate((d) => {
+      const item = d.accounts.find((x) => x.id === id)!;
+      item.name = name;
+      item.institution = institution;
+      item.kind = kind;
+      item.operator = operator;
+      item.updatedAt = now();
+      item.version++;
+    });
+  };
+  const removeAccount = (id: string) => {
+    const used =
+      data.transactions.some((t) => t.accountId === id) ||
+      data.budgets.some((b) => b.accountId === id);
+    if (used)
+      return alert(
+        "Esta conta possui lançamentos ou orçamentos. Desative-a ou remova os vínculos antes de excluir.",
+      );
+    if (confirm("Excluir esta conta/cartão?"))
+      mutate((d) => {
+        d.accounts = d.accounts.filter((a) => a.id !== id);
+      });
+  };
   return (
     <div className="grid two">
       <section className="panel">
@@ -1421,12 +1633,23 @@ function Config({
         />
         <div className="list">
           {data.accounts.map((a) => (
-            <Row
-              key={a.id}
-              a={a.name}
-              b={`${a.institution} · ${a.operator}`}
-              c={a.kind}
-            />
+            <div className="row editable-row" key={a.id}>
+              <div>
+                <b>{a.name}</b>
+                <small>
+                  {a.institution} · {a.operator} · {a.kind}
+                </small>
+              </div>
+              <div className="actions">
+                <button onClick={() => editAccount(a.id)}>Editar</button>
+                <button
+                  className="danger-button"
+                  onClick={() => removeAccount(a.id)}
+                >
+                  <Trash2 size={15} />
+                </button>
+              </div>
+            </div>
           ))}
         </div>
       </section>
@@ -1499,6 +1722,33 @@ function CategoryEditor({
           .forEach((t) => (t.subcategory = name));
       });
   };
+  const removeCategory = (id: string) => {
+    const used =
+      data.transactions.some((t) => t.categoryId === id) ||
+      data.budgets.some((b) => b.categoryId === id);
+    if (used)
+      return alert(
+        "Esta categoria está em uso. Reclassifique os lançamentos e orçamentos antes de excluir.",
+      );
+    if (confirm("Excluir esta categoria?"))
+      mutate((d) => {
+        d.categories = d.categories.filter((c) => c.id !== id);
+        d.rules = d.rules.filter((r) => r.categoryId !== id);
+      });
+  };
+  const removeSub = (id: string, sub: string) => {
+    if (
+      data.transactions.some(
+        (t) => t.categoryId === id && t.subcategory === sub,
+      )
+    )
+      return alert("Esta subcategoria está em uso e não pode ser excluída.");
+    if (confirm(`Excluir a subcategoria ${sub}?`))
+      mutate((d) => {
+        const c = d.categories.find((x) => x.id === id)!;
+        c.subcategories = c.subcategories.filter((s) => s !== sub);
+      });
+  };
   return (
     <>
       <QuickForm
@@ -1519,12 +1769,25 @@ function CategoryEditor({
           <div className="actions">
             <button onClick={() => rename(c.id, c.name)}>Renomear</button>
             <button onClick={() => addSub(c.id)}>Adicionar subcategoria</button>
+            <button
+              className="danger-button"
+              onClick={() => removeCategory(c.id)}
+            >
+              <Trash2 size={15} /> Excluir
+            </button>
           </div>
           <div className="subcategories">
             {c.subcategories.map((s) => (
-              <button key={s} onClick={() => renameSub(c.id, s)}>
-                {s}
-              </button>
+              <span className="sub-item" key={s}>
+                <button onClick={() => renameSub(c.id, s)}>{s}</button>
+                <button
+                  className="danger-button"
+                  onClick={() => removeSub(c.id, s)}
+                  aria-label={`Excluir ${s}`}
+                >
+                  <Trash2 size={13} />
+                </button>
+              </span>
             ))}
           </div>
         </details>
@@ -1792,6 +2055,49 @@ function Analytics({ data }: { data: FamilyData }) {
   );
 }
 
+function parseCurrency(value: FormDataEntryValue | null | undefined) {
+  const raw = String(value || "").replace(/[^0-9,.-]/g, "");
+  const normalized = raw.includes(",")
+    ? raw.replace(/\./g, "").replace(",", ".")
+    : raw;
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function MoneyInput({
+  name,
+  defaultValue,
+  placeholder,
+  required,
+}: {
+  name: string;
+  defaultValue?: number;
+  placeholder?: string;
+  required?: boolean;
+}) {
+  const format = (value: number) =>
+    value
+      ? new Intl.NumberFormat("pt-BR", {
+          style: "currency",
+          currency: "BRL",
+        }).format(value)
+      : "";
+  const [display, setDisplay] = useState(
+    defaultValue ? format(defaultValue) : "",
+  );
+  return (
+    <input
+      name={name}
+      inputMode="decimal"
+      required={required}
+      placeholder={placeholder}
+      value={display}
+      onChange={(event) => setDisplay(event.target.value)}
+      onBlur={() => setDisplay(format(parseCurrency(display)))}
+    />
+  );
+}
+
 function QuickForm({
   fields,
   extras,
@@ -1810,16 +2116,20 @@ function QuickForm({
         e.currentTarget.reset();
       }}
     >
-      {fields.map(([name, label, type]) => (
-        <input
-          key={name}
-          required
-          name={name}
-          type={type}
-          placeholder={label}
-          aria-label={label}
-        />
-      ))}
+      {fields.map(([name, label, type]) =>
+        type === "number" ? (
+          <MoneyInput key={name} name={name} required placeholder={label} />
+        ) : (
+          <input
+            key={name}
+            required
+            name={name}
+            type={type}
+            placeholder={label}
+            aria-label={label}
+          />
+        ),
+      )}
       {extras}
       <button type="submit">Adicionar</button>
     </form>

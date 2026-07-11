@@ -8,12 +8,12 @@ const msal = clientId
   ? new PublicClientApplication({
       auth: {
         clientId,
-        authority: "https://login.microsoftonline.com/consumers",
+        authority: "https://login.microsoftonline.com/common",
         redirectUri,
       },
       // O estado transitório da autenticação fica limitado à aba. Isso evita que
       // um popup interrompido no celular bloqueie sessões futuras.
-      cache: { cacheLocation: "sessionStorage" },
+      cache: { cacheLocation: "localStorage", cacheRetentionDays: 0 },
     })
   : null;
 let etag: string | undefined;
@@ -65,7 +65,11 @@ async function acquireToken() {
   await prepareAuth();
   let account = msal!.getAllAccounts()[0];
   if (!account) {
-    await msal!.loginRedirect({ scopes, redirectStartPage: location.href });
+    await msal!.loginRedirect({
+      scopes,
+      redirectStartPage: location.href,
+      prompt: "select_account",
+    });
     throw new Error("Redirecionando para a Microsoft…");
   }
   try {
@@ -88,7 +92,11 @@ export async function signIn(): Promise<AccountInfo> {
   await prepareAuth();
   const account = msal!.getAllAccounts()[0];
   if (account) return account;
-  await msal!.loginRedirect({ scopes, redirectStartPage: location.href });
+  await msal!.loginRedirect({
+    scopes,
+    redirectStartPage: location.href,
+    prompt: "select_account",
+  });
   throw new Error("Redirecionando para a Microsoft…");
 }
 export function isConfigured() {

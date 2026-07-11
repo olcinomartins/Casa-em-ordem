@@ -367,7 +367,7 @@ th {
 }
 .transaction-edit {
   display: grid;
-  grid-template-columns: 1.7fr 1fr 1fr 1fr auto;
+  grid-template-columns: 1.7fr 1fr 1fr 1fr auto auto;
   gap: 0.5rem;
   align-items: center;
   padding: 0.65rem 0;
@@ -419,6 +419,35 @@ th {
 }
 .payment button {
   grid-column: 1/-1;
+}
+.payment-actions {
+  grid-column: 1/-1;
+}
+.danger-button {
+  color: var(--red);
+  border-color: #ead5d1;
+}
+.editable-row > .actions {
+  flex-shrink: 0;
+}
+.goal-section {
+  margin-top: 1.5rem;
+}
+.goal-actions {
+  margin-top: 0.8rem;
+  flex-wrap: wrap;
+}
+.sub-item {
+  display: inline-flex;
+}
+.sub-item button {
+  border-radius: 0;
+}
+.sub-item button:first-child {
+  border-radius: 8px 0 0 8px;
+}
+.sub-item button:last-child {
+  border-radius: 0 8px 8px 0;
 }
 .goals {
   display: grid;
