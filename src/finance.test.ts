@@ -1,5 +1,74 @@
-import {describe,expect,it} from 'vitest'; import {createSeed} from './seed'; import {audit,normalize,Transaction} from './domain'; import {personalBalance,realized,suggest,upsertRule} from './finance';
-const tx=(patch:Partial<Transaction>={}):Transaction=>({...audit('Olcino'),date:'2026-07-10',competence:'2026-07',description:'LOJA TESTE',normalized:'LOJA TESTE',amount:100,accountId:'a',operator:'Olcino',scope:'Familiar',classification:'confirmed',dedupeKey:'x',transfer:false,...patch});
-describe('regimes financeiros',()=>{it('reconhece parcela no fluxo e total na compra',()=>{const t=tx({amount:100,totalAmount:1200,installment:1,installments:12,purchaseDate:'2026-07-01',paymentDate:'2026-08-10'});expect(realized(t,'2026-07','cash')).toBe(0);expect(realized(t,'2026-08','cash')).toBe(100);expect(realized(t,'2026-07','accrual')).toBe(1200)});it('ignora transferência',()=>expect(realized(tx({transfer:true}),'2026-07','cash')).toBe(0))});
-describe('classificação',()=>{it('normaliza e reaplica regra confirmada',()=>{const d=createSeed();const cat=d.categories[0];const t=tx({categoryId:cat.id,subcategory:cat.subcategories[0]});upsertRule(d,t);expect(suggest('Loja   Teste', 'a','Olcino',d.rules)?.categoryId).toBe(cat.id);expect(normalize('Débito: Loja Têste')).toBe('LOJA TESTE')})});
-describe('orçamento pessoal',()=>{it('carrega sobra e excesso',()=>{const d=createSeed();d.budgets=[{...audit(),month:'2026-06',member:'Olcino',amount:500},{...audit(),month:'2026-07',member:'Olcino',amount:500}];d.transactions=[tx({date:'2026-06-10',paymentDate:'2026-06-10',scope:'Pessoal — Olcino',amount:200}),tx({date:'2026-07-10',paymentDate:'2026-07-10',scope:'Pessoal — Olcino',amount:900,dedupeKey:'y'})];expect(personalBalance(d,'Olcino','2026-07')).toBe(-100)})});
+import { describe, expect, it } from "vitest";
+import { createSeed } from "./seed";
+import { audit, normalize, Transaction } from "./domain";
+import { personalBalance, realized, suggest, upsertRule } from "./finance";
+const tx = (patch: Partial<Transaction> = {}): Transaction => ({
+  ...audit("Olcino"),
+  date: "2026-07-10",
+  competence: "2026-07",
+  description: "LOJA TESTE",
+  normalized: "LOJA TESTE",
+  amount: 100,
+  accountId: "a",
+  operator: "Olcino",
+  scope: "Familiar",
+  classification: "confirmed",
+  dedupeKey: "x",
+  transfer: false,
+  ...patch,
+});
+describe("regimes financeiros", () => {
+  it("reconhece parcela no fluxo e total na compra", () => {
+    const t = tx({
+      amount: 100,
+      totalAmount: 1200,
+      installment: 1,
+      installments: 12,
+      purchaseDate: "2026-07-01",
+      paymentDate: "2026-08-10",
+    });
+    expect(realized(t, "2026-07", "cash")).toBe(0);
+    expect(realized(t, "2026-08", "cash")).toBe(100);
+    expect(realized(t, "2026-07", "accrual")).toBe(1200);
+    expect(realized({ ...t, installment: 2 }, "2026-07", "accrual")).toBe(0);
+  });
+  it("ignora transferência", () =>
+    expect(realized(tx({ transfer: true }), "2026-07", "cash")).toBe(0));
+});
+describe("classificação", () => {
+  it("normaliza e reaplica regra confirmada", () => {
+    const d = createSeed();
+    const cat = d.categories[0];
+    const t = tx({ categoryId: cat.id, subcategory: cat.subcategories[0] });
+    upsertRule(d, t);
+    expect(suggest("Loja   Teste", "a", "Olcino", d.rules)?.categoryId).toBe(
+      cat.id,
+    );
+    expect(normalize("Débito: Loja Têste")).toBe("LOJA TESTE");
+  });
+});
+describe("orçamento pessoal", () => {
+  it("carrega sobra e excesso", () => {
+    const d = createSeed();
+    d.budgets = [
+      { ...audit(), month: "2026-06", member: "Olcino", amount: 500 },
+      { ...audit(), month: "2026-07", member: "Olcino", amount: 500 },
+    ];
+    d.transactions = [
+      tx({
+        date: "2026-06-10",
+        paymentDate: "2026-06-10",
+        scope: "Pessoal — Olcino",
+        amount: 200,
+      }),
+      tx({
+        date: "2026-07-10",
+        paymentDate: "2026-07-10",
+        scope: "Pessoal — Olcino",
+        amount: 900,
+        dedupeKey: "y",
+      }),
+    ];
+    expect(personalBalance(d, "Olcino", "2026-07")).toBe(-100);
+  });
+});

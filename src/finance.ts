@@ -89,7 +89,8 @@ export function realized(
     return monthOf(t.paymentDate || t.date) === month ? t.amount : 0;
   const d = t.purchaseDate || t.competence || t.date;
   if (monthOf(d) !== month) return 0;
-  if ((t.installments ?? 1) > 1 && t.totalAmount != null) return t.totalAmount;
+  if ((t.installments ?? 1) > 1 && t.totalAmount != null)
+    return (t.installment ?? 1) === 1 ? t.totalAmount : 0;
   return t.amount;
 }
 export function budgetApplies(

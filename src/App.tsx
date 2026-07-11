@@ -347,13 +347,13 @@ function ViewSwitch({
         className={view === "cash" ? "on" : ""}
         onClick={() => setView("cash")}
       >
-        Fluxo
+        Data da parcela
       </button>
       <button
         className={view === "accrual" ? "on" : ""}
         onClick={() => setView("accrual")}
       >
-        Compra integral
+        Data da compra
       </button>
       <button
         className={view === "compare" ? "on" : ""}
@@ -822,10 +822,11 @@ function Transactions({
             </button>
             <button
               title="Excluir lançamento"
-              className="icon danger-button"
+              className="icon danger-button transaction-delete"
               onClick={() => remove(t.id)}
             >
               <Trash2 size={19} />
+              <span>Excluir</span>
             </button>
           </div>
         ))}
@@ -1427,6 +1428,47 @@ function Tasks({
         t.due = dt.toISOString();
       }
     });
+  const edit = (id: string) => {
+    const task = data.tasks.find((t) => t.id === id)!;
+    const title = prompt("Título da tarefa:", task.title);
+    if (!title) return;
+    const due = prompt(
+      "Data e hora (AAAA-MM-DDTHH:MM):",
+      task.due.slice(0, 16),
+    );
+    if (!due || Number.isNaN(new Date(due).getTime()))
+      return alert("Data e hora inválidas.");
+    const assignee = prompt(
+      "Responsável: Olcino, Mari ou Ambos",
+      task.assignee,
+    ) as Member | null;
+    if (!assignee || !["Olcino", "Mari", "Ambos"].includes(assignee))
+      return alert("Responsável inválido.");
+    const repeat = prompt(
+      "Repetição: none, daily, weekly, monthly ou yearly",
+      task.repeat,
+    ) as Task["repeat"] | null;
+    if (
+      !repeat ||
+      !["none", "daily", "weekly", "monthly", "yearly"].includes(repeat)
+    )
+      return alert("Repetição inválida.");
+    mutate((d) => {
+      const item = d.tasks.find((t) => t.id === id)!;
+      item.title = title;
+      item.due = new Date(due).toISOString();
+      item.assignee = assignee;
+      item.repeat = repeat;
+      item.updatedAt = now();
+      item.version++;
+    });
+  };
+  const remove = (id: string) => {
+    if (confirm("Excluir esta tarefa e seu histórico?"))
+      mutate((d) => {
+        d.tasks = d.tasks.filter((t) => t.id !== id);
+      });
+  };
   return (
     <section className="panel">
       <div className="panel-head">
@@ -1506,6 +1548,12 @@ function Tasks({
                 </small>
               </div>
               <Badge text={t.priority} />
+              <div className="actions task-actions">
+                <button onClick={() => edit(t.id)}>Editar</button>
+                <button className="danger-button" onClick={() => remove(t.id)}>
+                  <Trash2 size={15} /> Excluir
+                </button>
+              </div>
             </article>
           ))}
       </div>

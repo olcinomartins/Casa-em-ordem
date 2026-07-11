@@ -42,6 +42,11 @@ const parseDate = (v: unknown) => {
   }
   return new Date().toISOString().slice(0, 10);
 };
+const shiftMonths = (iso: string, months: number) => {
+  const date = new Date(`${iso}T12:00:00`);
+  date.setMonth(date.getMonth() + months);
+  return date.toISOString().slice(0, 10);
+};
 const pick = (r: Record<string, unknown>, names: string[]) => {
   const key = Object.keys(r).find((k) =>
     names.some((n) => normalize(k).includes(normalize(n))),
@@ -117,10 +122,14 @@ export async function previewFile(
       /(\d+)\s*(?:de|\/|\s)\s*(\d+)/i,
     );
     const d = parseDate(date);
+    const installment = parcel ? Number(parcel[1]) : undefined;
+    const installments = parcel ? Number(parcel[2]) : undefined;
+    const paymentDate = shiftMonths(d, Math.max(0, (installment || 1) - 1));
     const base = {
       ...audit(operator),
-      date: d,
+      date: paymentDate,
       competence: monthOf(d),
+      purchaseDate: d,
       description: descString,
       normalized: normalize(descString),
       amount,
@@ -130,9 +139,13 @@ export async function previewFile(
         ? "Familiar"
         : `Pessoal — ${operator}`) as Transaction["scope"],
       classification: "pending" as const,
-      installment: parcel ? Number(parcel[1]) : undefined,
-      installments: parcel ? Number(parcel[2]) : undefined,
-      paymentDate: d,
+      installment,
+      installments,
+      totalAmount:
+        installments && installments > 1
+          ? Math.abs(amount) * installments
+          : undefined,
+      paymentDate,
       transfer: /PAGAMENTO.*FATURA|FATURA.*CART[AÃ]O|TRANSFERENCIA ENTRE/i.test(
         normalize(descString),
       ),

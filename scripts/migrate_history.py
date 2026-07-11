@@ -75,6 +75,7 @@ def col(row, *names):
 seen = set(); rule_counts = Counter(); ignored = 0
 for row in ws.iter_rows(min_row=2, values_only=True):
     when = col(row, "Data ajustada", "Data")
+    purchase_when = col(row, "Data") or when
     description = col(row, "Lancamento")
     value = col(row, "Valor")
     origin = col(row, "Origem")
@@ -84,7 +85,7 @@ for row in ws.iter_rows(min_row=2, values_only=True):
     cat_name, _, sub = cat_text.partition("-")
     cat = category(cat_name or "Outros", sub or "Compras diversas")
     acc = account(origin)
-    d = iso(when); installment = col(row, "Parcela.1")
+    d = iso(when); purchase_date = iso(purchase_when); installment = col(row, "Parcela.1"); installments = col(row, "Parcela.2")
     key_raw = f"{d}|{norm(description)}|{float(value):.2f}|{acc['id']}|{installment or 0}"
     key = hashlib.sha256(key_raw.encode()).hexdigest()
     if key in seen: ignored += 1; continue
@@ -96,8 +97,10 @@ for row in ws.iter_rows(min_row=2, values_only=True):
     amount = -abs(float(value)) if is_income else abs(float(value))
     operator = acc["operator"]
     scope = "Transferência interna" if transfer else "Familiar" if operator == "Ambos" else f"Pessoal — {operator}"
-    t = {**audit(), "date": d, "competence": d[:7], "description": str(description), "normalized": norm(description), "amount": amount, "accountId": acc["id"], "operator": operator, "scope": scope, "categoryId": cat["id"], "subcategory": sub or "Compras diversas", "classification": "confirmed" if cat_text else "pending", "dedupeKey": key, "transfer": transfer, "movement": movement_kind, "sourceKind": source_kind}
+    t = {**audit(), "date": d, "paymentDate": d, "purchaseDate": purchase_date, "competence": purchase_date[:7], "description": str(description), "normalized": norm(description), "amount": amount, "accountId": acc["id"], "operator": operator, "scope": scope, "categoryId": cat["id"], "subcategory": sub or "Compras diversas", "classification": "confirmed" if cat_text else "pending", "dedupeKey": key, "transfer": transfer, "movement": movement_kind, "sourceKind": source_kind}
     if isinstance(installment, (int, float)) and installment > 0: t["installment"] = int(installment)
+    if isinstance(installments, (int, float)) and installments > 1:
+        t["installments"] = int(installments); t["totalAmount"] = abs(amount) * int(installments)
     data["transactions"].append(t)
     if cat_text: rule_counts[(t["normalized"], acc["id"], operator, cat["id"], t["subcategory"])] += 1
 

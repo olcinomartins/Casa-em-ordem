@@ -449,6 +449,12 @@ th {
 .sub-item button:last-child {
   border-radius: 0 8px 8px 0;
 }
+.task-actions {
+  grid-column: 2 / -1;
+}
+.transaction-delete span {
+  display: none;
+}
 .goals {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
@@ -761,15 +767,33 @@ code {
 .values-hidden .account-ranking b,
 .values-hidden .goal-columns b,
 .values-hidden .transactions-table td:nth-child(3),
-.values-hidden .analysis-table td:nth-child(n + 2) {
+.values-hidden .analysis-table td:nth-child(n + 2),
+.values-hidden .summary span {
   visibility: hidden;
+  position: relative;
+}
+.values-hidden .card strong::after,
+.values-hidden .bars label span:last-child::after,
+.values-hidden .personal strong::after,
+.values-hidden .goal-mini b::after,
+.values-hidden .goal-foot span::after,
+.values-hidden .payment strong::after,
+.values-hidden .tx-main small::after,
+.values-hidden .budget-item small::after,
+.values-hidden .category-ranking b::after,
+.values-hidden .account-ranking b::after,
+.values-hidden .goal-columns b::after,
+.values-hidden .transactions-table td:nth-child(3)::after,
+.values-hidden .analysis-table td:nth-child(n + 2)::after,
+.values-hidden .summary span::after {
+  content: "*****";
+  visibility: visible;
+  color: #718078;
+  position: absolute;
+  inset: 0;
 }
 .values-hidden .chart-bars i {
   pointer-events: none;
-}
-.values-hidden .summary span {
-  color: transparent;
-  user-select: none;
 }
 .privacy-toggle span {
   white-space: nowrap;
@@ -922,6 +946,9 @@ code {
   }
   .transaction-edit {
     grid-template-columns: 1fr;
+  }
+  .transaction-delete span {
+    display: inline;
   }
   .tx-main {
     grid-column: auto;
