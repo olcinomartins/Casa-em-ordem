@@ -5,8 +5,14 @@ export interface ReadReceipt { estabelecimento?:string; data?:string; total?:num
 export async function readReceipt(file:File):Promise<ReadReceipt>{
   if(!file.type.startsWith("image/"))throw new Error("Escolha uma fotografia da nota.");
   if(file.size>12_000_000)throw new Error("A fotografia deve ter no máximo 12 MB.");
-  const response=await fetch(endpoint,{method:"POST",headers:{"Content-Type":"application/json","Authorization":`Bearer ${await getMicrosoftAccessToken()}`},body:JSON.stringify({mimeType:file.type,image:await toBase64(file)})});
-  const result=await response.json().catch(()=>({}));
-  if(!response.ok)throw new Error([result.error,result.detail].filter(Boolean).join(" — ")||`Falha na leitura (${response.status}).`);
-  return result.receipt;
+  const image=await toBase64(file);const accessToken=await getMicrosoftAccessToken();let lastError="";
+  for(let attempt=0;attempt<2;attempt++){
+    const response=await fetch(endpoint,{method:"POST",headers:{"Content-Type":"application/json","Authorization":`Bearer ${accessToken}`},body:JSON.stringify({mimeType:file.type,image})});
+    const result=await response.json().catch(()=>({}));
+    if(response.ok&&result.receipt)return result.receipt;
+    lastError=[result.error,result.detail].filter(Boolean).join(" — ")||`Falha na leitura (${response.status}).`;
+    if(response.status<429&&response.status!==502)break;
+    await new Promise(resolve=>setTimeout(resolve,1500));
+  }
+  throw new Error(lastError);
 }
