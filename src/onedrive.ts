@@ -89,6 +89,7 @@ async function token() {
   });
   return tokenInFlight;
 }
+export async function getMicrosoftAccessToken() { return token(); }
 export async function signIn(): Promise<AccountInfo> {
   await prepareAuth();
   const account = msal!.getAllAccounts()[0];

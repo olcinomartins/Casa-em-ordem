@@ -65,7 +65,7 @@ import {
 } from "./finance";
 import { previewFile, Preview } from "./importer";
 import { tasksToIcs } from "./ics";
-import { authorizeReceiptReader, readReceipt, ReadReceipt } from "./receipts";
+import { readReceipt, ReadReceipt } from "./receipts";
 
 type Page =
   | "painel"
@@ -586,7 +586,7 @@ function Receipts({data,mutate,setMessage}:{data:FamilyData;mutate:(f:(d:FamilyD
   const history=data.receipts||[];const products=Array.from(new Set(history.flatMap(r=>r.items.map(i=>i.description)))).map(name=>{const purchases=history.flatMap(r=>r.items.map(i=>({r,i}))).filter(x=>x.i.description===name);const last=purchases.sort((a,b)=>b.r.date.localeCompare(a.r.date))[0];return{name,count:purchases.length,price:last?.i.unitPrice??last?.i.total,store:last?.r.store}}).sort((a,b)=>b.count-a.count);
   return <>
     <input ref={libraryInput} hidden type="file" accept="image/*" multiple onChange={e=>analyze(Array.from(e.target.files||[]))}/>
-    <section className="panel"><div className="panel-head"><div><h2>Fotografar nota de supermercado</h2><p className="muted">A fotografia é enviada ao leitor protegido e não é armazenada na base.</p></div><div className="actions"><button onClick={authorizeReceiptReader}>Autorizar leitor</button><button className="primary" disabled={busy} onClick={()=>libraryInput.current?.click()}>{busy?"Lendo…":"Fotografar ou escolher da biblioteca"}</button></div></div>
+    <section className="panel"><div className="panel-head"><div><h2>Fotografar nota de supermercado</h2><p className="muted">O mesmo login Microsoft do aplicativo autoriza a leitura. A fotografia não é armazenada na base.</p></div><div className="actions"><button className="primary" disabled={busy} onClick={()=>libraryInput.current?.click()}>{busy?"Lendo…":"Fotografar ou escolher da biblioteca"}</button></div></div>
     {draft&&<div className="receipt-review"><div className="form-row"><input value={draft.estabelecimento||""} placeholder="Estabelecimento" onChange={e=>setDraft({...draft,estabelecimento:e.target.value})}/><input type="date" value={draft.data||""} onChange={e=>setDraft({...draft,data:e.target.value})}/><CurrencyInput value={Number(draft.total)||0} onChange={value=>setDraft({...draft,total:value})}/></div><h3>Itens identificados</h3>{(draft.itens||[]).map((item,index)=><div className="form-row" key={index}><input value={item.descricao||""} onChange={e=>{const itens=[...(draft.itens||[])];itens[index]={...item,descricao:e.target.value};setDraft({...draft,itens})}}/><span>{item.quantidade||1} × {money(item.valorUnitario||item.valorTotal||0)}</span></div>)}<button className="primary" onClick={save}>Confirmar e salvar nota</button></div>}
     </section>
     <section className="grid two"><div className="panel"><h2>Histórico de notas</h2>{history.length?history.slice().sort((a,b)=>b.date.localeCompare(a.date)).map(r=><div className="budget-item" key={r.id}><div><b>{r.store}</b><small>{r.date} · {r.items.length} itens · {money(r.total)}</small></div><button onClick={()=>mutate(d=>{d.receipts=(d.receipts||[]).filter(x=>x.id!==r.id)})}><Trash2 size={15}/></button></div>):<Empty/>}</div><div className="panel"><h2>Lista baseada nas compras</h2><p className="muted">Produtos mais recorrentes e último preço encontrado.</p>{products.length?products.slice(0,50).map(p=><Row key={p.name} a={p.name} b={`${p.count} compra(s) · ${p.store||""}`} c={p.price==null?"—":money(p.price)}/>):<Empty/>}</div></section>
