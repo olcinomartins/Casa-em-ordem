@@ -11,6 +11,13 @@
   --line: #deddd4;
   --red: #a8483e;
 }
+
+.collapsible { margin: 0 0 1rem; border: 1px solid var(--line); border-radius: 18px; background: rgba(255,255,255,.55); overflow: hidden; }
+.collapsible > summary { cursor: pointer; list-style: none; padding: 1rem 1.2rem; font-weight: 700; font-size: 1.05rem; display: flex; justify-content: space-between; align-items: center; }
+.collapsible > summary::-webkit-details-marker { display: none; }
+.collapsible > summary span { transition: transform .2s ease; font-size: 1.4rem; }
+.collapsible[open] > summary span { transform: rotate(180deg); }
+.collapsible-content { padding: 0 .8rem .8rem; }
 * {
   box-sizing: border-box;
 }

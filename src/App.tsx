@@ -67,30 +67,12 @@ import { previewFile, Preview } from "./importer";
 import { tasksToIcs } from "./ics";
 import { readReceipt, ReadReceipt } from "./receipts";
 
-type Page =
-  | "painel"
-  | "importar"
-  | "notas"
-  | "casa"
-  | "transacoes"
-  | "orcamento"
-  | "pagamentos"
-  | "metas"
-  | "tarefas"
-  | "analises"
-  | "config";
+type Page = "visao" | "rotinas" | "planejamento" | "importar";
 const nav: [Page, string, typeof BarChart3][] = [
-  ["painel", "Painel", BarChart3],
-  ["importar", "Importar", Upload],
-  ["notas", "Notas e compras", ReceiptText],
-  ["casa", "Responsabilidades", CheckSquare],
-  ["transacoes", "Transações", Tags],
-  ["orcamento", "Orçamentos", WalletCards],
-  ["pagamentos", "Pagamentos", ReceiptText],
-  ["metas", "Metas", Target],
-  ["tarefas", "Tarefas", CheckSquare],
-  ["analises", "Análises", TrendingUp],
-  ["config", "Configurações", Settings],
+  ["visao", "Painel e Análises", BarChart3],
+  ["rotinas", "Responsabilidades, Tarefas e Pagamentos", CheckSquare],
+  ["planejamento", "Categorias, Contas, Orçamentos e Metas", WalletCards],
+  ["importar", "Importar extratos e faturas", Upload],
 ];
 const currentMonth = () => new Date().toISOString().slice(0, 7);
 const dateOnly = (d: Date) => d.toISOString().slice(0, 10);
@@ -103,7 +85,7 @@ export default function App() {
   const [hideValues, setHideValues] = useState(
     () => localStorage.getItem("casa-em-ordem-hide-values") === "true",
   );
-  const [page, setPage] = useState<Page>("painel");
+  const [page, setPage] = useState<Page>("visao");
   const [month, setMonth] = useState(currentMonth());
   const [view, setView] = useState<CashView>("cash");
   const [message, setMessage] = useState("");
@@ -244,7 +226,7 @@ export default function App() {
           ))}
         </nav>
         <div className="aside-foot">
-          <button onClick={isConfigured() ? connect : () => setPage("config")}>
+          <button onClick={isConfigured() ? connect : () => setPage("planejamento")}>
             {cloud === "connected" ? (
               <Cloud size={18} />
             ) : (
@@ -292,7 +274,7 @@ export default function App() {
               {hideValues ? <EyeOff size={18} /> : <Eye size={18} />}
               <span>{hideValues ? "Mostrar" : "Esconder"}</span>
             </button>
-            {page === "config" && (
+            {page === "planejamento" && (
               <button onClick={configureShared}>Base compartilhada</button>
             )}
             <button className="primary" onClick={sync}>
@@ -305,42 +287,17 @@ export default function App() {
             {message}
           </div>
         )}
-        {page === "painel" && (
-          <Dashboard data={data} month={month} view={view} setView={setView} />
-        )}{" "}
-        {page === "importar" && (
-          <ImportPage data={data} mutate={mutate} setMessage={setMessage} />
-        )}{" "}
-        {page === "notas" && <Receipts data={data} mutate={mutate} setMessage={setMessage} />}{" "}
-        {page === "casa" && <Chores data={data} mutate={mutate} />}{" "}
-        {page === "transacoes" && (
-          <Transactions data={data} month={month} mutate={mutate} />
-        )}{" "}
-        {page === "orcamento" && (
-          <Budgets
-            data={data}
-            month={month}
-            view={view}
-            setView={setView}
-            mutate={mutate}
-          />
-        )}{" "}
-        {page === "pagamentos" && <Payments data={data} mutate={mutate} />}{" "}
-        {page === "metas" && <Goals data={data} mutate={mutate} />}{" "}
-        {page === "tarefas" && <Tasks data={data} mutate={mutate} />}{" "}
-        {page === "analises" && <Analytics data={data} />}{" "}
-        {page === "config" && (
-          <Config
-            data={data}
-            setData={setData}
-            mutate={mutate}
-            connect={connect}
-            setMessage={setMessage}
-          />
-        )}
+        {page === "visao" && <><Collapsible title="Painel" open><Dashboard data={data} month={month} view={view} setView={setView} /></Collapsible><Collapsible title="Análises históricas"><Analytics data={data} /></Collapsible></>}
+        {page === "rotinas" && <><Collapsible title="Responsabilidades da casa" open><Chores data={data} mutate={mutate} /></Collapsible><Collapsible title="Tarefas e agenda"><Tasks data={data} mutate={mutate} /></Collapsible><Collapsible title="Central de pagamentos"><Payments data={data} mutate={mutate} /></Collapsible></>}
+        {page === "planejamento" && <><Collapsible title="Categorias, contas e configurações" open><Config data={data} setData={setData} mutate={mutate} connect={connect} setMessage={setMessage} /></Collapsible><Collapsible title="Orçamentos"><Budgets data={data} month={month} view={view} setView={setView} mutate={mutate} /></Collapsible><Collapsible title="Metas e reservas"><Goals data={data} mutate={mutate} /></Collapsible></>}
+        {page === "importar" && <><Collapsible title="Importar extratos e faturas" open><ImportPage data={data} mutate={mutate} setMessage={setMessage} /></Collapsible><Collapsible title="Transações e revisão"><Transactions data={data} month={month} mutate={mutate} /></Collapsible><Collapsible title="Notas e compras"><Receipts data={data} mutate={mutate} setMessage={setMessage} /></Collapsible></>}
       </main>
     </div>
   );
+}
+
+function Collapsible({title,open=false,children}:{title:string;open?:boolean;children:React.ReactNode}) {
+  return <details className="collapsible" open={open}><summary>{title}<span aria-hidden="true">⌄</span></summary><div className="collapsible-content">{children}</div></details>;
 }
 
 function ViewSwitch({
