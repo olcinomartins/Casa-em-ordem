@@ -758,6 +758,7 @@ code {
 .values-hidden .tx-main small,
 .values-hidden .budget-item small,
 .values-hidden .category-ranking b,
+.values-hidden .account-ranking b,
 .values-hidden .goal-columns b,
 .values-hidden .transactions-table td:nth-child(3),
 .values-hidden .analysis-table td:nth-child(n + 2) {
@@ -772,6 +773,28 @@ code {
 }
 .privacy-toggle span {
   white-space: nowrap;
+}
+.mobile-page-select {
+  display: none;
+}
+.account-history {
+  margin-top: 1rem;
+}
+.account-ranking > div {
+  margin: 0.9rem 0;
+}
+.account-ranking label {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.3rem;
+}
+.account-ranking label small {
+  display: block;
+  color: #829087;
+}
+.account-ranking progress::-webkit-progress-value {
+  background: #315f50;
 }
 .chart {
   height: 310px;
@@ -866,6 +889,15 @@ code {
     gap: 1rem;
   }
   header p {
+    display: none;
+  }
+  .mobile-page-select {
+    display: block;
+    width: 100%;
+    margin-bottom: 0.4rem;
+    font-weight: 600;
+  }
+  header h1 {
     display: none;
   }
   header .primary {

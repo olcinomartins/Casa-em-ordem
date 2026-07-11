@@ -252,6 +252,18 @@ export default function App() {
       <main>
         <header>
           <div>
+            <select
+              className="mobile-page-select"
+              value={page}
+              onChange={(event) => setPage(event.target.value as Page)}
+              aria-label="Selecionar página"
+            >
+              {nav.map(([id, label]) => (
+                <option key={id} value={id}>
+                  {label}
+                </option>
+              ))}
+            </select>
             <h1>{nav.find((n) => n[0] === page)?.[1]}</h1>
             <p>
               {data.household.name} · dinheiro compartilhado, decisões em
@@ -1806,13 +1818,15 @@ function Analytics({ data }: { data: FamilyData }) {
   const [report, setReport] = useState<"budget" | "reserve" | "final">(
     "budget",
   );
+  const [accountId, setAccountId] = useState("all");
   const months = available.filter((month) => month >= start && month <= end);
   const belongs = (t: Transaction, kind: "budget" | "reserve" | "final") =>
-    kind === "final"
+    (accountId === "all" || t.accountId === accountId) &&
+    (kind === "final"
       ? t.movement !== "transfer" && !t.transfer
       : kind === "reserve"
         ? t.movement === "reserve"
-        : (t.movement || "expense_income") === "expense_income" && !t.transfer;
+        : (t.movement || "expense_income") === "expense_income" && !t.transfer);
   const rows = months.map((month) => {
     const relevant = data.transactions.filter((t) => belongs(t, report));
     const income = relevant
@@ -1865,6 +1879,22 @@ function Analytics({ data }: { data: FamilyData }) {
   const totalPlanned = rows.reduce((s, r) => s + r.planned, 0),
     totalRealized = rows.reduce((s, r) => s + r.realized, 0),
     totalResult = totalPlanned - totalRealized;
+  const accountRows = data.accounts
+    .map((account) => {
+      const actual = data.transactions
+        .filter((t) => t.accountId === account.id && belongs(t, report))
+        .reduce(
+          (sum, t) =>
+            months.reduce(
+              (value, current) => value + Math.abs(realized(t, current, mode)),
+              sum,
+            ),
+          0,
+        );
+      return { account, actual };
+    })
+    .filter((row) => row.actual)
+    .sort((a, b) => b.actual - a.actual);
   return (
     <>
       <section className="bi-controls">
@@ -1910,6 +1940,18 @@ function Analytics({ data }: { data: FamilyData }) {
         >
           <option value="accrual">Data da compra</option>
           <option value="cash">Data da parcela</option>
+        </select>
+        <select
+          value={accountId}
+          onChange={(event) => setAccountId(event.target.value)}
+          aria-label="Filtrar conta ou cartão"
+        >
+          <option value="all">Todas as contas e cartões</option>
+          {data.accounts.map((account) => (
+            <option key={account.id} value={account.id}>
+              {account.name}
+            </option>
+          ))}
         </select>
       </section>
       <section className="cards">
@@ -2050,6 +2092,27 @@ function Analytics({ data }: { data: FamilyData }) {
             </tbody>
           </table>
         </div>
+      </section>
+      <section className="panel account-history">
+        <h2>Acumulado por conta e cartão</h2>
+        <p className="muted">Valores no período e modo selecionados.</p>
+        <div className="account-ranking">
+          {accountRows.map((row) => (
+            <div key={row.account.id}>
+              <label>
+                <span>
+                  {row.account.name}
+                  <small>
+                    {row.account.institution} · {row.account.operator}
+                  </small>
+                </span>
+                <b>{money(row.actual)}</b>
+              </label>
+              <progress value={row.actual} max={accountRows[0]?.actual || 1} />
+            </div>
+          ))}
+        </div>
+        {!accountRows.length && <Empty />}
       </section>
     </>
   );
