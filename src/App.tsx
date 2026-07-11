@@ -27,6 +27,7 @@ import {
   Member,
   Obligation,
   Receipt,
+  Chore,
   Task,
   Transaction,
   audit,
@@ -70,6 +71,7 @@ type Page =
   | "painel"
   | "importar"
   | "notas"
+  | "casa"
   | "transacoes"
   | "orcamento"
   | "pagamentos"
@@ -81,6 +83,7 @@ const nav: [Page, string, typeof BarChart3][] = [
   ["painel", "Painel", BarChart3],
   ["importar", "Importar", Upload],
   ["notas", "Notas e compras", ReceiptText],
+  ["casa", "Responsabilidades", CheckSquare],
   ["transacoes", "Transações", Tags],
   ["orcamento", "Orçamentos", WalletCards],
   ["pagamentos", "Pagamentos", ReceiptText],
@@ -309,6 +312,7 @@ export default function App() {
           <ImportPage data={data} mutate={mutate} setMessage={setMessage} />
         )}{" "}
         {page === "notas" && <Receipts data={data} mutate={mutate} setMessage={setMessage} />}{" "}
+        {page === "casa" && <Chores data={data} mutate={mutate} />}{" "}
         {page === "transacoes" && (
           <Transactions data={data} month={month} mutate={mutate} />
         )}{" "}
@@ -566,12 +570,23 @@ function BudgetBars({
   );
 }
 
+const initialChores=["Varrer a casa","Passar pano","Lavar roupa","Estender roupa","Lavar louça","Comprar comida","Passear com a cachorra","Colocar comida para a cachorra","Cozinhar"];
+function Chores({data,mutate}:{data:FamilyData;mutate:(f:(d:FamilyData)=>void)=>void}){
+  const [editing,setEditing]=useState<Chore>();
+  useEffect(()=>{if(data.chores===undefined)mutate(d=>{d.chores=initialChores.map(title=>({...audit(),title,assignee:"Ambos",frequency:"weekly",active:true,completionHistory:[]}))})},[data.chores]);
+  const submit=(event:React.FormEvent<HTMLFormElement>)=>{event.preventDefault();const fd=new FormData(event.currentTarget);const values={title:String(fd.get("title")),assignee:String(fd.get("assignee")) as Member,frequency:String(fd.get("frequency")) as Chore["frequency"]};mutate(d=>{d.chores??=[];if(editing){const item=d.chores.find(x=>x.id===editing.id);if(item)Object.assign(item,values,{updatedAt:now(),version:item.version+1})}else d.chores.push({...audit(),...values,active:true,completionHistory:[]})});setEditing(undefined);event.currentTarget.reset()};
+  const frequency=(value:Chore["frequency"])=>({daily:"Diária",weekly:"Semanal",monthly:"Mensal",as_needed:"Quando necessário"})[value];
+  return <section className="grid two"><div className="panel"><h2>{editing?"Editar responsabilidade":"Nova responsabilidade"}</h2><form key={editing?.id||"new"} onSubmit={submit}><div className="form-stack"><input name="title" required placeholder="Tarefa doméstica" defaultValue={editing?.title}/><select name="assignee" defaultValue={editing?.assignee||"Ambos"}><option>Olcino</option><option>Mari</option><option>Ambos</option></select><select name="frequency" defaultValue={editing?.frequency||"weekly"}><option value="daily">Diária</option><option value="weekly">Semanal</option><option value="monthly">Mensal</option><option value="as_needed">Quando necessário</option></select><div className="actions"><button className="primary" type="submit">{editing?"Salvar alteração":"Adicionar"}</button>{editing&&<button type="button" onClick={()=>setEditing(undefined)}>Cancelar</button>}</div></div></form></div><div className="panel"><h2>Responsabilidades da casa</h2>{(data.chores||[]).map(item=><div className="budget-item" key={item.id}><div><b>{item.title}</b><small>{item.assignee} · {frequency(item.frequency)}{item.lastCompletedAt?` · feita em ${item.lastCompletedAt.slice(0,10)}`:""}</small></div><div className="actions"><button title="Marcar como feita" onClick={()=>mutate(d=>{const x=d.chores?.find(c=>c.id===item.id);if(x){const date=now();x.lastCompletedAt=date;x.completionHistory.push(date)}})}><CheckCircle2 size={16}/></button><button onClick={()=>setEditing(item)}>Editar</button><button onClick={()=>mutate(d=>{d.chores=(d.chores||[]).filter(x=>x.id!==item.id)})}><Trash2 size={15}/></button></div></div>)}</div></section>;
+}
+
 function Receipts({data,mutate,setMessage}:{data:FamilyData;mutate:(f:(d:FamilyData)=>void)=>void;setMessage:(s:string)=>void}){
-  const [draft,setDraft]=useState<ReadReceipt>();const [busy,setBusy]=useState(false);const input=useRef<HTMLInputElement>(null);
+  const [draft,setDraft]=useState<ReadReceipt>();const [busy,setBusy]=useState(false);const input=useRef<HTMLInputElement>(null);const libraryInput=useRef<HTMLInputElement>(null);
   const analyze=async(file?:File)=>{if(!file)return;setBusy(true);try{setDraft(await readReceipt(file));setMessage("Nota lida. Confira os dados antes de salvar.");}catch(e){setMessage((e as Error).message)}finally{setBusy(false)}};
   const save=()=>{if(!draft)return;const receipt:Receipt={...audit(),store:draft.estabelecimento||"Estabelecimento não identificado",date:draft.data||dateOnly(new Date()),total:Number(draft.total)||0,confidence:draft.confianca,notes:draft.observacoes,items:(draft.itens||[]).map(i=>({id:uid(),description:i.descricao||"Item não identificado",quantity:Number(i.quantidade)||1,unit:i.unidade,unitPrice:i.valorUnitario==null?undefined:Number(i.valorUnitario),total:Number(i.valorTotal)||0}))};mutate(d=>{(d.receipts??=[]).push(receipt)});setDraft(undefined);setMessage("Nota adicionada ao histórico. Clique em Salvar para sincronizar no OneDrive.")};
   const history=data.receipts||[];const products=Array.from(new Set(history.flatMap(r=>r.items.map(i=>i.description)))).map(name=>{const purchases=history.flatMap(r=>r.items.map(i=>({r,i}))).filter(x=>x.i.description===name);const last=purchases.sort((a,b)=>b.r.date.localeCompare(a.r.date))[0];return{name,count:purchases.length,price:last?.i.unitPrice??last?.i.total,store:last?.r.store}}).sort((a,b)=>b.count-a.count);
   return <>
+    <input ref={libraryInput} hidden type="file" accept="image/*" onChange={e=>analyze(e.target.files?.[0])}/>
+    <button className="primary" disabled={busy} onClick={()=>libraryInput.current?.click()}>{busy?"Lendo…":"Escolher foto da biblioteca"}</button>
     <section className="panel"><div className="panel-head"><div><h2>Fotografar nota de supermercado</h2><p className="muted">A fotografia é enviada ao leitor protegido e não é armazenada na base.</p></div><div className="actions"><button onClick={authorizeReceiptReader}>Autorizar leitor</button><button className="primary" disabled={busy} onClick={()=>input.current?.click()}>{busy?"Lendo…":"Escolher ou fotografar"}</button></div></div><input ref={input} hidden type="file" accept="image/*" capture="environment" onChange={e=>analyze(e.target.files?.[0])}/>
     {draft&&<div className="receipt-review"><div className="form-row"><input value={draft.estabelecimento||""} placeholder="Estabelecimento" onChange={e=>setDraft({...draft,estabelecimento:e.target.value})}/><input type="date" value={draft.data||""} onChange={e=>setDraft({...draft,data:e.target.value})}/><CurrencyInput value={Number(draft.total)||0} onChange={value=>setDraft({...draft,total:value})}/></div><h3>Itens identificados</h3>{(draft.itens||[]).map((item,index)=><div className="form-row" key={index}><input value={item.descricao||""} onChange={e=>{const itens=[...(draft.itens||[])];itens[index]={...item,descricao:e.target.value};setDraft({...draft,itens})}}/><span>{item.quantidade||1} × {money(item.valorUnitario||item.valorTotal||0)}</span></div>)}<button className="primary" onClick={save}>Confirmar e salvar nota</button></div>}
     </section>
