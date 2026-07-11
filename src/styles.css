@@ -25,6 +25,13 @@
 .receipt-item-edit { display: grid; grid-template-columns: 2fr 1.2fr repeat(4,1fr) auto; gap: .55rem; align-items: end; padding: .8rem 0; border-bottom: 1px solid var(--line); }
 .receipt-item-edit label { font-size: .72rem; color: #718078; }
 .receipt-item-edit label input { width: 100%; margin-top: .2rem; }
+.photo-progress { margin: 1rem 0; padding: .9rem; border-radius: 12px; background: #eef5f1; }
+.photo-progress-head { display: flex; align-items: center; gap: .55rem; }
+.photo-progress-head strong { margin-left: auto; }
+.photo-progress progress { width: 100%; height: 12px; margin: .65rem 0 .3rem; }
+.photo-progress small { color: #64746b; }
+.processing-dot { width: 14px; height: 14px; border: 2px solid #9eb5aa; border-top-color: var(--green); border-radius: 50%; animation: progress-spin .8s linear infinite; }
+@keyframes progress-spin { to { transform: rotate(360deg); } }
 * {
   box-sizing: border-box;
 }
