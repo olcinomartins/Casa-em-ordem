@@ -141,7 +141,7 @@ export interface ImportBatch extends Audit {
   count: number;
   duplicates: number;
 }
-export interface ReceiptItem { id:string; description:string; quantity:number; unit?:string; unitPrice?:number; total:number; }
+export interface ReceiptItem { id:string; description:string; quantity:number; unit?:string; unitPrice?:number; total:number; macroCategory?:string; }
 export interface Receipt extends Audit { store:string; date:string; total:number; confidence?:number; items:ReceiptItem[]; notes?:string[]; }
 export interface Chore extends Audit { title:string; assignee:Member; frequency:"daily"|"weekly"|"monthly"|"as_needed"; active:boolean; lastCompletedAt?:string; completionHistory:string[]; }
 export interface FamilyData {
