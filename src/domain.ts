@@ -139,6 +139,8 @@ export interface ImportBatch extends Audit {
   count: number;
   duplicates: number;
 }
+export interface ReceiptItem { id:string; description:string; quantity:number; unit?:string; unitPrice?:number; total:number; }
+export interface Receipt extends Audit { store:string; date:string; total:number; confidence?:number; items:ReceiptItem[]; notes?:string[]; }
 export interface FamilyData {
   schemaVersion: 1;
   household: { name: string; currency: "BRL"; members: Member[] };
@@ -151,6 +153,7 @@ export interface FamilyData {
   goals: Goal[];
   tasks: Task[];
   imports: ImportBatch[];
+  receipts?: Receipt[];
   lastSavedAt: string;
 }
 export const uid = () => crypto.randomUUID();
