@@ -12,7 +12,6 @@ import {
   CloudOff,
   Plus,
   Download,
-  Save,
   Trash2,
   CheckCircle2,
   TrendingUp,
@@ -142,18 +141,6 @@ export default function App() {
       draft.lastSavedAt = now();
       return draft;
     });
-  const sync = async () => {
-    if (!data) return;
-    try {
-      setCloud("syncing");
-      await saveCloud(data);
-      setCloud("connected");
-      setMessage("Base salva no OneDrive.");
-    } catch (e) {
-      setCloud("local");
-      setMessage((e as Error).message);
-    }
-  };
   const configureShared = () => {
     const current = getCloudLocation();
     const driveId = prompt(
@@ -283,9 +270,6 @@ export default function App() {
             {page === "planejamento" && (
               <button onClick={configureShared}>Base compartilhada</button>
             )}
-            <button className="primary" onClick={sync}>
-              <Save size={17} /> Salvar
-            </button>
           </div>
         </header>
         {message && (
