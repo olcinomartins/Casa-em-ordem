@@ -18,6 +18,8 @@ import {
   Eye,
   EyeOff,
   ShoppingCart,
+  Mic,
+  Square,
 } from "lucide-react";
 import {
   Account,
@@ -62,10 +64,12 @@ import {
   realized,
   recurringCheck,
   upsertRule,
+  dedupeKey,
 } from "./finance";
 import { previewFile, Preview } from "./importer";
 import { tasksToIcs } from "./ics";
 import { readReceipt, ReadReceipt } from "./receipts";
+import { readVoiceExpense, VoiceTransaction } from "./voice";
 
 type Page = "visao" | "rotinas" | "planejamento" | "importar" | "supermercado";
 const nav: [Page, string, typeof BarChart3][] = [
@@ -280,7 +284,7 @@ export default function App() {
         {page === "visao" && <><Collapsible title="Painel" open><Dashboard data={data} month={month} view={view} setView={setView} /></Collapsible><Collapsible title="Análises históricas"><Analytics data={data} /></Collapsible></>}
         {page === "rotinas" && <><Collapsible title="Responsabilidades, tarefas e agenda" open><Tasks data={data} mutate={mutate} currentMember={currentMember} /></Collapsible><Collapsible title="Central de pagamentos"><Payments data={data} mutate={mutate} /></Collapsible></>}
         {page === "planejamento" && <><Collapsible title="Contas e cartões" open><Config mode="accounts" data={data} setData={setData} mutate={mutate} connect={connect} setMessage={setMessage} /></Collapsible><Collapsible title="Categorias de despesas e receitas"><Config mode="categories" data={data} setData={setData} mutate={mutate} connect={connect} setMessage={setMessage} /></Collapsible><Collapsible title="Orçamentos"><Budgets data={data} month={month} view={view} setView={setView} mutate={mutate} /></Collapsible><Collapsible title="Metas e reservas"><Goals data={data} mutate={mutate} /></Collapsible></>}
-        {page === "importar" && <><Collapsible title="Importar extratos e faturas" open><ImportPage data={data} mutate={mutate} setMessage={setMessage} /></Collapsible><Collapsible title="Transações e revisão"><Transactions data={data} month={month} mutate={mutate} /></Collapsible></>}
+        {page === "importar" && <><Collapsible title="Registrar despesa por voz" open><VoiceExpense data={data} mutate={mutate} setMessage={setMessage} currentMember={currentMember}/></Collapsible><Collapsible title="Importar extratos e faturas"><ImportPage data={data} mutate={mutate} setMessage={setMessage} /></Collapsible><Collapsible title="Transações e revisão"><Transactions data={data} month={month} mutate={mutate} /></Collapsible></>}
         {page === "supermercado" && <Receipts data={data} mutate={mutate} setMessage={setMessage} />}
       </main>
     </div>
@@ -542,6 +546,14 @@ function Receipts({data,mutate,setMessage}:{data:FamilyData;mutate:(f:(d:FamilyD
     <section className="panel"><h2>Sugestões para a lista de compras</h2><p className="muted">Calculadas silenciosamente pelas datas e quantidades salvas na base.</p>{products.filter(p=>p.next).map(p=><Row key={p.name} a={p.name} b={`${p.category} · comprar cerca de ${p.averageQuantity.toFixed(1)} un. · intervalo médio ${p.averageDays} dias`} c={p.next||"—"}/>)}</section>
     <section className="panel"><h2>Produtos e valores médios</h2><p className="muted">Catálogo consolidado por categoria, sem exibir as notas individuais.</p>{products.length?products.map(p=><Row key={p.name} a={p.name} b={`${p.category} · ${p.count} ocorrência(s) · quantidade média ${p.averageQuantity.toFixed(1)} · último local: ${p.store||"não identificado"}`} c={p.price==null?"—":`${money(p.price)} médio`}/>):<Empty/>}</section>
   </>;
+}
+
+function VoiceExpense({data,mutate,setMessage,currentMember}:{data:FamilyData;mutate:(f:(d:FamilyData)=>void)=>void;setMessage:(s:string)=>void;currentMember:"Olcino"|"Mari"}){
+  const [recording,setRecording]=useState(false);const [processing,setProcessing]=useState(false);const [draft,setDraft]=useState<VoiceTransaction>();const recorder=useRef<MediaRecorder>();const stream=useRef<MediaStream>();const chunks=useRef<Blob[]>([]);
+  const start=async()=>{try{const media=await navigator.mediaDevices.getUserMedia({audio:true});stream.current=media;const preferred=["audio/mp4","audio/webm;codecs=opus","audio/webm"].find(type=>MediaRecorder.isTypeSupported(type));const active=new MediaRecorder(media,preferred?{mimeType:preferred}:undefined);recorder.current=active;chunks.current=[];active.ondataavailable=e=>{if(e.data.size)chunks.current.push(e.data)};active.onstop=async()=>{media.getTracks().forEach(track=>track.stop());setProcessing(true);try{setDraft(await readVoiceExpense(new Blob(chunks.current,{type:active.mimeType})));setMessage("Áudio interpretado. Confira antes de registrar.")}catch(error){setMessage((error as Error).message)}finally{setProcessing(false)}};active.start();setRecording(true)}catch{setMessage("Não foi possível acessar o microfone. Autorize o acesso no navegador.")}};
+  const stop=()=>{recorder.current?.stop();setRecording(false)};
+  const save=async()=>{if(!draft?.descricao||!draft.valor||!draft.data)return setMessage("Confira descrição, valor e data.");const category=data.categories.find(c=>normalize(c.name).includes(normalize(draft.categoriaSugerida||"")));const account=data.accounts.find(a=>normalize(a.name).includes(normalize(draft.contaOuCartaoSugerido||"")))||data.accounts[0];if(!account)return setMessage("Cadastre uma conta ou cartão antes de registrar.");const amount=draft.tipo==="receita"?-Math.abs(Number(draft.valor)):Math.abs(Number(draft.valor));const base={...audit(currentMember),date:draft.data,competence:monthOf(draft.data),purchaseDate:draft.data,paymentDate:draft.data,description:draft.descricao,normalized:normalize(draft.descricao),amount,accountId:account.id,operator:currentMember,scope:(draft.escopoSugerido==="Familiar"?"Familiar":`Pessoal — ${currentMember}`) as Transaction["scope"],categoryId:category?.id,subcategory:draft.subcategoriaSugerida,classification:"suggested" as const,installments:draft.parcelas||1,transfer:draft.tipo==="transferência",movement:draft.tipo==="aporte"?("reserve" as const):draft.tipo==="transferência"?("transfer" as const):("expense_income" as const),sourceKind:"card" as const,dedupeKey:"",estimated:true,notes:`Estimativa por voz: ${draft.transcricao||""}`};base.dedupeKey=await dedupeKey(base);mutate(d=>d.transactions.push(base));setDraft(undefined);setMessage("Estimativa registrada e incluída no acompanhamento do mês.")};
+  return <section className="panel"><div className="panel-head"><div><h2>Registrar por voz</h2><p className="muted">Fale valor, estabelecimento, data, cartão e categoria. O lançamento será uma estimativa editável.</p></div><button className={recording?"danger-button":"primary"} disabled={processing} onClick={recording?stop:start}>{recording?<><Square size={17}/> Parar</>:<><Mic size={17}/> {processing?"Processando…":"Gravar"}</>}</button></div>{recording&&<div className="voice-recording"><span/>Gravando… fale a despesa e toque em Parar.</div>}{draft&&<div className="form-stack"><textarea value={draft.transcricao||""} onChange={e=>setDraft({...draft,transcricao:e.target.value})}/><input value={draft.descricao||""} placeholder="Descrição" onChange={e=>setDraft({...draft,descricao:e.target.value})}/><input type="date" value={draft.data||""} onChange={e=>setDraft({...draft,data:e.target.value})}/><CurrencyInput value={Number(draft.valor)||0} onChange={valor=>setDraft({...draft,valor})}/><select value={draft.tipo||"despesa"} onChange={e=>setDraft({...draft,tipo:e.target.value as VoiceTransaction["tipo"]})}><option value="despesa">Despesa</option><option value="receita">Receita</option><option value="transferência">Transferência</option><option value="aporte">Aporte</option></select><input value={draft.categoriaSugerida||""} placeholder="Categoria sugerida" onChange={e=>setDraft({...draft,categoriaSugerida:e.target.value})}/><input value={draft.contaOuCartaoSugerido||""} placeholder="Conta ou cartão" onChange={e=>setDraft({...draft,contaOuCartaoSugerido:e.target.value})}/><button className="primary" onClick={save}>Confirmar estimativa</button></div>}</section>;
 }
 
 function ImportPage({

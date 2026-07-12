@@ -32,6 +32,9 @@
 .photo-progress small { color: #64746b; }
 .processing-dot { width: 14px; height: 14px; border: 2px solid #9eb5aa; border-top-color: var(--green); border-radius: 50%; animation: progress-spin .8s linear infinite; }
 @keyframes progress-spin { to { transform: rotate(360deg); } }
+.voice-recording { display: flex; align-items: center; gap: .55rem; padding: .8rem; margin: .8rem 0; border-radius: 10px; background: #fff1ef; color: #9b382d; }
+.voice-recording span { width: 12px; height: 12px; border-radius: 50%; background: #d64550; animation: voice-pulse 1s ease-in-out infinite; }
+@keyframes voice-pulse { 50% { transform: scale(1.45); opacity: .45; } }
 * {
   box-sizing: border-box;
 }

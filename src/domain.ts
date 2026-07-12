@@ -50,6 +50,7 @@ export interface Transaction extends Audit {
   movement?: "expense_income" | "reserve" | "transfer";
   sourceKind?: "card" | "statement";
   notes?: string;
+  estimated?: boolean;
 }
 export interface Rule extends Audit {
   pattern: string;
