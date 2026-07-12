@@ -1421,6 +1421,7 @@ function VoiceExpense({
       )}
       {draft && (
         <div className="form-stack">
+          <h3>Revise o lançamento antes de confirmar</h3>
           <textarea
             value={draft.transcricao || ""}
             onChange={(e) =>
@@ -1707,11 +1708,12 @@ function Transactions({
           <div className={`transaction-edit ${t.classification==="confirmed"?"confirmed-item":""}`} key={t.id}>
             <input type="checkbox" checked={selected.has(t.id)} onChange={e=>setSelected(current=>{const next=new Set(current);e.target.checked?next.add(t.id):next.delete(t.id);return next})}/>
             <div className="tx-main">
-              <b>{t.description}</b>
-              <small>
-                {t.date} · {money(t.amount)}
-              </small>
+              <input value={t.description} onChange={e=>update(t.id,{description:e.target.value,normalized:normalize(e.target.value)})}/>
+              <div className="tx-core-fields"><input type="date" value={t.date} onChange={e=>update(t.id,{date:e.target.value,paymentDate:e.target.value,competence:monthOf(e.target.value)})}/><CurrencyInput value={Math.abs(t.amount)} onChange={value=>update(t.id,{amount:t.amount<0?-Math.abs(value):Math.abs(value)})}/></div>
+              <small>{t.estimated?"Estimativa por voz · ":""}{t.classification==="confirmed"?"Confirmado":"Em revisão"}</small>
             </div>
+            <select value={t.accountId} onChange={e=>update(t.id,{accountId:e.target.value})}>{data.accounts.filter(account=>account.active).map(account=><option key={account.id} value={account.id}>{account.institution} · {account.name}</option>)}</select>
+            <select value={t.operator} onChange={e=>update(t.id,{operator:e.target.value as Member})}><option>Olcino</option><option>Mari</option><option>Ambos</option></select>
             <select
               value={t.categoryId || ""}
               onChange={(e) => {

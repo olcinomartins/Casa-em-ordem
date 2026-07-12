@@ -397,7 +397,7 @@ th {
 }
 .transaction-edit {
   display: grid;
-  grid-template-columns: auto 1.7fr 1fr 1fr 1fr auto auto;
+  grid-template-columns: auto 1.7fr 1fr 1fr 1fr 1fr 1fr auto auto;
   gap: 0.5rem;
   align-items: center;
   padding: 0.65rem 0;
@@ -407,6 +407,8 @@ th {
   display: block;
   color: #718078;
 }
+.tx-main > input { width: 100%; font-weight: 600; }
+.tx-core-fields { display: grid; grid-template-columns: 1fr 1fr; gap: .35rem; margin-top: .35rem; }
 .icon {
   padding: 0.5rem;
 }
