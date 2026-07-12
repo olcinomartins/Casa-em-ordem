@@ -530,6 +530,7 @@ function Dashboard({
           label="Renda familiar"
           value={money(income)}
           hint="Entradas líquidas no mês"
+          tone="good"
         />
         <Card
           label="Despesas no fluxo"
@@ -539,6 +540,7 @@ function Dashboard({
               ? `Integral: ${money(expenses("accrual"))}`
               : "Conforme pagamentos"
           }
+          tone="bad"
         />
         <Card
           label="Resultado de caixa"
@@ -549,9 +551,11 @@ function Dashboard({
         <Card
           label="Estimativa antes do fechamento"
           value={money(expenses("cash") + expectedBeforeClosing)}
-          hint={`${money(expenses("cash"))} confirmado · ${money(expectedBeforeClosing)} previsto`}
+          hint={`${money(expenses("cash"))} realizado · ${money(expectedBeforeClosing)} ainda previsto`}
+          tone="warning"
         />
       </section>
+      <details className="estimate-breakdown"><summary>Entender a estimativa de {money(expenses("cash")+expectedBeforeClosing)}</summary><p>É a soma das despesas realizadas com os compromissos ainda previstos para {month}. Não representa o saldo bancário nem uma fatura já fechada.</p>{data.obligations.filter(o=>monthOf(o.dueDate)===month&&!['Paga','Dispensada'].includes(o.status)).sort((a,b)=>a.dueDate.localeCompare(b.dueDate)).map(o=><Row key={o.id} a={o.name} b={`${o.dueDate} · ${o.status}`} c={money(o.planned)}/>)}</details>
       <section className="grid two">
         <div className="panel">
           <h2>Orçado × realizado</h2>
@@ -644,7 +648,7 @@ function Card({
   return (
     <div className={`card ${tone || ""}`}>
       <span>{label}</span>
-      <strong>{value}</strong>
+      <strong>{tone==="good"?"↑ ":tone==="bad"?"↓ ":tone==="warning"?"→ ":""}{value}</strong>
       <small>{hint}</small>
     </div>
   );

@@ -211,9 +211,16 @@ header p,
 .card.good {
   border-top: 3px solid var(--sage);
 }
+.card.good strong { color: #39745c; }
 .card.bad {
   border-top: 3px solid var(--red);
 }
+.card.bad strong { color: var(--red); }
+.card.warning { border-top: 3px solid #d3a153; }
+.card.warning strong { color: #9a6a1f; }
+.estimate-breakdown { margin: 1rem 0; border: 1px solid #dbc28f; border-radius: 14px; overflow: hidden; }
+.estimate-breakdown > summary { cursor: pointer; padding: .85rem 1rem; font-weight: 700; color: #77541d; background: #fff7e7; }
+.estimate-breakdown > p, .estimate-breakdown > .row { margin-left: 1rem; margin-right: 1rem; }
 .grid {
   display: grid;
   gap: 1rem;

@@ -180,8 +180,8 @@ export const normalize = (s: string) =>
     .replace(/[^A-Z0-9]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
-export const money = (v: number) =>
-  new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(
-    v,
-  );
+export const money = (v: number) => {
+  const formatted=new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL"}).format(Math.abs(v));
+  return v<0?`(${formatted})`:formatted;
+};
 export const monthOf = (d: string) => d.slice(0, 7);
