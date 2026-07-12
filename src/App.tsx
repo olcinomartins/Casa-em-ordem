@@ -1363,7 +1363,7 @@ function VoiceExpense({
       scope: (["Familiar","Pessoal — Olcino","Pessoal — Mari","Transferência interna","Fora do orçamento"].includes(draft.escopoSugerido||"")?draft.escopoSugerido:"Familiar") as Transaction["scope"],
       categoryId: category?.id,
       subcategory: draft.subcategoriaSugerida,
-      classification: "suggested" as const,
+      classification: "confirmed" as const,
       installments: draft.parcelas || 1,
       transfer: draft.tipo === "transferência",
       movement:
@@ -1629,7 +1629,7 @@ function Transactions({
   month: string;
   mutate: (f: (d: FamilyData) => void) => void;
 }) {
-  const [filter, setFilter] = useState("all");
+  const [filter, setFilter] = useState("review");
   const [selected,setSelected]=useState<Set<string>>(new Set());
   const [bulkCategory,setBulkCategory]=useState("");
   const undoTransactions=useRef<Transaction[]>();
@@ -1643,7 +1643,7 @@ function Transactions({
     (t) =>
       t.date >= startDate &&
       t.date <= endDate &&
-      (filter === "all" || t.classification === filter),
+      (filter === "all" || (filter==="review"?t.classification!=="confirmed":t.classification === filter)),
   );
   const update = (id: string, patch: Partial<Transaction>, learn = false) =>
     mutate((d) => {
@@ -1676,10 +1676,11 @@ function Transactions({
           </p>
         </div>
         <select value={filter} onChange={(e) => setFilter(e.target.value)}>
-          <option value="all">Todos</option>
+          <option value="review">A revisar</option>
           <option value="pending">Pendentes</option>
           <option value="suggested">Sugeridos</option>
           <option value="confirmed">Confirmados</option>
+          <option value="all">Todos</option>
         </select>
       </div>
       <div className="form-row date-range">
@@ -1703,7 +1704,7 @@ function Transactions({
       <div className="bulk-toolbar"><label><input type="checkbox" checked={rows.length>0&&selectedRows.length===rows.length} onChange={e=>setSelected(e.target.checked?new Set(rows.map(row=>row.id)):new Set())}/> Selecionar todos os filtrados</label><b>{selectedRows.length} selecionado(s) · {money(selectedRows.reduce((sum,row)=>sum+Math.abs(row.amount),0))}</b><button onClick={()=>bulkApply("confirm")}>Confirmar em massa</button><select value={bulkCategory} onChange={e=>setBulkCategory(e.target.value)}><option value="">Categoria em massa</option>{data.categories.map(category=><option key={category.id} value={category.id}>{category.name}</option>)}</select><button disabled={!bulkCategory} onClick={()=>bulkApply("category")}>Aplicar categoria</button><button className="danger-button" onClick={()=>bulkApply("delete")}>Excluir selecionados</button>{undoTransactions.current&&<button onClick={undoBulk}>Desfazer última operação</button>}</div>
       <div className="transaction-list">
         {rows.map((t) => (
-          <div className="transaction-edit" key={t.id}>
+          <div className={`transaction-edit ${t.classification==="confirmed"?"confirmed-item":""}`} key={t.id}>
             <input type="checkbox" checked={selected.has(t.id)} onChange={e=>setSelected(current=>{const next=new Set(current);e.target.checked?next.add(t.id):next.delete(t.id);return next})}/>
             <div className="tx-main">
               <b>{t.description}</b>
@@ -1757,15 +1758,7 @@ function Transactions({
               <option>Transferência interna</option>
               <option>Fora do orçamento</option>
             </select>
-            <button
-              title="Confirmar e aprender"
-              className="icon"
-              onClick={() =>
-                update(t.id, { classification: "confirmed" }, true)
-              }
-            >
-              <CheckCircle2 />
-            </button>
+            {t.classification!=="confirmed"?<button title="Confirmar e aprender" className="icon" onClick={()=>update(t.id,{classification:"confirmed"},true)}><CheckCircle2/></button>:<button title="Desconfirmar" onClick={()=>update(t.id,{classification:"suggested"})}>Desconfirmar</button>}
             <button
               title="Excluir lançamento"
               className="icon danger-button transaction-delete"
@@ -2098,6 +2091,7 @@ function Payments({
       <div className="payment-grid">
         {data.obligations
           .slice()
+          .filter(o=>!["Paga","Confirmada","Dispensada"].includes(o.status))
           .sort((a, b) => a.dueDate.localeCompare(b.dueDate))
           .map((o) => {
             const actual = o.pattern
@@ -2136,6 +2130,7 @@ function Payments({
             );
           })}
       </div>
+      <details className="completed-block"><summary>Pagamentos confirmados ({data.obligations.filter(o=>["Paga","Confirmada","Dispensada"].includes(o.status)).length})</summary>{data.obligations.filter(o=>["Paga","Confirmada","Dispensada"].includes(o.status)).sort((a,b)=>b.dueDate.localeCompare(a.dueDate)).map(o=><div className="confirmed-row" key={o.id}><div><b>{o.name}</b><small>{o.dueDate} · {money(o.paidAmount??o.planned)} · {o.status}</small></div><button onClick={()=>mutate(d=>{const item=d.obligations.find(x=>x.id===o.id);if(item){item.status="A pagar";item.paidAt=undefined;item.paidAmount=undefined}})}>Desconfirmar</button></div>)}</details>
       {!data.obligations.length && <Empty />}
     </section>
   );
@@ -2481,6 +2476,8 @@ function Tasks({
     .filter((t) => t.status !== "Concluída")
     .slice()
     .sort((a, b) => a.due.localeCompare(b.due));
+  const completedOccurrences=data.tasks.flatMap(task=>task.history.map((completedAt,index)=>({task,completedAt,index}))).sort((a,b)=>b.completedAt.localeCompare(a.completedAt));
+  const undoCompletion=(taskId:string,index:number,completedAt:string)=>mutate(d=>{const task=d.tasks.find(item=>item.id===taskId);if(!task)return;task.history.splice(index,1);task.status="Pendente";task.due=completedAt;task.updatedAt=now();task.version++});
   const dayNames = ["dom", "seg", "ter", "qua", "qui", "sex", "sáb"];
   const renderTasks = (items: Task[]) => (
     <div className="task-list">
@@ -2599,6 +2596,7 @@ function Tasks({
           (t) => t.assignee !== currentMember && t.assignee !== "Ambos",
         ),
       )}
+      <details className="completed-block"><summary>Concluídas ({completedOccurrences.length})</summary>{completedOccurrences.map(item=><div className="confirmed-row" key={`${item.task.id}-${item.completedAt}`}><div><b>{item.task.title}</b><small>{new Date(item.completedAt).toLocaleString("pt-BR")} · {item.task.assignee}</small></div><button onClick={()=>undoCompletion(item.task.id,item.index,item.completedAt)}>Desfazer conclusão</button></div>)}</details>
     </section>
   );
 }

@@ -417,6 +417,11 @@ th {
 .bulk-toolbar label { display: flex; align-items: center; gap: .35rem; }
 .bulk-category { display: grid; gap: .55rem; padding: .8rem; margin-bottom: 1rem; border: 1px solid var(--line); border-radius: 12px; }
 .bulk-category textarea { width: 100%; resize: vertical; }
+.confirmed-item, .confirmed-row { background: #e7f4eb; border-color: #a7cfb3 !important; }
+.completed-block { margin-top: 1rem; border: 1px solid #a7cfb3; border-radius: 12px; overflow: hidden; }
+.completed-block > summary { cursor: pointer; padding: .8rem; font-weight: 700; color: #24613a; background: #e7f4eb; }
+.confirmed-row { display: flex; justify-content: space-between; align-items: center; gap: .7rem; padding: .75rem; border-bottom: 1px solid #c9e3d0; }
+.confirmed-row small { display: block; color: #52705b; }
 .budget-line {
   display: flex;
   align-items: center;
