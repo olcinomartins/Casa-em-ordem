@@ -35,6 +35,12 @@
 .voice-recording { display: flex; align-items: center; gap: .55rem; padding: .8rem; margin: .8rem 0; border-radius: 10px; background: #fff1ef; color: #9b382d; }
 .voice-recording span { width: 12px; height: 12px; border-radius: 50%; background: #d64550; animation: voice-pulse 1s ease-in-out infinite; }
 @keyframes voice-pulse { 50% { transform: scale(1.45); opacity: .45; } }
+.voice-checklist { display: flex; flex-wrap: wrap; gap: .45rem; margin: .8rem 0; }
+.voice-checklist b { width: 100%; }
+.voice-checklist span { background: #eef3ef; border-radius: 999px; padding: .35rem .6rem; font-size: .78rem; }
+.voice-live { padding: .9rem; border-radius: 12px; background: #fff1ef; color: #8c3c32; }
+.voice-wave { height: 58px; display: flex; align-items: center; justify-content: center; gap: 3px; margin-bottom: .4rem; }
+.voice-wave i { display: block; width: 4px; min-height: 3px; max-height: 52px; border-radius: 4px; background: #d64550; transition: height .08s linear; }
 * {
   box-sizing: border-box;
 }

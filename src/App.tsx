@@ -85,7 +85,9 @@ const dateOnly = (d: Date) => d.toISOString().slice(0, 10);
 export default function App() {
   const [data, setData] = useState<FamilyData>();
   const [authenticated, setAuthenticated] = useState(false);
-  const [currentMember, setCurrentMember] = useState<"Olcino"|"Mari">("Olcino");
+  const [currentMember, setCurrentMember] = useState<"Olcino" | "Mari">(
+    "Olcino",
+  );
   const [authError, setAuthError] = useState("");
   const [authBusy, setAuthBusy] = useState(false);
   const [hideValues, setHideValues] = useState(
@@ -101,8 +103,52 @@ export default function App() {
   useEffect(() => {
     if (authenticated && data) saveLocal(data);
   }, [authenticated, data]);
-  const autosaveReady=useRef(false);
-  useEffect(()=>{if(!authenticated||!data)return;if(!autosaveReady.current){autosaveReady.current=true;return}setCloud("syncing");const timer=window.setTimeout(()=>{saveCloud(data).then(()=>setCloud("connected")).catch(error=>{setCloud("local");setMessage(`Falha no salvamento automático: ${(error as Error).message}`)})},1200);return()=>window.clearTimeout(timer)},[authenticated,data]);
+  const autosaveReady = useRef(false);
+  useEffect(() => {
+    if (!authenticated || !data) return;
+    if (!autosaveReady.current) {
+      autosaveReady.current = true;
+      return;
+    }
+    setCloud("syncing");
+    const timer = window.setTimeout(() => {
+      saveCloud(data)
+        .then(() => setCloud("connected"))
+        .catch((error) => {
+          setCloud("local");
+          setMessage(
+            `Falha no salvamento automático: ${(error as Error).message}`,
+          );
+        });
+    }, 1200);
+    return () => window.clearTimeout(timer);
+  }, [authenticated, data]);
+  useEffect(() => {
+    if (!authenticated) return;
+    const refresh = () => {
+      if (document.visibilityState !== "visible") return;
+      loadCloud()
+        .then((remote) => {
+          if (remote)
+            setData((current) =>
+              !current || remote.lastSavedAt > current.lastSavedAt
+                ? remote
+                : current,
+            );
+        })
+        .catch((error) =>
+          setMessage(
+            `Não foi possível atualizar do OneDrive: ${(error as Error).message}`,
+          ),
+        );
+    };
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, [authenticated]);
   const allowAccount = async (account: { username: string }) => {
     const email = account.username.toLowerCase();
     const allowed = String(import.meta.env.VITE_ALLOWED_EMAILS || "")
@@ -114,9 +160,15 @@ export default function App() {
       await signOut();
       throw new Error(`O e-mail ${email} não está autorizado.`);
     }
-    setCurrentMember(email === "mariana_camillie@hotmail.com" ? "Mari" : "Olcino");
+    setCurrentMember(
+      email === "mariana_camillie@hotmail.com" ? "Mari" : "Olcino",
+    );
     const remote = await loadCloud();
-    setData(remote ?? (await loadLocal()));
+    if (!remote)
+      throw new Error(
+        "A base familiar do OneDrive não foi encontrada. O aplicativo não abrirá uma cópia local antiga.",
+      );
+    setData(remote);
     setAuthenticated(true);
     setCloud("connected");
   };
@@ -223,7 +275,9 @@ export default function App() {
           ))}
         </nav>
         <div className="aside-foot">
-          <button onClick={isConfigured() ? connect : () => setPage("planejamento")}>
+          <button
+            onClick={isConfigured() ? connect : () => setPage("planejamento")}
+          >
             {cloud === "connected" ? (
               <Cloud size={18} />
             ) : (
@@ -281,18 +335,115 @@ export default function App() {
             {message}
           </div>
         )}
-        {page === "visao" && <><Collapsible title="Painel" open><Dashboard data={data} month={month} view={view} setView={setView} /></Collapsible><Collapsible title="Análises históricas"><Analytics data={data} /></Collapsible></>}
-        {page === "rotinas" && <><Collapsible title="Responsabilidades, tarefas e agenda" open><Tasks data={data} mutate={mutate} currentMember={currentMember} /></Collapsible><Collapsible title="Central de pagamentos"><Payments data={data} mutate={mutate} /></Collapsible></>}
-        {page === "planejamento" && <><Collapsible title="Contas e cartões" open><Config mode="accounts" data={data} setData={setData} mutate={mutate} connect={connect} setMessage={setMessage} /></Collapsible><Collapsible title="Categorias de despesas e receitas"><Config mode="categories" data={data} setData={setData} mutate={mutate} connect={connect} setMessage={setMessage} /></Collapsible><Collapsible title="Orçamentos"><Budgets data={data} month={month} view={view} setView={setView} mutate={mutate} /></Collapsible><Collapsible title="Metas e reservas"><Goals data={data} mutate={mutate} /></Collapsible></>}
-        {page === "importar" && <><Collapsible title="Registrar despesa por voz" open><VoiceExpense data={data} mutate={mutate} setMessage={setMessage} currentMember={currentMember}/></Collapsible><Collapsible title="Importar extratos e faturas"><ImportPage data={data} mutate={mutate} setMessage={setMessage} /></Collapsible><Collapsible title="Transações e revisão"><Transactions data={data} month={month} mutate={mutate} /></Collapsible></>}
-        {page === "supermercado" && <Receipts data={data} mutate={mutate} setMessage={setMessage} />}
+        {page === "visao" && (
+          <>
+            <Collapsible title="Painel" open>
+              <Dashboard
+                data={data}
+                month={month}
+                view={view}
+                setView={setView}
+              />
+            </Collapsible>
+            <Collapsible title="Análises históricas">
+              <Analytics data={data} />
+            </Collapsible>
+          </>
+        )}
+        {page === "rotinas" && (
+          <>
+            <Collapsible title="Responsabilidades, tarefas e agenda" open>
+              <Tasks
+                data={data}
+                mutate={mutate}
+                currentMember={currentMember}
+              />
+            </Collapsible>
+            <Collapsible title="Central de pagamentos">
+              <Payments data={data} mutate={mutate} />
+            </Collapsible>
+          </>
+        )}
+        {page === "planejamento" && (
+          <>
+            <Collapsible title="Contas e cartões" open>
+              <Config
+                mode="accounts"
+                data={data}
+                setData={setData}
+                mutate={mutate}
+                connect={connect}
+                setMessage={setMessage}
+              />
+            </Collapsible>
+            <Collapsible title="Categorias de despesas e receitas">
+              <Config
+                mode="categories"
+                data={data}
+                setData={setData}
+                mutate={mutate}
+                connect={connect}
+                setMessage={setMessage}
+              />
+            </Collapsible>
+            <Collapsible title="Orçamentos">
+              <Budgets
+                data={data}
+                month={month}
+                view={view}
+                setView={setView}
+                mutate={mutate}
+              />
+            </Collapsible>
+            <Collapsible title="Metas e reservas">
+              <Goals data={data} mutate={mutate} />
+            </Collapsible>
+          </>
+        )}
+        {page === "importar" && (
+          <>
+            <Collapsible title="Registrar despesa por voz" open>
+              <VoiceExpense
+                data={data}
+                mutate={mutate}
+                setMessage={setMessage}
+                currentMember={currentMember}
+              />
+            </Collapsible>
+            <Collapsible title="Importar extratos e faturas">
+              <ImportPage data={data} mutate={mutate} setMessage={setMessage} />
+            </Collapsible>
+            <Collapsible title="Transações e revisão">
+              <Transactions data={data} month={month} mutate={mutate} />
+            </Collapsible>
+          </>
+        )}
+        {page === "supermercado" && (
+          <Receipts data={data} mutate={mutate} setMessage={setMessage} />
+        )}
       </main>
     </div>
   );
 }
 
-function Collapsible({title,open=false,children}:{title:string;open?:boolean;children:React.ReactNode}) {
-  return <details className="collapsible" open={open}><summary>{title}<span aria-hidden="true">⌄</span></summary><div className="collapsible-content">{children}</div></details>;
+function Collapsible({
+  title,
+  open = false,
+  children,
+}: {
+  title: string;
+  open?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <details className="collapsible" open={open}>
+      <summary>
+        {title}
+        <span aria-hidden="true">⌄</span>
+      </summary>
+      <div className="collapsible-content">{children}</div>
+    </details>
+  );
 }
 
 function ViewSwitch({
@@ -361,7 +512,13 @@ function Dashboard({
       !["Paga", "Confirmada", "Dispensada"].includes(o.status) &&
       o.dueDate <= dateOnly(new Date(Date.now() + 14 * 864e5)),
   ).length;
-  const expectedBeforeClosing=data.obligations.filter(o=>monthOf(o.dueDate)===month&&!['Paga','Confirmada','Dispensada'].includes(o.status)).reduce((sum,o)=>sum+o.planned,0);
+  const expectedBeforeClosing = data.obligations
+    .filter(
+      (o) =>
+        monthOf(o.dueDate) === month &&
+        !["Paga", "Confirmada", "Dispensada"].includes(o.status),
+    )
+    .reduce((sum, o) => sum + o.planned, 0);
   return (
     <>
       <div className="toolbar">
@@ -388,17 +545,29 @@ function Dashboard({
           hint="Antes dos aportes"
           tone={income - expenses("cash") < 0 ? "bad" : "good"}
         />
-        <Card label="Estimativa antes do fechamento" value={money(expenses("cash")+expectedBeforeClosing)} hint={`${money(expenses("cash"))} confirmado · ${money(expectedBeforeClosing)} previsto`} />
+        <Card
+          label="Estimativa antes do fechamento"
+          value={money(expenses("cash") + expectedBeforeClosing)}
+          hint={`${money(expenses("cash"))} confirmado · ${money(expectedBeforeClosing)} previsto`}
+        />
       </section>
       <section className="grid two">
         <div className="panel">
           <h2>Orçado × realizado</h2>
           {view === "compare" ? (
             <div className="grid two">
-              <div><h3>Fluxo das parcelas</h3><BudgetBars data={data} month={month} view="cash" /></div>
-              <div><h3>Compra integral</h3><BudgetBars data={data} month={month} view="accrual" /></div>
+              <div>
+                <h3>Fluxo das parcelas</h3>
+                <BudgetBars data={data} month={month} view="cash" />
+              </div>
+              <div>
+                <h3>Compra integral</h3>
+                <BudgetBars data={data} month={month} view="accrual" />
+              </div>
             </div>
-          ) : <BudgetBars data={data} month={month} view={view} />}
+          ) : (
+            <BudgetBars data={data} month={month} view={view} />
+          )}
         </div>
         <div className="panel">
           <h2>Orçamentos pessoais acumulados</h2>
@@ -519,41 +688,804 @@ function BudgetBars({
   );
 }
 
-const initialChores=["Varrer a casa","Passar pano","Lavar roupa","Estender roupa","Lavar louça","Comprar comida","Passear com a cachorra","Colocar comida para a cachorra","Cozinhar"];
-function Chores({data,mutate}:{data:FamilyData;mutate:(f:(d:FamilyData)=>void)=>void}){
-  const [editing,setEditing]=useState<Chore>();
-  useEffect(()=>{if(data.chores===undefined)mutate(d=>{d.chores=initialChores.map(title=>({...audit(),title,assignee:"Ambos",frequency:"weekly",active:true,completionHistory:[]}))})},[data.chores]);
-  const submit=(event:React.FormEvent<HTMLFormElement>)=>{event.preventDefault();const fd=new FormData(event.currentTarget);const values={title:String(fd.get("title")),assignee:String(fd.get("assignee")) as Member,frequency:String(fd.get("frequency")) as Chore["frequency"]};mutate(d=>{d.chores??=[];if(editing){const item=d.chores.find(x=>x.id===editing.id);if(item)Object.assign(item,values,{updatedAt:now(),version:item.version+1})}else d.chores.push({...audit(),...values,active:true,completionHistory:[]})});setEditing(undefined);event.currentTarget.reset()};
-  const frequency=(value:Chore["frequency"])=>({daily:"Diária",weekly:"Semanal",monthly:"Mensal",as_needed:"Quando necessário"})[value];
-  return <section className="grid two"><div className="panel"><h2>{editing?"Editar responsabilidade":"Nova responsabilidade"}</h2><form key={editing?.id||"new"} onSubmit={submit}><div className="form-stack"><input name="title" required placeholder="Tarefa doméstica" defaultValue={editing?.title}/><select name="assignee" defaultValue={editing?.assignee||"Ambos"}><option>Olcino</option><option>Mari</option><option>Ambos</option></select><select name="frequency" defaultValue={editing?.frequency||"weekly"}><option value="daily">Diária</option><option value="weekly">Semanal</option><option value="monthly">Mensal</option><option value="as_needed">Quando necessário</option></select><div className="actions"><button className="primary" type="submit">{editing?"Salvar alteração":"Adicionar"}</button>{editing&&<button type="button" onClick={()=>setEditing(undefined)}>Cancelar</button>}</div></div></form></div><div className="panel"><h2>Responsabilidades da casa</h2>{(data.chores||[]).map(item=><div className="budget-item" key={item.id}><div><b>{item.title}</b><small>{item.assignee} · {frequency(item.frequency)}{item.lastCompletedAt?` · feita em ${item.lastCompletedAt.slice(0,10)}`:""}</small></div><div className="actions"><button title="Marcar como feita" onClick={()=>mutate(d=>{const x=d.chores?.find(c=>c.id===item.id);if(x){const date=now();x.lastCompletedAt=date;x.completionHistory.push(date)}})}><CheckCircle2 size={16}/></button><button onClick={()=>setEditing(item)}>Editar</button><button onClick={()=>mutate(d=>{d.chores=(d.chores||[]).filter(x=>x.id!==item.id)})}><Trash2 size={15}/></button></div></div>)}</div></section>;
-}
-
-const groceryMacro=(description:string)=>{const n=normalize(description);if(/CARNE|FRANGO|PEIXE|LINGUICA|OVO/.test(n))return"Proteínas";if(/LEITE|QUEIJO|IOGUR|MANTEIGA|REQUEI/.test(n))return"Laticínios";if(/ARROZ|FEIJAO|MACARR|FARINHA|ACUCAR|CAFE|OLEO/.test(n))return"Mercearia";if(/BANANA|MACA|LARANJA|UVA|MAMAO|BATATA|TOMATE|CEBOLA|ALFACE|CENOURA/.test(n))return"Hortifruti";if(/SABAO|DETERG|DESINF|AMACIANTE|ESPONJA/.test(n))return"Limpeza";if(/SHAMPOO|SABONETE|PAPEL HIG|CREME DENT/.test(n))return"Higiene";if(/RACAO|PETISCO|CACHORR/.test(n))return"Pet";if(/BISCOITO|CHOCOLATE|REFRIG|SUCO|CERVEJA/.test(n))return"Bebidas e lanches";return"Outros"};
-function Receipts({data,mutate,setMessage}:{data:FamilyData;mutate:(f:(d:FamilyData)=>void)=>void;setMessage:(s:string)=>void}){
-  const [draft,setDraft]=useState<ReadReceipt>();const [busy,setBusy]=useState(false);const libraryInput=useRef<HTMLInputElement>(null);
-  const [photoProgress,setPhotoProgress]=useState<{current:number;total:number;completed:number;failed:number}>();
-  const analyze=async(files:File[])=>{if(!files.length)return;setBusy(true);setPhotoProgress({current:1,total:files.length,completed:0,failed:0});const parts:ReadReceipt[]=[];const failures:string[]=[];for(let index=0;index<files.length;index++){setPhotoProgress(p=>({current:index+1,total:files.length,completed:p?.completed||0,failed:p?.failed||0}));setMessage(`Lendo imagem ${index+1} de ${files.length}…`);try{parts.push(await readReceipt(files[index]));setPhotoProgress(p=>({...p!,completed:(p?.completed||0)+1}))}catch(error){failures.push(`imagem ${index+1}: ${(error as Error).message}`);setPhotoProgress(p=>({...p!,failed:(p?.failed||0)+1}))}if(index<files.length-1)await new Promise(resolve=>setTimeout(resolve,1200))}if(parts.length){const best=parts.slice().sort((a,b)=>(b.confianca||0)-(a.confianca||0))[0]||{};setDraft({...best,estabelecimento:parts.find(x=>x.estabelecimento)?.estabelecimento,data:parts.find(x=>x.data)?.data,total:parts.slice().reverse().find(x=>Number(x.total)>0)?.total,itens:parts.flatMap(x=>x.itens||[]),observacoes:[...parts.flatMap(x=>x.observacoes||[]),...failures]});setMessage(`${parts.length} de ${files.length} imagem(ns) lida(s).${failures.length?" As demais podem ser reenviadas.":" Confira os dados."}`)}else setMessage(failures[0]||"Nenhuma imagem pôde ser lida.");setBusy(false);window.setTimeout(()=>setPhotoProgress(undefined),2500)};
-  const save=()=>{if(!draft)return;const receipt:Receipt={...audit(),store:draft.estabelecimento||"Estabelecimento não identificado",date:draft.data||dateOnly(new Date()),total:Number(draft.total)||0,confidence:draft.confianca,notes:draft.observacoes,items:(draft.itens||[]).map(i=>({id:uid(),description:i.descricao||"Item não identificado",quantity:Number(i.quantidade)||1,unit:i.unidade,unitPrice:i.valorUnitario==null?undefined:Number(i.valorUnitario),total:Number(i.valorTotal)||0,macroCategory:i.categoriaMacro||groceryMacro(i.descricao||"")}))};mutate(d=>{(d.receipts??=[]).push(receipt)});setDraft(undefined);setMessage("Compra registrada e sincronização automática iniciada.")};
-  const updateItem=(index:number,patch:Partial<NonNullable<ReadReceipt["itens"]>[number]>)=>setDraft(current=>{if(!current)return current;const itens=[...(current.itens||[])];itens[index]={...itens[index],...patch};return{...current,itens}});
-  const macroCategories=["Proteínas","Laticínios","Mercearia","Hortifruti","Limpeza","Higiene","Pet","Bebidas e lanches","Outros"];
-  const history=data.receipts||[];const allPurchases=history.flatMap(r=>r.items.map(i=>({r,i})));const keys=Array.from(new Set(allPurchases.map(x=>normalize(x.i.description))));const products=keys.map(key=>{const purchases=allPurchases.filter(x=>normalize(x.i.description)===key).sort((a,b)=>a.r.date.localeCompare(b.r.date));const last=purchases.at(-1);const intervals=purchases.slice(1).map((x,index)=>(new Date(x.r.date).getTime()-new Date(purchases[index].r.date).getTime())/864e5);const averageDays=intervals.length?Math.round(intervals.reduce((a,b)=>a+b,0)/intervals.length):undefined;const next=averageDays&&last?new Date(new Date(last.r.date).getTime()+averageDays*864e5).toISOString().slice(0,10):undefined;const prices=purchases.map(x=>x.i.unitPrice??(x.i.quantity?x.i.total/x.i.quantity:undefined)).filter((value):value is number=>Number.isFinite(value));return{name:last?.i.description||key,category:last?.i.macroCategory||groceryMacro(last?.i.description||key),count:purchases.length,averageQuantity:purchases.reduce((s,x)=>s+x.i.quantity,0)/purchases.length,price:prices.length?prices.reduce((a,b)=>a+b,0)/prices.length:undefined,store:last?.r.store,averageDays,next}}).sort((a,b)=>b.count-a.count);
-  return <>
-    <input ref={libraryInput} hidden type="file" accept="image/*" multiple onChange={e=>analyze(Array.from(e.target.files||[]))}/>
-    <section className="panel"><div className="panel-head"><div><h2>Fotografar nota de supermercado</h2><p className="muted">O mesmo login Microsoft do aplicativo autoriza a leitura. A fotografia não é armazenada na base.</p></div><div className="actions"><button className="primary" disabled={busy} onClick={()=>libraryInput.current?.click()}>{busy?"Lendo…":"Fotografar ou escolher da biblioteca"}</button></div></div>
-    {photoProgress&&<div className="photo-progress"><div className="photo-progress-head"><span className={busy?"processing-dot":""}/><b>{busy?`Enviando e processando foto ${photoProgress.current} de ${photoProgress.total}`:"Processamento concluído"}</b><strong>{Math.round(((photoProgress.completed+photoProgress.failed)/photoProgress.total)*100)}%</strong></div><progress value={photoProgress.completed+photoProgress.failed} max={photoProgress.total}/><small>{photoProgress.completed} concluída(s){photoProgress.failed?` · ${photoProgress.failed} com erro`:""}</small></div>}
-    {draft&&<div className="receipt-review"><div className="form-row"><input value={draft.estabelecimento||""} placeholder="Estabelecimento" onChange={e=>setDraft({...draft,estabelecimento:e.target.value})}/><input type="date" value={draft.data||""} onChange={e=>setDraft({...draft,data:e.target.value})}/><CurrencyInput value={Number(draft.total)||0} onChange={value=>setDraft({...draft,total:value})}/></div><div className="panel-head"><h3>Itens identificados</h3><button onClick={()=>setDraft({...draft,itens:[...(draft.itens||[]),{descricao:"",categoriaMacro:"Outros",quantidade:1,unidade:"un",valorUnitario:0,valorTotal:0}]})}><Plus size={15}/> Adicionar item</button></div>{(draft.itens||[]).map((item,index)=><div className="receipt-item-edit" key={index}><input value={item.descricao||""} placeholder="Nome do produto" onChange={e=>updateItem(index,{descricao:e.target.value})}/><select value={item.categoriaMacro||groceryMacro(item.descricao||"")} onChange={e=>updateItem(index,{categoriaMacro:e.target.value})}>{macroCategories.map(category=><option key={category}>{category}</option>)}</select><label>Quantidade<input type="number" inputMode="decimal" step="0.001" value={item.quantidade??1} onChange={e=>updateItem(index,{quantidade:Number(e.target.value)})}/></label><label>Unidade<input value={item.unidade||""} onChange={e=>updateItem(index,{unidade:e.target.value})}/></label><label>Valor unitário<CurrencyInput value={Number(item.valorUnitario)||0} onChange={value=>updateItem(index,{valorUnitario:value})}/></label><label>Valor total<CurrencyInput value={Number(item.valorTotal)||0} onChange={value=>updateItem(index,{valorTotal:value})}/></label><button className="danger-button" onClick={()=>setDraft({...draft,itens:(draft.itens||[]).filter((_,itemIndex)=>itemIndex!==index)})}><Trash2 size={15}/> Excluir</button></div>)}<button className="primary" onClick={save}>Confirmar e salvar nota</button></div>}
+const initialChores = [
+  "Varrer a casa",
+  "Passar pano",
+  "Lavar roupa",
+  "Estender roupa",
+  "Lavar louça",
+  "Comprar comida",
+  "Passear com a cachorra",
+  "Colocar comida para a cachorra",
+  "Cozinhar",
+];
+function Chores({
+  data,
+  mutate,
+}: {
+  data: FamilyData;
+  mutate: (f: (d: FamilyData) => void) => void;
+}) {
+  const [editing, setEditing] = useState<Chore>();
+  useEffect(() => {
+    if (data.chores === undefined)
+      mutate((d) => {
+        d.chores = initialChores.map((title) => ({
+          ...audit(),
+          title,
+          assignee: "Ambos",
+          frequency: "weekly",
+          active: true,
+          completionHistory: [],
+        }));
+      });
+  }, [data.chores]);
+  const submit = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const fd = new FormData(event.currentTarget);
+    const values = {
+      title: String(fd.get("title")),
+      assignee: String(fd.get("assignee")) as Member,
+      frequency: String(fd.get("frequency")) as Chore["frequency"],
+    };
+    mutate((d) => {
+      d.chores ??= [];
+      if (editing) {
+        const item = d.chores.find((x) => x.id === editing.id);
+        if (item)
+          Object.assign(item, values, {
+            updatedAt: now(),
+            version: item.version + 1,
+          });
+      } else
+        d.chores.push({
+          ...audit(),
+          ...values,
+          active: true,
+          completionHistory: [],
+        });
+    });
+    setEditing(undefined);
+    event.currentTarget.reset();
+  };
+  const frequency = (value: Chore["frequency"]) =>
+    ({
+      daily: "Diária",
+      weekly: "Semanal",
+      monthly: "Mensal",
+      as_needed: "Quando necessário",
+    })[value];
+  return (
+    <section className="grid two">
+      <div className="panel">
+        <h2>{editing ? "Editar responsabilidade" : "Nova responsabilidade"}</h2>
+        <form key={editing?.id || "new"} onSubmit={submit}>
+          <div className="form-stack">
+            <input
+              name="title"
+              required
+              placeholder="Tarefa doméstica"
+              defaultValue={editing?.title}
+            />
+            <select name="assignee" defaultValue={editing?.assignee || "Ambos"}>
+              <option>Olcino</option>
+              <option>Mari</option>
+              <option>Ambos</option>
+            </select>
+            <select
+              name="frequency"
+              defaultValue={editing?.frequency || "weekly"}
+            >
+              <option value="daily">Diária</option>
+              <option value="weekly">Semanal</option>
+              <option value="monthly">Mensal</option>
+              <option value="as_needed">Quando necessário</option>
+            </select>
+            <div className="actions">
+              <button className="primary" type="submit">
+                {editing ? "Salvar alteração" : "Adicionar"}
+              </button>
+              {editing && (
+                <button type="button" onClick={() => setEditing(undefined)}>
+                  Cancelar
+                </button>
+              )}
+            </div>
+          </div>
+        </form>
+      </div>
+      <div className="panel">
+        <h2>Responsabilidades da casa</h2>
+        {(data.chores || []).map((item) => (
+          <div className="budget-item" key={item.id}>
+            <div>
+              <b>{item.title}</b>
+              <small>
+                {item.assignee} · {frequency(item.frequency)}
+                {item.lastCompletedAt
+                  ? ` · feita em ${item.lastCompletedAt.slice(0, 10)}`
+                  : ""}
+              </small>
+            </div>
+            <div className="actions">
+              <button
+                title="Marcar como feita"
+                onClick={() =>
+                  mutate((d) => {
+                    const x = d.chores?.find((c) => c.id === item.id);
+                    if (x) {
+                      const date = now();
+                      x.lastCompletedAt = date;
+                      x.completionHistory.push(date);
+                    }
+                  })
+                }
+              >
+                <CheckCircle2 size={16} />
+              </button>
+              <button onClick={() => setEditing(item)}>Editar</button>
+              <button
+                onClick={() =>
+                  mutate((d) => {
+                    d.chores = (d.chores || []).filter((x) => x.id !== item.id);
+                  })
+                }
+              >
+                <Trash2 size={15} />
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
     </section>
-    <section className="panel"><h2>Sugestões para a lista de compras</h2><p className="muted">Calculadas silenciosamente pelas datas e quantidades salvas na base.</p>{products.filter(p=>p.next).map(p=><Row key={p.name} a={p.name} b={`${p.category} · comprar cerca de ${p.averageQuantity.toFixed(1)} un. · intervalo médio ${p.averageDays} dias`} c={p.next||"—"}/>)}</section>
-    <section className="panel"><h2>Produtos e valores médios</h2><p className="muted">Catálogo consolidado por categoria, sem exibir as notas individuais.</p>{products.length?products.map(p=><Row key={p.name} a={p.name} b={`${p.category} · ${p.count} ocorrência(s) · quantidade média ${p.averageQuantity.toFixed(1)} · último local: ${p.store||"não identificado"}`} c={p.price==null?"—":`${money(p.price)} médio`}/>):<Empty/>}</section>
-  </>;
+  );
 }
 
-function VoiceExpense({data,mutate,setMessage,currentMember}:{data:FamilyData;mutate:(f:(d:FamilyData)=>void)=>void;setMessage:(s:string)=>void;currentMember:"Olcino"|"Mari"}){
-  const [recording,setRecording]=useState(false);const [processing,setProcessing]=useState(false);const [draft,setDraft]=useState<VoiceTransaction>();const recorder=useRef<MediaRecorder>();const stream=useRef<MediaStream>();const chunks=useRef<Blob[]>([]);
-  const start=async()=>{try{const media=await navigator.mediaDevices.getUserMedia({audio:true});stream.current=media;const preferred=["audio/mp4","audio/webm;codecs=opus","audio/webm"].find(type=>MediaRecorder.isTypeSupported(type));const active=new MediaRecorder(media,preferred?{mimeType:preferred}:undefined);recorder.current=active;chunks.current=[];active.ondataavailable=e=>{if(e.data.size)chunks.current.push(e.data)};active.onstop=async()=>{media.getTracks().forEach(track=>track.stop());setProcessing(true);try{setDraft(await readVoiceExpense(new Blob(chunks.current,{type:active.mimeType})));setMessage("Áudio interpretado. Confira antes de registrar.")}catch(error){setMessage((error as Error).message)}finally{setProcessing(false)}};active.start();setRecording(true)}catch{setMessage("Não foi possível acessar o microfone. Autorize o acesso no navegador.")}};
-  const stop=()=>{recorder.current?.stop();setRecording(false)};
-  const save=async()=>{if(!draft?.descricao||!draft.valor||!draft.data)return setMessage("Confira descrição, valor e data.");const category=data.categories.find(c=>normalize(c.name).includes(normalize(draft.categoriaSugerida||"")));const account=data.accounts.find(a=>normalize(a.name).includes(normalize(draft.contaOuCartaoSugerido||"")))||data.accounts[0];if(!account)return setMessage("Cadastre uma conta ou cartão antes de registrar.");const amount=draft.tipo==="receita"?-Math.abs(Number(draft.valor)):Math.abs(Number(draft.valor));const base={...audit(currentMember),date:draft.data,competence:monthOf(draft.data),purchaseDate:draft.data,paymentDate:draft.data,description:draft.descricao,normalized:normalize(draft.descricao),amount,accountId:account.id,operator:currentMember,scope:(draft.escopoSugerido==="Familiar"?"Familiar":`Pessoal — ${currentMember}`) as Transaction["scope"],categoryId:category?.id,subcategory:draft.subcategoriaSugerida,classification:"suggested" as const,installments:draft.parcelas||1,transfer:draft.tipo==="transferência",movement:draft.tipo==="aporte"?("reserve" as const):draft.tipo==="transferência"?("transfer" as const):("expense_income" as const),sourceKind:"card" as const,dedupeKey:"",estimated:true,notes:`Estimativa por voz: ${draft.transcricao||""}`};base.dedupeKey=await dedupeKey(base);mutate(d=>d.transactions.push(base));setDraft(undefined);setMessage("Estimativa registrada e incluída no acompanhamento do mês.")};
-  return <section className="panel"><div className="panel-head"><div><h2>Registrar por voz</h2><p className="muted">Fale valor, estabelecimento, data, cartão e categoria. O lançamento será uma estimativa editável.</p></div><button className={recording?"danger-button":"primary"} disabled={processing} onClick={recording?stop:start}>{recording?<><Square size={17}/> Parar</>:<><Mic size={17}/> {processing?"Processando…":"Gravar"}</>}</button></div>{recording&&<div className="voice-recording"><span/>Gravando… fale a despesa e toque em Parar.</div>}{draft&&<div className="form-stack"><textarea value={draft.transcricao||""} onChange={e=>setDraft({...draft,transcricao:e.target.value})}/><input value={draft.descricao||""} placeholder="Descrição" onChange={e=>setDraft({...draft,descricao:e.target.value})}/><input type="date" value={draft.data||""} onChange={e=>setDraft({...draft,data:e.target.value})}/><CurrencyInput value={Number(draft.valor)||0} onChange={valor=>setDraft({...draft,valor})}/><select value={draft.tipo||"despesa"} onChange={e=>setDraft({...draft,tipo:e.target.value as VoiceTransaction["tipo"]})}><option value="despesa">Despesa</option><option value="receita">Receita</option><option value="transferência">Transferência</option><option value="aporte">Aporte</option></select><input value={draft.categoriaSugerida||""} placeholder="Categoria sugerida" onChange={e=>setDraft({...draft,categoriaSugerida:e.target.value})}/><input value={draft.contaOuCartaoSugerido||""} placeholder="Conta ou cartão" onChange={e=>setDraft({...draft,contaOuCartaoSugerido:e.target.value})}/><button className="primary" onClick={save}>Confirmar estimativa</button></div>}</section>;
+const groceryMacro = (description: string) => {
+  const n = normalize(description);
+  if (/CARNE|FRANGO|PEIXE|LINGUICA|OVO/.test(n)) return "Proteínas";
+  if (/LEITE|QUEIJO|IOGUR|MANTEIGA|REQUEI/.test(n)) return "Laticínios";
+  if (/ARROZ|FEIJAO|MACARR|FARINHA|ACUCAR|CAFE|OLEO/.test(n))
+    return "Mercearia";
+  if (
+    /BANANA|MACA|LARANJA|UVA|MAMAO|BATATA|TOMATE|CEBOLA|ALFACE|CENOURA/.test(n)
+  )
+    return "Hortifruti";
+  if (/SABAO|DETERG|DESINF|AMACIANTE|ESPONJA/.test(n)) return "Limpeza";
+  if (/SHAMPOO|SABONETE|PAPEL HIG|CREME DENT/.test(n)) return "Higiene";
+  if (/RACAO|PETISCO|CACHORR/.test(n)) return "Pet";
+  if (/BISCOITO|CHOCOLATE|REFRIG|SUCO|CERVEJA/.test(n))
+    return "Bebidas e lanches";
+  return "Outros";
+};
+function Receipts({
+  data,
+  mutate,
+  setMessage,
+}: {
+  data: FamilyData;
+  mutate: (f: (d: FamilyData) => void) => void;
+  setMessage: (s: string) => void;
+}) {
+  const [draft, setDraft] = useState<ReadReceipt>();
+  const [busy, setBusy] = useState(false);
+  const libraryInput = useRef<HTMLInputElement>(null);
+  const [photoProgress, setPhotoProgress] = useState<{
+    current: number;
+    total: number;
+    completed: number;
+    failed: number;
+  }>();
+  const analyze = async (files: File[]) => {
+    if (!files.length) return;
+    setBusy(true);
+    setPhotoProgress({
+      current: 1,
+      total: files.length,
+      completed: 0,
+      failed: 0,
+    });
+    const parts: ReadReceipt[] = [];
+    const failures: string[] = [];
+    for (let index = 0; index < files.length; index++) {
+      setPhotoProgress((p) => ({
+        current: index + 1,
+        total: files.length,
+        completed: p?.completed || 0,
+        failed: p?.failed || 0,
+      }));
+      setMessage(`Lendo imagem ${index + 1} de ${files.length}…`);
+      try {
+        parts.push(await readReceipt(files[index]));
+        setPhotoProgress((p) => ({
+          ...p!,
+          completed: (p?.completed || 0) + 1,
+        }));
+      } catch (error) {
+        failures.push(`imagem ${index + 1}: ${(error as Error).message}`);
+        setPhotoProgress((p) => ({ ...p!, failed: (p?.failed || 0) + 1 }));
+      }
+      if (index < files.length - 1)
+        await new Promise((resolve) => setTimeout(resolve, 1200));
+    }
+    if (parts.length) {
+      const best =
+        parts
+          .slice()
+          .sort((a, b) => (b.confianca || 0) - (a.confianca || 0))[0] || {};
+      setDraft({
+        ...best,
+        estabelecimento: parts.find((x) => x.estabelecimento)?.estabelecimento,
+        data: parts.find((x) => x.data)?.data,
+        total: parts
+          .slice()
+          .reverse()
+          .find((x) => Number(x.total) > 0)?.total,
+        itens: parts.flatMap((x) => x.itens || []),
+        observacoes: [
+          ...parts.flatMap((x) => x.observacoes || []),
+          ...failures,
+        ],
+      });
+      setMessage(
+        `${parts.length} de ${files.length} imagem(ns) lida(s).${failures.length ? " As demais podem ser reenviadas." : " Confira os dados."}`,
+      );
+    } else setMessage(failures[0] || "Nenhuma imagem pôde ser lida.");
+    setBusy(false);
+    window.setTimeout(() => setPhotoProgress(undefined), 2500);
+  };
+  const save = () => {
+    if (!draft) return;
+    const receipt: Receipt = {
+      ...audit(),
+      store: draft.estabelecimento || "Estabelecimento não identificado",
+      date: draft.data || dateOnly(new Date()),
+      total: Number(draft.total) || 0,
+      confidence: draft.confianca,
+      notes: draft.observacoes,
+      items: (draft.itens || []).map((i) => ({
+        id: uid(),
+        description: i.descricao || "Item não identificado",
+        quantity: Number(i.quantidade) || 1,
+        unit: i.unidade,
+        unitPrice:
+          i.valorUnitario == null ? undefined : Number(i.valorUnitario),
+        total: Number(i.valorTotal) || 0,
+        macroCategory: i.categoriaMacro || groceryMacro(i.descricao || ""),
+      })),
+    };
+    mutate((d) => {
+      (d.receipts ??= []).push(receipt);
+    });
+    setDraft(undefined);
+    setMessage("Compra registrada e sincronização automática iniciada.");
+  };
+  const updateItem = (
+    index: number,
+    patch: Partial<NonNullable<ReadReceipt["itens"]>[number]>,
+  ) =>
+    setDraft((current) => {
+      if (!current) return current;
+      const itens = [...(current.itens || [])];
+      itens[index] = { ...itens[index], ...patch };
+      return { ...current, itens };
+    });
+  const macroCategories = [
+    "Proteínas",
+    "Laticínios",
+    "Mercearia",
+    "Hortifruti",
+    "Limpeza",
+    "Higiene",
+    "Pet",
+    "Bebidas e lanches",
+    "Outros",
+  ];
+  const history = data.receipts || [];
+  const allPurchases = history.flatMap((r) => r.items.map((i) => ({ r, i })));
+  const keys = Array.from(
+    new Set(allPurchases.map((x) => normalize(x.i.description))),
+  );
+  const products = keys
+    .map((key) => {
+      const purchases = allPurchases
+        .filter((x) => normalize(x.i.description) === key)
+        .sort((a, b) => a.r.date.localeCompare(b.r.date));
+      const last = purchases.at(-1);
+      const intervals = purchases
+        .slice(1)
+        .map(
+          (x, index) =>
+            (new Date(x.r.date).getTime() -
+              new Date(purchases[index].r.date).getTime()) /
+            864e5,
+        );
+      const averageDays = intervals.length
+        ? Math.round(intervals.reduce((a, b) => a + b, 0) / intervals.length)
+        : undefined;
+      const next =
+        averageDays && last
+          ? new Date(new Date(last.r.date).getTime() + averageDays * 864e5)
+              .toISOString()
+              .slice(0, 10)
+          : undefined;
+      const prices = purchases
+        .map(
+          (x) =>
+            x.i.unitPrice ??
+            (x.i.quantity ? x.i.total / x.i.quantity : undefined),
+        )
+        .filter((value): value is number => Number.isFinite(value));
+      return {
+        name: last?.i.description || key,
+        category:
+          last?.i.macroCategory || groceryMacro(last?.i.description || key),
+        count: purchases.length,
+        averageQuantity:
+          purchases.reduce((s, x) => s + x.i.quantity, 0) / purchases.length,
+        price: prices.length
+          ? prices.reduce((a, b) => a + b, 0) / prices.length
+          : undefined,
+        store: last?.r.store,
+        averageDays,
+        next,
+      };
+    })
+    .sort((a, b) => b.count - a.count);
+  return (
+    <>
+      <input
+        ref={libraryInput}
+        hidden
+        type="file"
+        accept="image/*"
+        multiple
+        onChange={(e) => analyze(Array.from(e.target.files || []))}
+      />
+      <section className="panel">
+        <div className="panel-head">
+          <div>
+            <h2>Fotografar nota de supermercado</h2>
+            <p className="muted">
+              O mesmo login Microsoft do aplicativo autoriza a leitura. A
+              fotografia não é armazenada na base.
+            </p>
+          </div>
+          <div className="actions">
+            <button
+              className="primary"
+              disabled={busy}
+              onClick={() => libraryInput.current?.click()}
+            >
+              {busy ? "Lendo…" : "Fotografar ou escolher da biblioteca"}
+            </button>
+          </div>
+        </div>
+        {photoProgress && (
+          <div className="photo-progress">
+            <div className="photo-progress-head">
+              <span className={busy ? "processing-dot" : ""} />
+              <b>
+                {busy
+                  ? `Enviando e processando foto ${photoProgress.current} de ${photoProgress.total}`
+                  : "Processamento concluído"}
+              </b>
+              <strong>
+                {Math.round(
+                  ((photoProgress.completed + photoProgress.failed) /
+                    photoProgress.total) *
+                    100,
+                )}
+                %
+              </strong>
+            </div>
+            <progress
+              value={photoProgress.completed + photoProgress.failed}
+              max={photoProgress.total}
+            />
+            <small>
+              {photoProgress.completed} concluída(s)
+              {photoProgress.failed
+                ? ` · ${photoProgress.failed} com erro`
+                : ""}
+            </small>
+          </div>
+        )}
+        {draft && (
+          <div className="receipt-review">
+            <div className="form-row">
+              <input
+                value={draft.estabelecimento || ""}
+                placeholder="Estabelecimento"
+                onChange={(e) =>
+                  setDraft({ ...draft, estabelecimento: e.target.value })
+                }
+              />
+              <input
+                type="date"
+                value={draft.data || ""}
+                onChange={(e) => setDraft({ ...draft, data: e.target.value })}
+              />
+              <CurrencyInput
+                value={Number(draft.total) || 0}
+                onChange={(value) => setDraft({ ...draft, total: value })}
+              />
+            </div>
+            <div className="panel-head">
+              <h3>Itens identificados</h3>
+              <button
+                onClick={() =>
+                  setDraft({
+                    ...draft,
+                    itens: [
+                      ...(draft.itens || []),
+                      {
+                        descricao: "",
+                        categoriaMacro: "Outros",
+                        quantidade: 1,
+                        unidade: "un",
+                        valorUnitario: 0,
+                        valorTotal: 0,
+                      },
+                    ],
+                  })
+                }
+              >
+                <Plus size={15} /> Adicionar item
+              </button>
+            </div>
+            {(draft.itens || []).map((item, index) => (
+              <div className="receipt-item-edit" key={index}>
+                <input
+                  value={item.descricao || ""}
+                  placeholder="Nome do produto"
+                  onChange={(e) =>
+                    updateItem(index, { descricao: e.target.value })
+                  }
+                />
+                <select
+                  value={
+                    item.categoriaMacro || groceryMacro(item.descricao || "")
+                  }
+                  onChange={(e) =>
+                    updateItem(index, { categoriaMacro: e.target.value })
+                  }
+                >
+                  {macroCategories.map((category) => (
+                    <option key={category}>{category}</option>
+                  ))}
+                </select>
+                <label>
+                  Quantidade
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                    step="0.001"
+                    value={item.quantidade ?? 1}
+                    onChange={(e) =>
+                      updateItem(index, { quantidade: Number(e.target.value) })
+                    }
+                  />
+                </label>
+                <label>
+                  Unidade
+                  <input
+                    value={item.unidade || ""}
+                    onChange={(e) =>
+                      updateItem(index, { unidade: e.target.value })
+                    }
+                  />
+                </label>
+                <label>
+                  Valor unitário
+                  <CurrencyInput
+                    value={Number(item.valorUnitario) || 0}
+                    onChange={(value) =>
+                      updateItem(index, { valorUnitario: value })
+                    }
+                  />
+                </label>
+                <label>
+                  Valor total
+                  <CurrencyInput
+                    value={Number(item.valorTotal) || 0}
+                    onChange={(value) =>
+                      updateItem(index, { valorTotal: value })
+                    }
+                  />
+                </label>
+                <button
+                  className="danger-button"
+                  onClick={() =>
+                    setDraft({
+                      ...draft,
+                      itens: (draft.itens || []).filter(
+                        (_, itemIndex) => itemIndex !== index,
+                      ),
+                    })
+                  }
+                >
+                  <Trash2 size={15} /> Excluir
+                </button>
+              </div>
+            ))}
+            <button className="primary" onClick={save}>
+              Confirmar e salvar nota
+            </button>
+          </div>
+        )}
+      </section>
+      <section className="panel">
+        <h2>Sugestões para a lista de compras</h2>
+        <p className="muted">
+          Calculadas silenciosamente pelas datas e quantidades salvas na base.
+        </p>
+        {products
+          .filter((p) => p.next)
+          .map((p) => (
+            <Row
+              key={p.name}
+              a={p.name}
+              b={`${p.category} · comprar cerca de ${p.averageQuantity.toFixed(1)} un. · intervalo médio ${p.averageDays} dias`}
+              c={p.next || "—"}
+            />
+          ))}
+      </section>
+      <section className="panel">
+        <h2>Produtos e valores médios</h2>
+        <p className="muted">
+          Catálogo consolidado por categoria, sem exibir as notas individuais.
+        </p>
+        {products.length ? (
+          products.map((p) => (
+            <Row
+              key={p.name}
+              a={p.name}
+              b={`${p.category} · ${p.count} ocorrência(s) · quantidade média ${p.averageQuantity.toFixed(1)} · último local: ${p.store || "não identificado"}`}
+              c={p.price == null ? "—" : `${money(p.price)} médio`}
+            />
+          ))
+        ) : (
+          <Empty />
+        )}
+      </section>
+    </>
+  );
+}
+
+function VoiceExpense({
+  data,
+  mutate,
+  setMessage,
+  currentMember,
+}: {
+  data: FamilyData;
+  mutate: (f: (d: FamilyData) => void) => void;
+  setMessage: (s: string) => void;
+  currentMember: "Olcino" | "Mari";
+}) {
+  const [recording, setRecording] = useState(false);
+  const [processing, setProcessing] = useState(false);
+  const [draft, setDraft] = useState<VoiceTransaction>();
+  const [levels, setLevels] = useState<number[]>(Array(24).fill(3));
+  const recorder = useRef<MediaRecorder>();
+  const stream = useRef<MediaStream>();
+  const chunks = useRef<Blob[]>([]);
+  const animation = useRef<number>();
+  const start = async () => {
+    try {
+      const media = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true },
+      });
+      stream.current = media;
+      const context = new AudioContext();
+      await context.resume();
+      const analyser = context.createAnalyser();
+      analyser.fftSize = 64;
+      context.createMediaStreamSource(media).connect(analyser);
+      const samples = new Uint8Array(analyser.frequencyBinCount);
+      const draw = () => {
+        analyser.getByteFrequencyData(samples);
+        setLevels(
+          Array.from(samples.slice(0, 24)).map((value) =>
+            Math.max(3, Math.round(value / 5)),
+          ),
+        );
+        animation.current = requestAnimationFrame(draw);
+      };
+      draw();
+      const preferred = [
+        "audio/mp4",
+        "audio/webm;codecs=opus",
+        "audio/webm",
+      ].find((type) => MediaRecorder.isTypeSupported(type));
+      const active = new MediaRecorder(
+        media,
+        preferred ? { mimeType: preferred } : undefined,
+      );
+      recorder.current = active;
+      chunks.current = [];
+      active.ondataavailable = (e) => {
+        if (e.data.size) chunks.current.push(e.data);
+      };
+      active.onstop = async () => {
+        media.getTracks().forEach((track) => track.stop());
+        if (animation.current) cancelAnimationFrame(animation.current);
+        await context.close();
+        setProcessing(true);
+        try {
+          setDraft(
+            await readVoiceExpense(
+              new Blob(chunks.current, { type: active.mimeType }),
+            ),
+          );
+          setMessage("Áudio interpretado. Confira antes de registrar.");
+        } catch (error) {
+          setMessage((error as Error).message);
+        } finally {
+          setProcessing(false);
+        }
+      };
+      active.start(500);
+      setRecording(true);
+    } catch (error) {
+      setMessage(
+        `Não foi possível acessar o microfone: ${(error as Error).message}`,
+      );
+    }
+  };
+  const stop = () => {
+    recorder.current?.stop();
+    setRecording(false);
+    if (animation.current) cancelAnimationFrame(animation.current);
+  };
+  const save = async () => {
+    if (!draft?.descricao || !draft.valor || !draft.data)
+      return setMessage("Confira descrição, valor e data.");
+    const category = data.categories.find((c) =>
+      normalize(c.name).includes(normalize(draft.categoriaSugerida || "")),
+    );
+    const account =
+      data.accounts.find((a) =>
+        normalize(a.name).includes(
+          normalize(draft.contaOuCartaoSugerido || ""),
+        ),
+      ) || data.accounts[0];
+    if (!account)
+      return setMessage("Cadastre uma conta ou cartão antes de registrar.");
+    const amount =
+      draft.tipo === "receita"
+        ? -Math.abs(Number(draft.valor))
+        : Math.abs(Number(draft.valor));
+    const base = {
+      ...audit(currentMember),
+      date: draft.data,
+      competence: monthOf(draft.data),
+      purchaseDate: draft.data,
+      paymentDate: draft.data,
+      description: draft.descricao,
+      normalized: normalize(draft.descricao),
+      amount,
+      accountId: account.id,
+      operator: currentMember,
+      scope: (draft.escopoSugerido === "Familiar"
+        ? "Familiar"
+        : `Pessoal — ${currentMember}`) as Transaction["scope"],
+      categoryId: category?.id,
+      subcategory: draft.subcategoriaSugerida,
+      classification: "suggested" as const,
+      installments: draft.parcelas || 1,
+      transfer: draft.tipo === "transferência",
+      movement:
+        draft.tipo === "aporte"
+          ? ("reserve" as const)
+          : draft.tipo === "transferência"
+            ? ("transfer" as const)
+            : ("expense_income" as const),
+      sourceKind: "card" as const,
+      dedupeKey: "",
+      estimated: true,
+      notes: `Estimativa por voz: ${draft.transcricao || ""}`,
+    };
+    base.dedupeKey = await dedupeKey(base);
+    mutate((d) => d.transactions.push(base));
+    setDraft(undefined);
+    setMessage("Estimativa registrada e incluída no acompanhamento do mês.");
+  };
+  return (
+    <section className="panel">
+      <div className="panel-head">
+        <div>
+          <h2>Registrar por voz</h2>
+          <p className="muted">O lançamento será uma estimativa editável.</p>
+        </div>
+        <button
+          className={recording ? "danger-button" : "primary"}
+          disabled={processing}
+          onClick={recording ? stop : start}
+        >
+          {recording ? (
+            <>
+              <Square size={17} /> Parar
+            </>
+          ) : (
+            <>
+              <Mic size={17} /> {processing ? "Processando…" : "Gravar"}
+            </>
+          )}
+        </button>
+      </div>
+      <div className="voice-checklist">
+        <b>Inclua na gravação:</b>
+        <span>1. Valor</span><span>2. Compra ou estabelecimento</span>
+        <span>3. Categoria</span><span>4. Conta ou cartão</span>
+        <span>5. Quem gastou</span><span>6. Data</span>
+      </div>
+      {recording && (
+        <div className="voice-live">
+          <div className="voice-wave" aria-label="Nível do microfone">
+            {levels.map((level,index)=><i key={index} style={{height:`${level}px`}} />)}
+          </div>
+          <small>Gravando — as barras sobem quando o microfone recebe sua voz.</small>
+        </div>
+      )}
+      {draft && (
+        <div className="form-stack">
+          <textarea
+            value={draft.transcricao || ""}
+            onChange={(e) =>
+              setDraft({ ...draft, transcricao: e.target.value })
+            }
+          />
+          <input
+            value={draft.descricao || ""}
+            placeholder="Descrição"
+            onChange={(e) => setDraft({ ...draft, descricao: e.target.value })}
+          />
+          <input
+            type="date"
+            value={draft.data || ""}
+            onChange={(e) => setDraft({ ...draft, data: e.target.value })}
+          />
+          <CurrencyInput
+            value={Number(draft.valor) || 0}
+            onChange={(valor) => setDraft({ ...draft, valor })}
+          />
+          <select
+            value={draft.tipo || "despesa"}
+            onChange={(e) =>
+              setDraft({
+                ...draft,
+                tipo: e.target.value as VoiceTransaction["tipo"],
+              })
+            }
+          >
+            <option value="despesa">Despesa</option>
+            <option value="receita">Receita</option>
+            <option value="transferência">Transferência</option>
+            <option value="aporte">Aporte</option>
+          </select>
+          <input
+            value={draft.categoriaSugerida || ""}
+            placeholder="Categoria sugerida"
+            onChange={(e) =>
+              setDraft({ ...draft, categoriaSugerida: e.target.value })
+            }
+          />
+          <input
+            value={draft.contaOuCartaoSugerido || ""}
+            placeholder="Conta ou cartão"
+            onChange={(e) =>
+              setDraft({ ...draft, contaOuCartaoSugerido: e.target.value })
+            }
+          />
+          <button className="primary" onClick={save}>
+            Confirmar estimativa
+          </button>
+        </div>
+      )}
+    </section>
+  );
 }
 
 function ImportPage({
@@ -568,14 +1500,17 @@ function ImportPage({
   const [account, setAccount] = useState(data.accounts[0]?.id || "");
   const [operator, setOperator] = useState<Member>("Olcino");
   const [preview, setPreview] = useState<Preview>();
-  const [pdfPassword, setPdfPassword] = useState(() => sessionStorage.getItem("inter-pdf-password") || "");
+  const [pdfPassword, setPdfPassword] = useState(
+    () => sessionStorage.getItem("inter-pdf-password") || "",
+  );
   const [rememberPassword, setRememberPassword] = useState(false);
   const input = useRef<HTMLInputElement>(null);
   const choose = async (file?: File) => {
     if (!file || !account)
       return setMessage("Cadastre e selecione uma conta antes de importar.");
     try {
-      if (rememberPassword && pdfPassword) sessionStorage.setItem("inter-pdf-password", pdfPassword);
+      if (rememberPassword && pdfPassword)
+        sessionStorage.setItem("inter-pdf-password", pdfPassword);
       else sessionStorage.removeItem("inter-pdf-password");
       setPreview(await previewFile(file, data, account, operator, pdfPassword));
     } catch (e) {
@@ -627,7 +1562,11 @@ function ImportPage({
           autoComplete="off"
         />
         <label>
-          <input type="checkbox" checked={rememberPassword} onChange={(e) => setRememberPassword(e.target.checked)} />
+          <input
+            type="checkbox"
+            checked={rememberPassword}
+            onChange={(e) => setRememberPassword(e.target.checked)}
+          />
           Lembrar somente até fechar o navegador
         </label>
         <input
@@ -729,12 +1668,16 @@ function Transactions({
   mutate: (f: (d: FamilyData) => void) => void;
 }) {
   const [filter, setFilter] = useState("all");
-  const [startDate,setStartDate]=useState(`${month}-01`);
-  const [endDate,setEndDate]=useState(`${month}-31`);
-  useEffect(()=>{setStartDate(`${month}-01`);setEndDate(`${month}-31`)},[month]);
+  const [startDate, setStartDate] = useState(`${month}-01`);
+  const [endDate, setEndDate] = useState(`${month}-31`);
+  useEffect(() => {
+    setStartDate(`${month}-01`);
+    setEndDate(`${month}-31`);
+  }, [month]);
   const rows = data.transactions.filter(
     (t) =>
-      t.date >= startDate && t.date <= endDate &&
+      t.date >= startDate &&
+      t.date <= endDate &&
       (filter === "all" || t.classification === filter),
   );
   const update = (id: string, patch: Partial<Transaction>, learn = false) =>
@@ -770,7 +1713,24 @@ function Transactions({
           <option value="confirmed">Confirmados</option>
         </select>
       </div>
-      <div className="form-row date-range"><label>De<input type="date" value={startDate} onChange={e=>setStartDate(e.target.value)}/></label><label>Até<input type="date" value={endDate} onChange={e=>setEndDate(e.target.value)}/></label></div>
+      <div className="form-row date-range">
+        <label>
+          De
+          <input
+            type="date"
+            value={startDate}
+            onChange={(e) => setStartDate(e.target.value)}
+          />
+        </label>
+        <label>
+          Até
+          <input
+            type="date"
+            value={endDate}
+            onChange={(e) => setEndDate(e.target.value)}
+          />
+        </label>
+      </div>
       <div className="transaction-list">
         {rows.map((t) => (
           <div className="transaction-edit" key={t.id}>
@@ -1090,7 +2050,8 @@ function Payments({
     if (!due || !/^\d{4}-\d{2}-\d{2}$/.test(due))
       return alert("Use a data no formato AAAA-MM-DD.");
     const kind = prompt("Tipo do compromisso:", current.kind) as
-      Obligation["kind"] | null;
+      | Obligation["kind"]
+      | null;
     if (!kind) return;
     const recurrence = prompt(
       "Repetição: none, monthly ou yearly",
@@ -1415,11 +2376,47 @@ function Tasks({
 }: {
   data: FamilyData;
   mutate: (f: (d: FamilyData) => void) => void;
-  currentMember: "Olcino"|"Mari";
+  currentMember: "Olcino" | "Mari";
 }) {
   const [show, setShow] = useState(false);
-  const migratedResponsibilities=useRef(false);
-  useEffect(()=>{if(migratedResponsibilities.current)return;migratedResponsibilities.current=true;mutate(d=>{const existing=new Set(d.tasks.map(t=>normalize(t.title)));const source=d.chores?.length?d.chores:initialChores.map(title=>({title,assignee:"Ambos" as Member,frequency:"weekly" as const,completionHistory:[]}));for(const chore of source){if(existing.has(normalize(chore.title)))continue;d.tasks.push({...audit(),title:chore.title,assignee:chore.assignee,due:new Date().toISOString(),priority:"Média",status:"Pendente",repeat:chore.frequency==="daily"?"daily":chore.frequency==="monthly"?"monthly":"weekly",shift:"Livre",weekdays:chore.frequency==="weekly"?[1]:undefined,checklist:[],history:chore.completionHistory||[]})}d.chores=[]})},[]);
+  const migratedResponsibilities = useRef(false);
+  useEffect(() => {
+    if (migratedResponsibilities.current) return;
+    migratedResponsibilities.current = true;
+    mutate((d) => {
+      const existing = new Set(d.tasks.map((t) => normalize(t.title)));
+      const source = d.chores?.length
+        ? d.chores
+        : initialChores.map((title) => ({
+            title,
+            assignee: "Ambos" as Member,
+            frequency: "weekly" as const,
+            completionHistory: [],
+          }));
+      for (const chore of source) {
+        if (existing.has(normalize(chore.title))) continue;
+        d.tasks.push({
+          ...audit(),
+          title: chore.title,
+          assignee: chore.assignee,
+          due: new Date().toISOString(),
+          priority: "Média",
+          status: "Pendente",
+          repeat:
+            chore.frequency === "daily"
+              ? "daily"
+              : chore.frequency === "monthly"
+                ? "monthly"
+                : "weekly",
+          shift: "Livre",
+          weekdays: chore.frequency === "weekly" ? [1] : undefined,
+          checklist: [],
+          history: chore.completionHistory || [],
+        });
+      }
+      d.chores = [];
+    });
+  }, []);
   const add = (fd: FormData) =>
     mutate((d) =>
       d.tasks.push({
@@ -1430,7 +2427,7 @@ function Tasks({
         priority: String(fd.get("priority")) as Task["priority"],
         status: "Pendente",
         repeat: String(fd.get("repeat")) as Task["repeat"],
-        shift: String(fd.get("shift")||"Livre") as Task["shift"],
+        shift: String(fd.get("shift") || "Livre") as Task["shift"],
         weekdays: fd.getAll("weekday").map(Number),
         checklist: [],
         history: [],
@@ -1444,8 +2441,11 @@ function Tasks({
       else {
         const dt = new Date(t.due);
         if (t.repeat === "daily") dt.setDate(dt.getDate() + 1);
-        if (t.repeat === "weekly" && t.weekdays?.length) { do { dt.setDate(dt.getDate()+1); } while(!t.weekdays.includes(dt.getDay())); }
-        else if (t.repeat === "weekly") dt.setDate(dt.getDate() + 7);
+        if (t.repeat === "weekly" && t.weekdays?.length) {
+          do {
+            dt.setDate(dt.getDate() + 1);
+          } while (!t.weekdays.includes(dt.getDay()));
+        } else if (t.repeat === "weekly") dt.setDate(dt.getDate() + 7);
         if (t.repeat === "monthly") dt.setMonth(dt.getMonth() + 1);
         if (t.repeat === "yearly") dt.setFullYear(dt.getFullYear() + 1);
         t.due = dt.toISOString();
@@ -1482,10 +2482,20 @@ function Tasks({
       item.due = new Date(due).toISOString();
       item.assignee = assignee;
       item.repeat = repeat;
-      const shift=prompt("Turno: Manhã, Tarde, Noite ou Livre",item.shift||"Livre") as Task["shift"]|null;
-      if(shift)item.shift=shift;
-      const days=prompt("Dias da semana (0=dom, 1=seg ... 6=sáb), separados por vírgula",(item.weekdays||[]).join(","));
-      if(days!==null)item.weekdays=days.split(",").map(Number).filter(n=>n>=0&&n<=6);
+      const shift = prompt(
+        "Turno: Manhã, Tarde, Noite ou Livre",
+        item.shift || "Livre",
+      ) as Task["shift"] | null;
+      if (shift) item.shift = shift;
+      const days = prompt(
+        "Dias da semana (0=dom, 1=seg ... 6=sáb), separados por vírgula",
+        (item.weekdays || []).join(","),
+      );
+      if (days !== null)
+        item.weekdays = days
+          .split(",")
+          .map(Number)
+          .filter((n) => n >= 0 && n <= 6);
       item.updatedAt = now();
       item.version++;
     });
@@ -1496,9 +2506,42 @@ function Tasks({
         d.tasks = d.tasks.filter((t) => t.id !== id);
       });
   };
-  const active=data.tasks.filter(t=>t.status!=="Concluída").slice().sort((a,b)=>a.due.localeCompare(b.due));
-  const dayNames=["dom","seg","ter","qua","qui","sex","sáb"];
-  const renderTasks=(items:Task[])=><div className="task-list">{items.map(t=><article key={t.id} className={new Date(t.due)<new Date()?"overdue":""}><button className="check" onClick={()=>done(t.id)}><CheckCircle2/></button><div><h3>{t.title}</h3><small>{new Date(t.due).toLocaleString("pt-BR")} · {t.assignee} · {t.shift||"Livre"}{t.weekdays?.length?` · ${t.weekdays.map(d=>dayNames[d]).join(", ")}`:""}</small></div><Badge text={t.priority}/><div className="actions task-actions"><button onClick={()=>edit(t.id)}>Editar</button><button className="danger-button" onClick={()=>remove(t.id)}><Trash2 size={15}/> Excluir</button></div></article>)}</div>;
+  const active = data.tasks
+    .filter((t) => t.status !== "Concluída")
+    .slice()
+    .sort((a, b) => a.due.localeCompare(b.due));
+  const dayNames = ["dom", "seg", "ter", "qua", "qui", "sex", "sáb"];
+  const renderTasks = (items: Task[]) => (
+    <div className="task-list">
+      {items.map((t) => (
+        <article
+          key={t.id}
+          className={new Date(t.due) < new Date() ? "overdue" : ""}
+        >
+          <button className="check" onClick={() => done(t.id)}>
+            <CheckCircle2 />
+          </button>
+          <div>
+            <h3>{t.title}</h3>
+            <small>
+              {new Date(t.due).toLocaleString("pt-BR")} · {t.assignee} ·{" "}
+              {t.shift || "Livre"}
+              {t.weekdays?.length
+                ? ` · ${t.weekdays.map((d) => dayNames[d]).join(", ")}`
+                : ""}
+            </small>
+          </div>
+          <Badge text={t.priority} />
+          <div className="actions task-actions">
+            <button onClick={() => edit(t.id)}>Editar</button>
+            <button className="danger-button" onClick={() => remove(t.id)}>
+              <Trash2 size={15} /> Excluir
+            </button>
+          </div>
+        </article>
+      ))}
+    </div>
+  );
   return (
     <section className="panel">
       <div className="panel-head">
@@ -1554,16 +2597,37 @@ function Tasks({
                 <option value="monthly">Mensal</option>
                 <option value="yearly">Anual</option>
               </select>
-              <select name="shift"><option>Livre</option><option>Manhã</option><option>Tarde</option><option>Noite</option></select>
-              <fieldset className="weekday-picker"><legend>Dias da semana</legend>{dayNames.map((day,index)=><label key={day}><input type="checkbox" name="weekday" value={index}/>{day}</label>)}</fieldset>
+              <select name="shift">
+                <option>Livre</option>
+                <option>Manhã</option>
+                <option>Tarde</option>
+                <option>Noite</option>
+              </select>
+              <fieldset className="weekday-picker">
+                <legend>Dias da semana</legend>
+                {dayNames.map((day, index) => (
+                  <label key={day}>
+                    <input type="checkbox" name="weekday" value={index} />
+                    {day}
+                  </label>
+                ))}
+              </fieldset>
             </>
           }
         />
       )}
       <h3>Minhas responsabilidades e tarefas</h3>
-      {renderTasks(active.filter(t=>t.assignee===currentMember||t.assignee==="Ambos"))}
+      {renderTasks(
+        active.filter(
+          (t) => t.assignee === currentMember || t.assignee === "Ambos",
+        ),
+      )}
       <h3>Outras responsabilidades e tarefas</h3>
-      {renderTasks(active.filter(t=>t.assignee!==currentMember&&t.assignee!=="Ambos"))}
+      {renderTasks(
+        active.filter(
+          (t) => t.assignee !== currentMember && t.assignee !== "Ambos",
+        ),
+      )}
     </section>
   );
 }
@@ -1574,14 +2638,14 @@ function Config({
   mutate,
   connect,
   setMessage,
-  mode="all",
+  mode = "all",
 }: {
   data: FamilyData;
   setData: (d: FamilyData) => void;
   mutate: (f: (d: FamilyData) => void) => void;
   connect: () => void;
   setMessage: (s: string) => void;
-  mode?: "all"|"accounts"|"categories";
+  mode?: "all" | "accounts" | "categories";
 }) {
   const restore = async (file?: File) => {
     if (!file) return;
@@ -1610,7 +2674,8 @@ function Config({
     const institution = prompt("Instituição:", a.institution);
     if (!institution) return;
     const kind = prompt("Tipo: checking, card, investment ou cash", a.kind) as
-      Account["kind"] | null;
+      | Account["kind"]
+      | null;
     if (!kind || !["checking", "card", "investment", "cash"].includes(kind))
       return alert("Tipo inválido.");
     const operator = prompt(
@@ -1644,60 +2709,64 @@ function Config({
   };
   return (
     <div className="grid two">
-      {mode!=="categories"&&<section className="panel">
-        <h2>Contas e cartões</h2>
-        <QuickForm
-          onSubmit={addAccount}
-          fields={[
-            ["name", "Nome da conta/cartão", "text"],
-            ["institution", "Instituição", "text"],
-          ]}
-          extras={
-            <>
-              <select name="kind">
-                <option value="checking">Conta corrente</option>
-                <option value="card">Cartão</option>
-                <option value="investment">Investimento</option>
-                <option value="cash">Dinheiro</option>
-              </select>
-              <select name="operator">
-                <option>Olcino</option>
-                <option>Mari</option>
-                <option>Ambos</option>
-              </select>
-            </>
-          }
-        />
-        <div className="list">
-          {data.accounts.map((a) => (
-            <div className="row editable-row" key={a.id}>
-              <div>
-                <b>{a.name}</b>
-                <small>
-                  {a.institution} · {a.operator} · {a.kind}
-                </small>
+      {mode !== "categories" && (
+        <section className="panel">
+          <h2>Contas e cartões</h2>
+          <QuickForm
+            onSubmit={addAccount}
+            fields={[
+              ["name", "Nome da conta/cartão", "text"],
+              ["institution", "Instituição", "text"],
+            ]}
+            extras={
+              <>
+                <select name="kind">
+                  <option value="checking">Conta corrente</option>
+                  <option value="card">Cartão</option>
+                  <option value="investment">Investimento</option>
+                  <option value="cash">Dinheiro</option>
+                </select>
+                <select name="operator">
+                  <option>Olcino</option>
+                  <option>Mari</option>
+                  <option>Ambos</option>
+                </select>
+              </>
+            }
+          />
+          <div className="list">
+            {data.accounts.map((a) => (
+              <div className="row editable-row" key={a.id}>
+                <div>
+                  <b>{a.name}</b>
+                  <small>
+                    {a.institution} · {a.operator} · {a.kind}
+                  </small>
+                </div>
+                <div className="actions">
+                  <button onClick={() => editAccount(a.id)}>Editar</button>
+                  <button
+                    className="danger-button"
+                    onClick={() => removeAccount(a.id)}
+                  >
+                    <Trash2 size={15} />
+                  </button>
+                </div>
               </div>
-              <div className="actions">
-                <button onClick={() => editAccount(a.id)}>Editar</button>
-                <button
-                  className="danger-button"
-                  onClick={() => removeAccount(a.id)}
-                >
-                  <Trash2 size={15} />
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-      </section>}
-      {mode!=="accounts"&&<section className="panel">
-        <h2>Categorias</h2>
-        <p className="muted">
-          {data.categories.length} categorias · {data.rules.length} regras
-          aprendidas
-        </p>
-        <CategoryEditor data={data} mutate={mutate} />
-      </section>}
+            ))}
+          </div>
+        </section>
+      )}
+      {mode !== "accounts" && (
+        <section className="panel">
+          <h2>Categorias</h2>
+          <p className="muted">
+            {data.categories.length} categorias · {data.rules.length} regras
+            aprendidas
+          </p>
+          <CategoryEditor data={data} mutate={mutate} />
+        </section>
+      )}
     </div>
   );
 }
@@ -1715,7 +2784,10 @@ function CategoryEditor({
         ...audit(),
         name: String(fd.get("name")),
         nature: String(fd.get("nature")) as
-          "expense" | "income" | "transfer" | "goal",
+          | "expense"
+          | "income"
+          | "transfer"
+          | "goal",
         subcategories: [],
       }),
     );
@@ -2141,8 +3213,22 @@ function parseCurrency(value: FormDataEntryValue | null | undefined) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function CurrencyInput({value,onChange}:{value:number;onChange:(value:number)=>void}) {
-  return <input type="number" inputMode="decimal" step="0.01" value={value} onChange={event=>onChange(Number(event.target.value))} />;
+function CurrencyInput({
+  value,
+  onChange,
+}: {
+  value: number;
+  onChange: (value: number) => void;
+}) {
+  return (
+    <input
+      type="number"
+      inputMode="decimal"
+      step="0.01"
+      value={value}
+      onChange={(event) => onChange(Number(event.target.value))}
+    />
+  );
 }
 
 function MoneyInput({
