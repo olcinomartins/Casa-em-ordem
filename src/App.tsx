@@ -279,7 +279,7 @@ export default function App() {
         )}
         {page === "visao" && <><Collapsible title="Painel" open><Dashboard data={data} month={month} view={view} setView={setView} /></Collapsible><Collapsible title="Análises históricas"><Analytics data={data} /></Collapsible></>}
         {page === "rotinas" && <><Collapsible title="Responsabilidades, tarefas e agenda" open><Tasks data={data} mutate={mutate} currentMember={currentMember} /></Collapsible><Collapsible title="Central de pagamentos"><Payments data={data} mutate={mutate} /></Collapsible></>}
-        {page === "planejamento" && <><Collapsible title="Contas, cartões e categorias" open><Config data={data} setData={setData} mutate={mutate} connect={connect} setMessage={setMessage} /></Collapsible><Collapsible title="Orçamentos"><Budgets data={data} month={month} view={view} setView={setView} mutate={mutate} /></Collapsible><Collapsible title="Metas e reservas"><Goals data={data} mutate={mutate} /></Collapsible></>}
+        {page === "planejamento" && <><Collapsible title="Contas e cartões" open><Config mode="accounts" data={data} setData={setData} mutate={mutate} connect={connect} setMessage={setMessage} /></Collapsible><Collapsible title="Categorias de despesas e receitas"><Config mode="categories" data={data} setData={setData} mutate={mutate} connect={connect} setMessage={setMessage} /></Collapsible><Collapsible title="Orçamentos"><Budgets data={data} month={month} view={view} setView={setView} mutate={mutate} /></Collapsible><Collapsible title="Metas e reservas"><Goals data={data} mutate={mutate} /></Collapsible></>}
         {page === "importar" && <><Collapsible title="Importar extratos e faturas" open><ImportPage data={data} mutate={mutate} setMessage={setMessage} /></Collapsible><Collapsible title="Transações e revisão"><Transactions data={data} month={month} mutate={mutate} /></Collapsible></>}
         {page === "supermercado" && <Receipts data={data} mutate={mutate} setMessage={setMessage} />}
       </main>
@@ -357,6 +357,7 @@ function Dashboard({
       !["Paga", "Confirmada", "Dispensada"].includes(o.status) &&
       o.dueDate <= dateOnly(new Date(Date.now() + 14 * 864e5)),
   ).length;
+  const expectedBeforeClosing=data.obligations.filter(o=>monthOf(o.dueDate)===month&&!['Paga','Confirmada','Dispensada'].includes(o.status)).reduce((sum,o)=>sum+o.planned,0);
   return (
     <>
       <div className="toolbar">
@@ -383,11 +384,7 @@ function Dashboard({
           hint="Antes dos aportes"
           tone={income - expenses("cash") < 0 ? "bad" : "good"}
         />
-        <Card
-          label="Para revisar"
-          value={String(pending + due)}
-          hint={`${pending} lançamentos · ${due} contas`}
-        />
+        <Card label="Estimativa antes do fechamento" value={money(expenses("cash")+expectedBeforeClosing)} hint={`${money(expenses("cash"))} confirmado · ${money(expectedBeforeClosing)} previsto`} />
       </section>
       <section className="grid two">
         <div className="panel">
@@ -720,9 +717,12 @@ function Transactions({
   mutate: (f: (d: FamilyData) => void) => void;
 }) {
   const [filter, setFilter] = useState("all");
+  const [startDate,setStartDate]=useState(`${month}-01`);
+  const [endDate,setEndDate]=useState(`${month}-31`);
+  useEffect(()=>{setStartDate(`${month}-01`);setEndDate(`${month}-31`)},[month]);
   const rows = data.transactions.filter(
     (t) =>
-      monthOf(t.date) === month &&
+      t.date >= startDate && t.date <= endDate &&
       (filter === "all" || t.classification === filter),
   );
   const update = (id: string, patch: Partial<Transaction>, learn = false) =>
@@ -758,6 +758,7 @@ function Transactions({
           <option value="confirmed">Confirmados</option>
         </select>
       </div>
+      <div className="form-row date-range"><label>De<input type="date" value={startDate} onChange={e=>setStartDate(e.target.value)}/></label><label>Até<input type="date" value={endDate} onChange={e=>setEndDate(e.target.value)}/></label></div>
       <div className="transaction-list">
         {rows.map((t) => (
           <div className="transaction-edit" key={t.id}>
@@ -1561,12 +1562,14 @@ function Config({
   mutate,
   connect,
   setMessage,
+  mode="all",
 }: {
   data: FamilyData;
   setData: (d: FamilyData) => void;
   mutate: (f: (d: FamilyData) => void) => void;
   connect: () => void;
   setMessage: (s: string) => void;
+  mode?: "all"|"accounts"|"categories";
 }) {
   const restore = async (file?: File) => {
     if (!file) return;
@@ -1629,7 +1632,7 @@ function Config({
   };
   return (
     <div className="grid two">
-      <section className="panel">
+      {mode!=="categories"&&<section className="panel">
         <h2>Contas e cartões</h2>
         <QuickForm
           onSubmit={addAccount}
@@ -1674,15 +1677,15 @@ function Config({
             </div>
           ))}
         </div>
-      </section>
-      <section className="panel">
+      </section>}
+      {mode!=="accounts"&&<section className="panel">
         <h2>Categorias</h2>
         <p className="muted">
           {data.categories.length} categorias · {data.rules.length} regras
           aprendidas
         </p>
         <CategoryEditor data={data} mutate={mutate} />
-      </section>
+      </section>}
     </div>
   );
 }
