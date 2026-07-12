@@ -1315,9 +1315,7 @@ function VoiceExpense({
         setProcessing(true);
         try {
           setDraft(
-            await readVoiceExpense(
-              new Blob(chunks.current, { type: active.mimeType }),
-            ),
+            await readVoiceExpense(new Blob(chunks.current, { type: active.mimeType }),{categories:data.categories.map(category=>({name:category.name,subcategories:category.subcategories})),accounts:data.accounts.filter(account=>account.active).map(account=>({name:account.name,institution:account.institution,operator:account.operator}))}),
           );
           setMessage("Áudio interpretado. Confira antes de registrar.");
         } catch (error) {
@@ -1342,15 +1340,9 @@ function VoiceExpense({
   const save = async () => {
     if (!draft?.descricao || !draft.valor || !draft.data)
       return setMessage("Confira descrição, valor e data.");
-    const category = data.categories.find((c) =>
-      normalize(c.name).includes(normalize(draft.categoriaSugerida || "")),
-    );
+    const category = data.categories.find((c) => c.name===draft.categoriaSugerida);
     const account =
-      data.accounts.find((a) =>
-        normalize(a.name).includes(
-          normalize(draft.contaOuCartaoSugerido || ""),
-        ),
-      ) || data.accounts[0];
+      data.accounts.find((a) => a.name===draft.contaOuCartaoSugerido) || data.accounts[0];
     if (!account)
       return setMessage("Cadastre uma conta ou cartão antes de registrar.");
     const amount =
@@ -1367,10 +1359,8 @@ function VoiceExpense({
       normalized: normalize(draft.descricao),
       amount,
       accountId: account.id,
-      operator: currentMember,
-      scope: (draft.escopoSugerido === "Familiar"
-        ? "Familiar"
-        : `Pessoal — ${currentMember}`) as Transaction["scope"],
+      operator: (["Olcino","Mari","Ambos"].includes(draft.responsavelSugerido||"")?draft.responsavelSugerido:currentMember) as Member,
+      scope: (["Familiar","Pessoal — Olcino","Pessoal — Mari","Transferência interna","Fora do orçamento"].includes(draft.escopoSugerido||"")?draft.escopoSugerido:"Familiar") as Transaction["scope"],
       categoryId: category?.id,
       subcategory: draft.subcategoriaSugerida,
       classification: "suggested" as const,
@@ -1465,20 +1455,11 @@ function VoiceExpense({
             <option value="transferência">Transferência</option>
             <option value="aporte">Aporte</option>
           </select>
-          <input
-            value={draft.categoriaSugerida || ""}
-            placeholder="Categoria sugerida"
-            onChange={(e) =>
-              setDraft({ ...draft, categoriaSugerida: e.target.value })
-            }
-          />
-          <input
-            value={draft.contaOuCartaoSugerido || ""}
-            placeholder="Conta ou cartão"
-            onChange={(e) =>
-              setDraft({ ...draft, contaOuCartaoSugerido: e.target.value })
-            }
-          />
+          <select value={draft.categoriaSugerida||""} onChange={e=>setDraft({...draft,categoriaSugerida:e.target.value,subcategoriaSugerida:data.categories.find(c=>c.name===e.target.value)?.subcategories[0]})}><option value="">Selecione a categoria</option>{data.categories.map(category=><option key={category.id} value={category.name}>{category.name}</option>)}</select>
+          <select value={draft.subcategoriaSugerida||""} onChange={e=>setDraft({...draft,subcategoriaSugerida:e.target.value})}><option value="">Selecione a subcategoria</option>{data.categories.find(category=>category.name===draft.categoriaSugerida)?.subcategories.map(subcategory=><option key={subcategory}>{subcategory}</option>)}</select>
+          <select value={draft.contaOuCartaoSugerido||""} onChange={e=>setDraft({...draft,contaOuCartaoSugerido:e.target.value})}><option value="">Selecione a conta ou cartão</option>{data.accounts.filter(account=>account.active).map(account=><option key={account.id} value={account.name}>{account.institution} · {account.name}</option>)}</select>
+          <select value={draft.responsavelSugerido||currentMember} onChange={e=>setDraft({...draft,responsavelSugerido:e.target.value})}><option>Olcino</option><option>Mari</option><option>Ambos</option></select>
+          <select value={draft.escopoSugerido||"Familiar"} onChange={e=>setDraft({...draft,escopoSugerido:e.target.value})}><option>Familiar</option><option>Pessoal — Olcino</option><option>Pessoal — Mari</option><option>Transferência interna</option><option>Fora do orçamento</option></select>
           <button className="primary" onClick={save}>
             Confirmar estimativa
           </button>
