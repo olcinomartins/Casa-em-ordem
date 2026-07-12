@@ -397,7 +397,7 @@ th {
 }
 .transaction-edit {
   display: grid;
-  grid-template-columns: 1.7fr 1fr 1fr 1fr auto auto;
+  grid-template-columns: auto 1.7fr 1fr 1fr 1fr auto auto;
   gap: 0.5rem;
   align-items: center;
   padding: 0.65rem 0;
@@ -413,6 +413,10 @@ th {
 .icon svg {
   width: 19px;
 }
+.bulk-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: .55rem; padding: .8rem; margin: .8rem 0; border-radius: 12px; background: #eef3ef; }
+.bulk-toolbar label { display: flex; align-items: center; gap: .35rem; }
+.bulk-category { display: grid; gap: .55rem; padding: .8rem; margin-bottom: 1rem; border: 1px solid var(--line); border-radius: 12px; }
+.bulk-category textarea { width: 100%; resize: vertical; }
 .budget-line {
   display: flex;
   align-items: center;

@@ -1480,39 +1480,31 @@ function ImportPage({
 }) {
   const [account, setAccount] = useState(data.accounts[0]?.id || "");
   const [operator, setOperator] = useState<Member>("Olcino");
-  const [preview, setPreview] = useState<Preview>();
+  const [previews, setPreviews] = useState<Preview[]>([]);
   const [pdfPassword, setPdfPassword] = useState(
     () => sessionStorage.getItem("inter-pdf-password") || "",
   );
   const [rememberPassword, setRememberPassword] = useState(false);
   const input = useRef<HTMLInputElement>(null);
-  const choose = async (file?: File) => {
-    if (!file || !account)
+  const choose = async (files: File[]) => {
+    if (!files.length || !account)
       return setMessage("Cadastre e selecione uma conta antes de importar.");
     try {
       if (rememberPassword && pdfPassword)
         sessionStorage.setItem("inter-pdf-password", pdfPassword);
       else sessionStorage.removeItem("inter-pdf-password");
-      setPreview(await previewFile(file, data, account, operator, pdfPassword));
+      const loaded:Preview[]=[];for(let index=0;index<files.length;index++){setMessage(`Processando arquivo ${index+1} de ${files.length}…`);try{loaded.push(await previewFile(files[index],data,account,operator,pdfPassword))}catch(error){setMessage(`${files[index].name}: ${(error as Error).message}`)}}setPreviews(loaded);
     } catch (e) {
       setMessage((e as Error).message);
     }
   };
   const confirm = () => {
-    if (!preview) return;
+    if (!previews.length) return;
     mutate((d) => {
-      d.transactions.push(...preview.rows);
-      d.imports.push({
-        ...audit(operator),
-        filename: preview.filename,
-        hash: preview.hash,
-        institution: preview.institution,
-        count: preview.rows.length,
-        duplicates: preview.duplicates,
-      });
+      for(const preview of previews){d.transactions.push(...preview.rows);d.imports.push({...audit(operator),filename:preview.filename,hash:preview.hash,institution:preview.institution,count:preview.rows.length,duplicates:preview.duplicates})}
     });
-    setMessage(`${preview.rows.length} lançamentos importados.`);
-    setPreview(undefined);
+    setMessage(`${previews.reduce((sum,item)=>sum+item.rows.length,0)} lançamentos de ${previews.length} arquivo(s) importados.`);
+    setPreviews([]);
   };
   return (
     <section className="panel">
@@ -1554,28 +1546,17 @@ function ImportPage({
           ref={input}
           type="file"
           accept=".pdf,.csv,.xls,.xlsx,.xlsm"
+          multiple
           hidden
-          onChange={(e) => choose(e.target.files?.[0])}
+          onChange={(e) => choose(Array.from(e.target.files||[]))}
         />
         <button className="primary" onClick={() => input.current?.click()}>
           <Upload size={17} /> Escolher arquivo
         </button>
       </div>
-      {preview && (
+      {previews.length>0 && (
         <>
-          <div className="summary">
-            <b>{preview.filename}</b>
-            <span>{preview.rows.length} novos</span>
-            <span>{preview.duplicates} duplicados ignorados</span>
-            <span>
-              {
-                preview.rows.filter((r) => r.classification === "suggested")
-                  .length
-              }{" "}
-              sugestões
-            </span>
-          </div>
-          <TransactionTable rows={preview.rows.slice(0, 100)} data={data} />
+          {previews.map(preview=><div key={preview.hash}><div className="summary"><b>{preview.filename}</b><span>{preview.rows.length} novos</span><span>{preview.duplicates} duplicados ignorados</span><span>{preview.rows.filter(r=>r.classification==="suggested").length} sugestões</span></div><TransactionTable rows={preview.rows.slice(0,20)} data={data}/></div>)}
           <button className="primary end" onClick={confirm}>
             Confirmar importação
           </button>
@@ -1649,6 +1630,9 @@ function Transactions({
   mutate: (f: (d: FamilyData) => void) => void;
 }) {
   const [filter, setFilter] = useState("all");
+  const [selected,setSelected]=useState<Set<string>>(new Set());
+  const [bulkCategory,setBulkCategory]=useState("");
+  const undoTransactions=useRef<Transaction[]>();
   const [startDate, setStartDate] = useState(`${month}-01`);
   const [endDate, setEndDate] = useState(`${month}-31`);
   useEffect(() => {
@@ -1677,6 +1661,10 @@ function Transactions({
         d.transactions = d.transactions.filter((t) => t.id !== id);
       });
   };
+  const selectedRows=rows.filter(row=>selected.has(row.id));
+  const remember=()=>{undoTransactions.current=structuredClone(data.transactions)};
+  const bulkApply=(action:"confirm"|"category"|"delete")=>{if(!selectedRows.length)return;const total=selectedRows.reduce((sum,row)=>sum+Math.abs(row.amount),0);if(!confirm(`${action==="delete"?"Excluir":"Alterar"} ${selectedRows.length} lançamento(s), total ${money(total)}?`))return;remember();mutate(d=>{if(action==="delete")d.transactions=d.transactions.filter(row=>!selected.has(row.id));else d.transactions.filter(row=>selected.has(row.id)).forEach(row=>{if(action==="confirm")row.classification="confirmed";if(action==="category"){const category=d.categories.find(c=>c.id===bulkCategory);row.categoryId=bulkCategory;row.subcategory=category?.subcategories[0];row.classification="confirmed"}row.updatedAt=now();row.version++})});setSelected(new Set())};
+  const undoBulk=()=>{if(!undoTransactions.current)return;const snapshot=undoTransactions.current;mutate(d=>{d.transactions=snapshot});undoTransactions.current=undefined};
   return (
     <section className="panel">
       <div className="panel-head">
@@ -1712,9 +1700,11 @@ function Transactions({
           />
         </label>
       </div>
+      <div className="bulk-toolbar"><label><input type="checkbox" checked={rows.length>0&&selectedRows.length===rows.length} onChange={e=>setSelected(e.target.checked?new Set(rows.map(row=>row.id)):new Set())}/> Selecionar todos os filtrados</label><b>{selectedRows.length} selecionado(s) · {money(selectedRows.reduce((sum,row)=>sum+Math.abs(row.amount),0))}</b><button onClick={()=>bulkApply("confirm")}>Confirmar em massa</button><select value={bulkCategory} onChange={e=>setBulkCategory(e.target.value)}><option value="">Categoria em massa</option>{data.categories.map(category=><option key={category.id} value={category.id}>{category.name}</option>)}</select><button disabled={!bulkCategory} onClick={()=>bulkApply("category")}>Aplicar categoria</button><button className="danger-button" onClick={()=>bulkApply("delete")}>Excluir selecionados</button>{undoTransactions.current&&<button onClick={undoBulk}>Desfazer última operação</button>}</div>
       <div className="transaction-list">
         {rows.map((t) => (
           <div className="transaction-edit" key={t.id}>
+            <input type="checkbox" checked={selected.has(t.id)} onChange={e=>setSelected(current=>{const next=new Set(current);e.target.checked?next.add(t.id):next.delete(t.id);return next})}/>
             <div className="tx-main">
               <b>{t.description}</b>
               <small>
@@ -2759,6 +2749,9 @@ function CategoryEditor({
   data: FamilyData;
   mutate: (f: (d: FamilyData) => void) => void;
 }) {
+  const [bulkText,setBulkText]=useState("");
+  const bulkRows=bulkText.split(/\r?\n/).map(line=>line.split(/[;,\t]/).map(value=>value.trim())).filter(row=>row[0]);
+  const createBulk=()=>{if(!bulkRows.length)return;const preview=bulkRows.slice(0,5).map(row=>`${row[0]} > ${row[1]||"sem subcategoria"}`).join("\n");if(!confirm(`Criar/atualizar ${bulkRows.length} linha(s)?\n\n${preview}${bulkRows.length>5?"\n…":""}`))return;mutate(d=>{for(const [name,subcategory,natureRaw] of bulkRows){let category=d.categories.find(c=>normalize(c.name)===normalize(name));if(!category){const nature=normalize(natureRaw||"DESPESA");category={...audit(),name,subcategories:[],nature:nature.includes("RECEITA")?"income":nature.includes("TRANSFER")?"transfer":nature.includes("META")?"goal":"expense"};d.categories.push(category)}if(subcategory&&!category.subcategories.some(item=>normalize(item)===normalize(subcategory)))category.subcategories.push(subcategory)}});setBulkText("")};
   const addCategory = (fd: FormData) =>
     mutate((d) =>
       d.categories.push({
@@ -2830,6 +2823,7 @@ function CategoryEditor({
   };
   return (
     <>
+      <div className="bulk-category"><h3>Criar categorias em massa</h3><p className="muted">Cole uma linha por subcategoria: Categoria; Subcategoria; Natureza.</p><textarea rows={6} value={bulkText} onChange={e=>setBulkText(e.target.value)} placeholder={'Alimentação;Supermercado;Despesa\nReceitas;Salário;Receita'}/><small>{bulkRows.length} linha(s) válida(s)</small><button className="primary" disabled={!bulkRows.length} onClick={createBulk}>Pré-visualizar e criar</button></div>
       <QuickForm
         onSubmit={addCategory}
         fields={[["name", "Nova categoria", "text"]]}
