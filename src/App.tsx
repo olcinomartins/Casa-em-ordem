@@ -65,6 +65,7 @@ import {
   recurringCheck,
   upsertRule,
   dedupeKey,
+  suggest,
 } from "./finance";
 import { previewFile, Preview } from "./importer";
 import { tasksToIcs } from "./ics";
@@ -516,7 +517,7 @@ function Dashboard({
     .filter(
       (o) =>
         monthOf(o.dueDate) === month &&
-        !["Paga", "Confirmada", "Dispensada"].includes(o.status),
+          !["Paga", "Dispensada"].includes(o.status),
     )
     .reduce((sum, o) => sum + o.planned, 0);
   return (
@@ -1996,16 +1997,18 @@ function Payments({
         dueDate: String(fd.get("due")),
         recurrence: String(fd.get("repeat")) as Obligation["recurrence"],
         tolerance: parseCurrency(fd.get("tolerance")),
+        accountId: String(fd.get("accountId") || "") || undefined,
         status: "A pagar",
       }),
     );
-  const mark = (id: string) =>
-    mutate((d) => {
-      const o = d.obligations.find((x) => x.id === id)!;
-      o.status = "Paga";
-      o.paidAt = dateOnly(new Date());
-      o.paidAmount = o.planned;
-    });
+  const mark = (id: string) => {
+    const current=data.obligations.find(o=>o.id===id)!;
+    const raw=prompt("Valor efetivamente pago:",money(current.planned)); if(raw===null)return;
+    const paidAmount=parseCurrency(raw); if(paidAmount<=0)return alert("Informe um valor maior que zero.");
+    const paidAt=prompt("Data efetiva do pagamento (AAAA-MM-DD):",dateOnly(new Date())); if(!paidAt||!/^\d{4}-\d{2}-\d{2}$/.test(paidAt))return alert("Data inválida.");
+    const account=current.accountId||data.accounts[0]?.id; if(!account)return alert("Cadastre uma conta para o pagamento.");
+    mutate(d=>{const o=d.obligations.find(x=>x.id===id)!;o.status="Paga";o.paidAt=paidAt;o.paidAmount=paidAmount;const rule=suggest(o.name,account,"Ambos",d.rules);d.transactions=d.transactions.filter(t=>t.obligationId!==id);d.transactions.push({...audit("Ambos"),date:paidAt,competence:monthOf(paidAt),purchaseDate:o.dueDate,paymentDate:paidAt,description:o.name,normalized:normalize(o.name),amount:paidAmount,accountId:account,operator:"Ambos",scope:"Familiar",categoryId:rule?.categoryId,subcategory:rule?.subcategory,classification:rule?"suggested":"pending",dedupeKey:`payment:${id}:${paidAt}`,transfer:false,movement:"expense_income",sourceKind:"statement",obligationId:id,notes:`Pagamento realizado. Previsto: ${money(o.planned)}`})});
+  };
   const edit = (id: string) => {
     const current = data.obligations.find((o) => o.id === id)!;
     const name = prompt("Nome do compromisso:", current.name);
@@ -2086,6 +2089,7 @@ function Payments({
                 <option value="monthly">Mensal</option>
                 <option value="yearly">Anual</option>
               </select>
+              <select name="accountId"><option value="">Conta do pagamento</option>{data.accounts.filter(account=>account.active).map(account=><option key={account.id} value={account.id}>{account.institution} · {account.name}</option>)}</select>
             </>
           }
         />
@@ -2132,7 +2136,7 @@ function Payments({
             );
           })}
       </div>
-      <details className="completed-block"><summary>Pagamentos confirmados ({data.obligations.filter(o=>["Paga","Confirmada","Dispensada"].includes(o.status)).length})</summary>{data.obligations.filter(o=>["Paga","Confirmada","Dispensada"].includes(o.status)).sort((a,b)=>b.dueDate.localeCompare(a.dueDate)).map(o=><div className="confirmed-row" key={o.id}><div><b>{o.name}</b><small>{o.dueDate} · {money(o.paidAmount??o.planned)} · {o.status}</small></div><button onClick={()=>mutate(d=>{const item=d.obligations.find(x=>x.id===o.id);if(item){item.status="A pagar";item.paidAt=undefined;item.paidAmount=undefined}})}>Desconfirmar</button></div>)}</details>
+      <details className="completed-block"><summary>Pagamentos confirmados ({data.obligations.filter(o=>["Paga","Confirmada","Dispensada"].includes(o.status)).length})</summary>{data.obligations.filter(o=>["Paga","Confirmada","Dispensada"].includes(o.status)).sort((a,b)=>b.dueDate.localeCompare(a.dueDate)).map(o=><div className="confirmed-row" key={o.id}><div><b>{o.name}</b><small>{o.dueDate} · {money(o.paidAmount??o.planned)} · {o.status}</small></div><button onClick={()=>mutate(d=>{const item=d.obligations.find(x=>x.id===o.id);if(item){item.status="A pagar";item.paidAt=undefined;item.paidAmount=undefined;d.transactions=d.transactions.filter(transaction=>transaction.obligationId!==o.id)}})}>Desconfirmar</button></div>)}</details>
       {!data.obligations.length && <Empty />}
     </section>
   );

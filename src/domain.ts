@@ -51,6 +51,7 @@ export interface Transaction extends Audit {
   sourceKind?: "card" | "statement";
   notes?: string;
   estimated?: boolean;
+  obligationId?: string;
 }
 export interface Rule extends Audit {
   pattern: string;
