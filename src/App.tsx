@@ -531,6 +531,7 @@ function Dashboard({
           value={money(income)}
           hint="Entradas líquidas no mês"
           tone="good"
+          details={data.transactions.filter(t=>t.amount<0&&Math.abs(realized(t,month,"cash"))>0).map(t=><Row key={t.id} a={t.description} b={t.paymentDate||t.date} c={money(Math.abs(t.amount))}/>) }
         />
         <Card
           label="Despesas no fluxo"
@@ -541,21 +542,23 @@ function Dashboard({
               : "Conforme pagamentos"
           }
           tone="bad"
+          details={data.transactions.filter(t=>t.amount>0&&Math.abs(realized(t,month,"cash"))>0).map(t=><Row key={t.id} a={t.description} b={t.paymentDate||t.date} c={money(t.amount)}/>) }
         />
         <Card
           label="Resultado de caixa"
           value={money(income - expenses("cash"))}
           hint="Antes dos aportes"
           tone={income - expenses("cash") < 0 ? "bad" : "good"}
+          details={<p>Entradas {money(income)} menos despesas realizadas {money(expenses("cash"))}.</p>}
         />
         <Card
           label="Estimativa antes do fechamento"
           value={money(expenses("cash") + expectedBeforeClosing)}
           hint={`${money(expenses("cash"))} realizado · ${money(expectedBeforeClosing)} ainda previsto`}
           tone="warning"
+          details={<><p>Despesas realizadas mais compromissos ainda previstos para {month}. Não é saldo bancário nem fatura fechada.</p>{data.obligations.filter(o=>monthOf(o.dueDate)===month&&!['Paga','Dispensada'].includes(o.status)).sort((a,b)=>a.dueDate.localeCompare(b.dueDate)).map(o=><Row key={o.id} a={o.name} b={`${o.dueDate} · ${o.status}`} c={money(o.planned)}/>)}</>}
         />
       </section>
-      <details className="estimate-breakdown"><summary>Entender a estimativa de {money(expenses("cash")+expectedBeforeClosing)}</summary><p>É a soma das despesas realizadas com os compromissos ainda previstos para {month}. Não representa o saldo bancário nem uma fatura já fechada.</p>{data.obligations.filter(o=>monthOf(o.dueDate)===month&&!['Paga','Dispensada'].includes(o.status)).sort((a,b)=>a.dueDate.localeCompare(b.dueDate)).map(o=><Row key={o.id} a={o.name} b={`${o.dueDate} · ${o.status}`} c={money(o.planned)}/>)}</details>
       <section className="grid two">
         <div className="panel">
           <h2>Orçado × realizado</h2>
@@ -639,19 +642,16 @@ function Card({
   value,
   hint,
   tone,
+  details,
 }: {
   label: string;
   value: string;
   hint: string;
   tone?: string;
+  details?: React.ReactNode;
 }) {
-  return (
-    <div className={`card ${tone || ""}`}>
-      <span>{label}</span>
-      <strong>{tone==="good"?"↑ ":tone==="bad"?"↓ ":tone==="warning"?"→ ":""}{value}</strong>
-      <small>{hint}</small>
-    </div>
-  );
+  const content=<><span>{label}</span><strong>{tone==="good"?"↑ ":tone==="bad"?"↓ ":tone==="warning"?"→ ":""}{value}</strong><small>{hint}</small></>;
+  return details?<details className={`card info-card ${tone||""}`}><summary>{content}<em>Toque para ver a composição</em></summary><div className="card-details">{details}</div></details>:<div className={`card ${tone||""}`}>{content}</div>;
 }
 function BudgetBars({
   data,
