@@ -1,14 +1,10 @@
-import { getDocument, GlobalWorkerOptions } from "pdfjs-dist/legacy/build/pdf.mjs";
-import PdfWorker from "pdfjs-dist/legacy/build/pdf.worker.min.mjs?worker";
+import { getDocument, GlobalWorkerOptions } from "pdfjs-dist/legacy/build/pdf.js";
+import pdfWorkerSrc from "pdfjs-dist/legacy/build/pdf.worker.min.js?url";
 import { readBlobArrayBuffer } from "./fileCompat";
 
-// Entrega o worker ao pipeline do Vite. Assim ele é transpilado e armazenado
-// pela PWA, em vez de ser copiado como um módulo bruto incompatível com Safari.
-let pdfWorker: Worker | undefined;
-const ensurePdfWorker = () => {
-  pdfWorker ??= new PdfWorker();
-  GlobalWorkerOptions.workerPort = pdfWorker;
-};
+// Usa o worker clássico do PDF.js 3 por uma URL versionada do Vite. A PWA
+// armazena esse arquivo no precache e o Safari/iOS não precisa iniciar ESM.
+GlobalWorkerOptions.workerSrc = pdfWorkerSrc;
 
 export type PdfInstitution = "Inter" | "XP" | "BTG";
 
@@ -208,11 +204,44 @@ export function parseXpInvoiceItems(
   items: string[],
   fallbackYear: number,
 ): InterPdfRow[] {
+  // Algumas versões do PDF.js/Safari entregam datas e valores da XP
+  // fragmentados ("15", "/", "04", "/", "26" e "-", "414", ",", "84").
+  // Reagrupamos somente esses formatos estruturais antes de ler a tabela.
+  const compact: string[] = [];
+  const source = items.map((item) => item.trim()).filter(Boolean);
+  for (let index = 0; index < source.length; index++) {
+    if (
+      /^\d{1,2}$/.test(source[index]) && source[index + 1] === "/" &&
+      /^\d{1,2}$/.test(source[index + 2] || "") && source[index + 3] === "/" &&
+      /^(?:\d{2}|\d{4})$/.test(source[index + 4] || "")
+    ) {
+      compact.push(source.slice(index, index + 5).join(""));
+      index += 4;
+      continue;
+    }
+    const sign = /^[+-]$/.test(source[index]) ? source[index] : "";
+    const integerIndex = index + (sign ? 1 : 0);
+    if (
+      /^[\d.]+$/.test(source[integerIndex] || "") && source[integerIndex + 1] === "," &&
+      /^\d{2}$/.test(source[integerIndex + 2] || "")
+    ) {
+      compact.push(`${sign}${source[integerIndex]},${source[integerIndex + 2]}`);
+      index = integerIndex + 2;
+      continue;
+    }
+    if (/^(?:R|US)$/i.test(source[index]) && source[index + 1] === "$") {
+      compact.push(`${source[index]}$`);
+      index++;
+      continue;
+    }
+    compact.push(source[index]);
+  }
+
   const rows: InterPdfRow[] = [];
   let active = false;
   let card = "";
-  for (let index = 0; index < items.length; index++) {
-    const item = items[index].trim();
+  for (let index = 0; index < compact.length; index++) {
+    const item = compact[index];
     const normalized = fold(item);
     const cardMatch = item.match(/\d{4}\*{2,}\d{4}|\*{4}\s*\d{4}/);
     if (cardMatch) card = cardMatch[0];
@@ -227,8 +256,8 @@ export function parseXpInvoiceItems(
     const description: string[] = [];
     let amount: number | undefined;
     let amountIndex = index;
-    for (let next = index + 1; next < Math.min(items.length, index + 16); next++) {
-      const candidate = items[next].trim();
+    for (let next = index + 1; next < Math.min(compact.length, index + 16); next++) {
+      const candidate = compact[next];
       const candidateNormalized = fold(candidate);
       if (!candidate) continue;
       if (/^(SUBTOTAL|TOTAL DA FATURA|ENCARGOS DA FATURA|DATA)$/.test(candidateNormalized)) break;
@@ -297,11 +326,11 @@ export const findPdfDueDate = (items: string[], fallbackYear: number) => {
 export async function readInterPdf(file: File, password?: string) {
   let task: ReturnType<typeof getDocument> | undefined;
   try {
-    ensurePdfWorker();
     const bytes = await preparePdfBytes(file);
     task = getDocument({
       data: bytes,
       password: password || undefined,
+      isEvalSupported: false,
     });
     const pdf = await task.promise;
     const all: string[] = [];

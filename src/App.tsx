@@ -75,7 +75,12 @@ import {
 import { previewFile, Preview } from "./importer";
 import { tasksToIcs } from "./ics";
 import { readReceipt, ReadReceipt } from "./receipts";
-import { getProtectedPdfPasswords, identifyPdfBank } from "./pdfPasswords";
+import {
+  getProtectedPdfPasswords,
+  identifyPdfBank,
+  isPdfPasswordError,
+  tryPdfPasswordCandidates,
+} from "./pdfPasswords";
 import { readVoiceExpense, VoiceTransaction } from "./voice";
 
 type Page = "visao" | "rotinas" | "planejamento" | "importar" | "supermercado";
@@ -1752,15 +1757,50 @@ function ImportPage({
       if (rememberPassword && pdfPassword)
         sessionStorage.setItem("inter-pdf-password", pdfPassword);
       else sessionStorage.removeItem("inter-pdf-password");
-      const loaded:Preview[]=[];for(let index=0;index<files.length;index++){
-        const file=files[index];setMessage(`Processando arquivo ${index+1} de ${files.length}…`);
-        const selectedInstitution=data.accounts.find(item=>item.id===account)?.institution||"";
-        const protectedPasswords=!pdfPassword&&/\.pdf$/i.test(file.name)?await getProtectedPdfPasswords(identifyPdfBank(`${file.name} ${selectedInstitution}`)).catch(()=>[]):[];
-        const attempts=/\.pdf$/i.test(file.name)?(pdfPassword?[pdfPassword]:[...protectedPasswords,undefined]):[undefined];
-        let lastError:unknown;
-        for(const password of attempts){try{loaded.push(await previewFile(file,data,account||undefined,undefined,password));lastError=undefined;break}catch(error){lastError=error}}
-        if(lastError)setMessage(`${file.name}: ${(lastError as Error).message}`);
-      }setPreviews(loaded);
+      const loaded: Preview[] = [];
+      for (let index = 0; index < files.length; index++) {
+        const file = files[index];
+        setMessage(`Processando arquivo ${index + 1} de ${files.length}…`);
+        const isPdf = /\.pdf$/i.test(file.name);
+        const selectedInstitution = data.accounts.find(
+          (item) => item.id === account,
+        )?.institution || "";
+        let passwordLookupError: unknown;
+        let protectedPasswords: string[] = [];
+        if (!pdfPassword && isPdf) {
+          try {
+            protectedPasswords = await getProtectedPdfPasswords(
+              identifyPdfBank(`${file.name} ${selectedInstitution}`),
+            );
+          } catch (error) {
+            passwordLookupError = error;
+          }
+        }
+        const attempts: Array<string | undefined> = isPdf
+          ? (pdfPassword ? [pdfPassword] : [...protectedPasswords, undefined])
+          : [undefined];
+        try {
+          const preview = isPdf
+            ? await tryPdfPasswordCandidates(attempts, (password) =>
+                previewFile(
+                  file,
+                  data,
+                  account || undefined,
+                  undefined,
+                  password,
+                ))
+            : await previewFile(file, data, account || undefined);
+          loaded.push(preview);
+        } catch (error) {
+          // Se o cofre de senhas falhou e o PDF confirmou que exige senha,
+          // exponha a falha do cofre em vez de alegar que a senha está errada.
+          const visibleError = passwordLookupError && isPdfPasswordError(error)
+            ? passwordLookupError
+            : error;
+          setMessage(`${file.name}: ${(visibleError as Error).message}`);
+        }
+      }
+      setPreviews(loaded);
     } catch (e) {
       setMessage((e as Error).message);
     }

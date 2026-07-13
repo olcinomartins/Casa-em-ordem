@@ -1,11 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
-vi.mock("pdfjs-dist/legacy/build/pdf.mjs", () => ({ getDocument: vi.fn(), GlobalWorkerOptions: {} }));
-vi.mock("pdfjs-dist/legacy/build/pdf.worker.min.mjs?worker", () => ({ default: class PdfWorker {} }));
+vi.mock("pdfjs-dist/legacy/build/pdf.js", () => ({ getDocument: vi.fn(), GlobalWorkerOptions: {} }));
+vi.mock("pdfjs-dist/legacy/build/pdf.worker.min.js?url", () => ({ default: "/pdf.worker.min.js" }));
+import { getDocument } from "pdfjs-dist/legacy/build/pdf.js";
 import {
   findPdfDueDate,
   parseBtgInvoiceItems,
   parseInterInvoiceItems,
   parseXpInvoiceItems,
+  readInterPdf,
 } from "./interPdf";
 
 describe("fatura PDF Inter", () => {
@@ -19,6 +21,28 @@ describe("fatura PDF Inter", () => {
     expect(rows).toHaveLength(2);
     expect(rows[0]).toMatchObject({installment:3,installments:12,amount:114.24});
     expect(rows[1].amount).toBe(-6915.89);
+  });
+
+  it("desativa avaliação de JavaScript ao abrir qualquer PDF", async () => {
+    const destroy = vi.fn().mockResolvedValue(undefined);
+    vi.mocked(getDocument).mockReturnValue({
+      promise: Promise.resolve({
+        numPages: 1,
+        getPage: vi.fn().mockResolvedValue({
+          getTextContent: vi.fn().mockResolvedValue({ items: [
+            { str: "Despesas da fatura" }, { str: "CARTÃO 5364********1234" },
+            { str: "13 de mar. 2026" }, { str: "LOJA" }, { str: "R$ 1,00" },
+            { str: "Próxima fatura" },
+          ] }),
+        }),
+      }),
+      destroy,
+    } as never);
+
+    await readInterPdf(new File(["%PDF-1.4"], "fatura.pdf", { type: "application/pdf" }));
+
+    expect(getDocument).toHaveBeenCalledWith(expect.objectContaining({ isEvalSupported: false }));
+    expect(destroy).toHaveBeenCalled();
   });
 });
 
@@ -58,6 +82,19 @@ describe("faturas PDF de outros bancos", () => {
       date: "2026-05-02",
       description: "PAGAMENTOS VALIDOS NORMAIS",
       amount: -100,
+    })]);
+  });
+
+  it("reagrupa data e valor fragmentados pelo leitor do Safari", () => {
+    const rows = parseXpInvoiceItems([
+      "Data", " ", "Descrição", " ", "R", "$", " ", "US", "$", "",
+      "15", "/", "04", "/", "26", " ", "PAGAMENTOS VALIDOS NORMAIS", " ",
+      "-", "414", ",", "84", "", "Subtotal",
+    ], 2026);
+    expect(rows).toEqual([expect.objectContaining({
+      date: "2026-04-15",
+      description: "PAGAMENTOS VALIDOS NORMAIS",
+      amount: -414.84,
     })]);
   });
 });
