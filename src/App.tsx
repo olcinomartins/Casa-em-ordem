@@ -1533,7 +1533,8 @@ function ImportPage({
       else sessionStorage.removeItem("inter-pdf-password");
       const loaded:Preview[]=[];for(let index=0;index<files.length;index++){
         const file=files[index];setMessage(`Processando arquivo ${index+1} de ${files.length}…`);
-        const protectedPasswords=!pdfPassword&&/\.pdf$/i.test(file.name)?await getProtectedPdfPasswords(identifyPdfBank(file.name)).catch(()=>[]):[];
+        const selectedInstitution=data.accounts.find(item=>item.id===account)?.institution||"";
+        const protectedPasswords=!pdfPassword&&/\.pdf$/i.test(file.name)?await getProtectedPdfPasswords(identifyPdfBank(`${file.name} ${selectedInstitution}`)).catch(()=>[]):[];
         const attempts=/\.pdf$/i.test(file.name)?(pdfPassword?[pdfPassword]:[...protectedPasswords,undefined]):[undefined];
         let lastError:unknown;
         for(const password of attempts){try{loaded.push(await previewFile(file,data,account||undefined,undefined,password));lastError=undefined;break}catch(error){lastError=error}}
