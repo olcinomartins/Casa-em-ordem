@@ -29,6 +29,7 @@ import {
   Member,
   Obligation,
   Receipt,
+  ReceiptItem,
   Chore,
   Task,
   Transaction,
@@ -896,6 +897,41 @@ const groceryMacro = (description: string) => {
     return "Bebidas e lanches";
   return "Outros";
 };
+
+function ProductOccurrenceEditor({
+  receipt,
+  item,
+  macroCategories,
+  unitOptions,
+  onSave,
+}: {
+  receipt: Receipt;
+  item: ReceiptItem;
+  macroCategories: string[];
+  unitOptions: string[][];
+  onSave: (receiptId: string, itemId: string, patch: Partial<ReceiptItem>) => void;
+}) {
+  const [draft, setDraft] = useState({ ...item });
+  useEffect(() => setDraft({ ...item }), [item]);
+  return (
+    <div className="receipt-item-edit product-occurrence-edit">
+      <div className="occurrence-context">
+        <b>{receipt.date}</b>
+        <small>{receipt.store}</small>
+      </div>
+      <input value={draft.description} onChange={(event)=>setDraft({...draft,description:event.target.value})} placeholder="Produto" />
+      <select value={draft.macroCategory||"Outros"} onChange={(event)=>setDraft({...draft,macroCategory:event.target.value})}>
+        {macroCategories.map(category=><option key={category}>{category}</option>)}
+      </select>
+      <label>Quantidade<input type="number" inputMode="decimal" step="0.001" value={draft.quantity} onChange={(event)=>setDraft({...draft,quantity:Number(event.target.value)})}/></label>
+      <label>Unidade<select value={draft.unit||"un"} onChange={(event)=>setDraft({...draft,unit:event.target.value})}>{unitOptions.map(([value,label])=><option key={value} value={value}>{label}</option>)}</select></label>
+      <label>Valor unitário<CurrencyInput value={Number(draft.unitPrice)||0} onChange={(value)=>setDraft({...draft,unitPrice:value})}/></label>
+      <label>Valor total<CurrencyInput value={Number(draft.total)||0} onChange={(value)=>setDraft({...draft,total:value})}/></label>
+      <button className="primary" onClick={()=>onSave(receipt.id,item.id,draft)}>Salvar esta ocorrência</button>
+    </div>
+  );
+}
+
 function Receipts({
   data,
   mutate,
@@ -907,12 +943,9 @@ function Receipts({
 }) {
   const [draft, setDraft] = useState<ReadReceipt>();
   const [editingReceiptId, setEditingReceiptId] = useState<string>();
-  const [editingProduct, setEditingProduct] = useState<{
-    key: string;
-    name: string;
-    category: string;
-    unit: string;
-  }>();
+  const [editingProductKey, setEditingProductKey] = useState<string>();
+  const [occurrenceStart, setOccurrenceStart] = useState("");
+  const [occurrenceEnd, setOccurrenceEnd] = useState("");
   const [busy, setBusy] = useState(false);
   const libraryInput = useRef<HTMLInputElement>(null);
   const [photoProgress, setPhotoProgress] = useState<{
@@ -1135,22 +1168,29 @@ function Receipts({
       };
     })
     .sort((a, b) => b.count - a.count);
-  const saveProduct = () => {
-    if (!editingProduct?.name.trim()) return;
+  const productOccurrences = editingProductKey
+    ? allPurchases
+        .filter(({ r, i }) =>
+          normalize(i.description) === editingProductKey &&
+          (!occurrenceStart || r.date >= occurrenceStart) &&
+          (!occurrenceEnd || r.date <= occurrenceEnd),
+        )
+        .sort((a, b) => b.r.date.localeCompare(a.r.date))
+    : [];
+  const saveProductOccurrence = (
+    receiptId: string,
+    itemId: string,
+    patch: Partial<ReceiptItem>,
+  ) => {
     mutate((d) => {
-      for (const receipt of d.receipts || []) {
-        for (const item of receipt.items) {
-          if (normalize(item.description) !== editingProduct.key) continue;
-          item.description = editingProduct.name.trim();
-          item.macroCategory = editingProduct.category;
-          item.unit = editingProduct.unit;
-          receipt.updatedAt = now();
-          receipt.version++;
-        }
-      }
+      const receipt = (d.receipts || []).find((entry) => entry.id === receiptId);
+      const item = receipt?.items.find((entry) => entry.id === itemId);
+      if (!receipt || !item) return;
+      Object.assign(item, patch);
+      receipt.updatedAt = now();
+      receipt.version++;
     });
-    setEditingProduct(undefined);
-    setMessage("Produto atualizado em todo o histórico e sincronização iniciada.");
+    setMessage("Ocorrência atualizada e sincronização automática iniciada.");
   };
   return (
     <>
@@ -1420,35 +1460,17 @@ function Receipts({
         <p className="muted">
           Edite diretamente o produto consolidado, sem precisar localizar cada compra.
         </p>
-        {editingProduct && (
-          <div className="receipt-item-edit product-direct-edit">
-            <input
-              value={editingProduct.name}
-              placeholder="Nome do produto"
-              onChange={(event) =>
-                setEditingProduct({ ...editingProduct, name: event.target.value })
-              }
-            />
-            <select
-              value={editingProduct.category}
-              onChange={(event) =>
-                setEditingProduct({ ...editingProduct, category: event.target.value })
-              }
-            >
-              {macroCategories.map((category) => <option key={category}>{category}</option>)}
-            </select>
-            <select
-              value={editingProduct.unit}
-              onChange={(event) =>
-                setEditingProduct({ ...editingProduct, unit: event.target.value })
-              }
-            >
-              {unitOptions.map(([value, label]) => (
-                <option key={value} value={value}>{label}</option>
-              ))}
-            </select>
-            <button className="primary" onClick={saveProduct}>Salvar produto</button>
-            <button onClick={() => setEditingProduct(undefined)}>Cancelar</button>
+        {editingProductKey && (
+          <div className="product-occurrences">
+            <div className="form-row">
+              <label>De<input type="date" value={occurrenceStart} onChange={(event)=>setOccurrenceStart(event.target.value)}/></label>
+              <label>Até<input type="date" value={occurrenceEnd} onChange={(event)=>setOccurrenceEnd(event.target.value)}/></label>
+              <button onClick={()=>{setOccurrenceStart("");setOccurrenceEnd("")}}>Limpar período</button>
+              <button onClick={()=>setEditingProductKey(undefined)}>Fechar ocorrências</button>
+            </div>
+            <p className="muted">{productOccurrences.length} ocorrência(s), da mais recente para a mais antiga. Salve somente as que desejar alterar.</p>
+            {productOccurrences.map(({r,i})=><ProductOccurrenceEditor key={`${r.id}:${i.id}`} receipt={r} item={i} macroCategories={macroCategories} unitOptions={unitOptions} onSave={saveProductOccurrence}/>)}
+            {!productOccurrences.length&&<Empty/>}
           </div>
         )}
         {products.length ? (
@@ -1461,16 +1483,13 @@ function Receipts({
               <div className="actions">
                 <span>{p.price == null ? "—" : `${money(p.price)} médio`}</span>
                 <button
-                  onClick={() =>
-                    setEditingProduct({
-                      key: p.key,
-                      name: p.name,
-                      category: p.category,
-                      unit: p.unit,
-                    })
-                  }
+                  onClick={() => {
+                    setEditingProductKey(p.key);
+                    setOccurrenceStart("");
+                    setOccurrenceEnd("");
+                  }}
                 >
-                  Editar produto
+                  Ver e editar ocorrências
                 </button>
               </div>
             </div>
