@@ -70,6 +70,7 @@ import {
 import { previewFile, Preview } from "./importer";
 import { tasksToIcs } from "./ics";
 import { readReceipt, ReadReceipt } from "./receipts";
+import { getProtectedPdfPasswords } from "./pdfPasswords";
 import { readVoiceExpense, VoiceTransaction } from "./voice";
 
 type Page = "visao" | "rotinas" | "planejamento" | "importar" | "supermercado";
@@ -1530,7 +1531,17 @@ function ImportPage({
       if (rememberPassword && pdfPassword)
         sessionStorage.setItem("inter-pdf-password", pdfPassword);
       else sessionStorage.removeItem("inter-pdf-password");
-      const loaded:Preview[]=[];for(let index=0;index<files.length;index++){setMessage(`Processando arquivo ${index+1} de ${files.length}…`);try{loaded.push(await previewFile(files[index],data,account||undefined,undefined,pdfPassword))}catch(error){setMessage(`${files[index].name}: ${(error as Error).message}`)}}setPreviews(loaded);
+      let protectedPasswords: string[] = [];
+      if (!pdfPassword && files.some(file => /\.pdf$/i.test(file.name))) {
+        protectedPasswords = await getProtectedPdfPasswords().catch(() => []);
+      }
+      const loaded:Preview[]=[];for(let index=0;index<files.length;index++){
+        const file=files[index];setMessage(`Processando arquivo ${index+1} de ${files.length}…`);
+        const attempts=/\.pdf$/i.test(file.name)?(pdfPassword?[pdfPassword]:[...protectedPasswords,undefined]):[undefined];
+        let lastError:unknown;
+        for(const password of attempts){try{loaded.push(await previewFile(file,data,account||undefined,undefined,password));lastError=undefined;break}catch(error){lastError=error}}
+        if(lastError)setMessage(`${file.name}: ${(lastError as Error).message}`);
+      }setPreviews(loaded);
     } catch (e) {
       setMessage((e as Error).message);
     }
@@ -1560,7 +1571,7 @@ function ImportPage({
           type="password"
           value={pdfPassword}
           onChange={(e) => setPdfPassword(e.target.value)}
-          placeholder="Senha do PDF Inter (se houver)"
+          placeholder="Senha manual (somente se o automático falhar)"
           autoComplete="off"
         />
         <label>
