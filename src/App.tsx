@@ -68,6 +68,10 @@ import {
   dedupeKey,
   suggest,
 } from "./finance";
+import {
+  monthlySpending,
+  reconcileImportedTransactions,
+} from "./spending";
 import { previewFile, Preview } from "./importer";
 import { tasksToIcs } from "./ics";
 import { readReceipt, ReadReceipt } from "./receipts";
@@ -479,6 +483,7 @@ function ViewSwitch({
     </div>
   );
 }
+
 function Dashboard({
   data,
   month,
@@ -491,17 +496,23 @@ function Dashboard({
   setView: (v: CashView) => void;
 }) {
   const calc = (v: "cash" | "accrual") =>
-    data.transactions.reduce((s, t) => s + realized(t, month, v), 0);
+    data.transactions.reduce(
+      (sum, transaction) =>
+        sum + (transaction.estimated ? 0 : realized(transaction, month, v)),
+      0,
+    );
   const cash = calc("cash"),
     acc = calc("accrual");
   const expenses = (v: "cash" | "accrual") =>
     data.transactions.reduce((s, t) => {
+      if (t.estimated) return s;
       const x = realized(t, month, v);
       return s + (x > 0 ? x : 0);
     }, 0);
   const income = data.transactions
     .filter(
       (t) =>
+        !t.estimated &&
         !t.transfer &&
         t.amount < 0 &&
         monthOf(t.paymentDate || t.date) === month,
@@ -515,36 +526,17 @@ function Dashboard({
       !["Paga", "Confirmada", "Dispensada"].includes(o.status) &&
       o.dueDate <= dateOnly(new Date(Date.now() + 14 * 864e5)),
   ).length;
-  const expectedBeforeClosing = data.obligations
-    .filter(
-      (o) =>
-        monthOf(o.dueDate) === month &&
-          !["Paga", "Dispensada"].includes(o.status),
-    )
-    .reduce((sum, o) => sum + o.planned, 0);
-  const realizedTransactions = data.transactions.filter(
-    (t) => !t.estimated && t.amount > 0 && Math.abs(realized(t, month, "cash")) > 0,
+  const spending = monthlySpending(
+    data,
+    month,
+    view === "accrual" ? "accrual" : "cash",
   );
-  const realizedExpenses = realizedTransactions.reduce(
-    (sum, transaction) => sum + Math.abs(realized(transaction, month, "cash")),
-    0,
-  );
-  const sameExpense = (amount: number, date: string, description?: string) =>
-    realizedTransactions.some((transaction) => {
-      const transactionDate = transaction.purchaseDate || transaction.date;
-      const days = Math.abs(new Date(`${transactionDate}T12:00:00`).getTime() - new Date(`${date}T12:00:00`).getTime()) / 864e5;
-      const descriptionMatches = !description || normalize(transaction.description).includes(normalize(description)) || normalize(description).includes(normalize(transaction.description));
-      return Math.abs(Math.abs(transaction.amount) - Math.abs(amount)) < 0.02 && days <= 3 && descriptionMatches;
-    });
-  const voiceEstimates = data.transactions.filter(
-    (t) => t.estimated && t.amount > 0 && monthOf(t.purchaseDate || t.date) === month && !sameExpense(t.amount, t.purchaseDate || t.date, t.description),
-  );
-  const voiceExpected = voiceEstimates.reduce((sum, transaction) => sum + Math.abs(transaction.amount), 0);
-  const receiptEstimates = (data.receipts || []).filter(
-    (receipt) => monthOf(receipt.date) === month && receipt.total > 0 && !sameExpense(receipt.total, receipt.date, receipt.store),
-  );
-  const receiptsExpected = receiptEstimates.reduce((sum, receipt) => sum + receipt.total, 0);
-  const totalExpected = realizedExpenses + expectedBeforeClosing + voiceExpected + receiptsExpected;
+  const realizedExpenses = spending.filter((entry) => entry.state === "realized").reduce((sum, entry) => sum + entry.amount, 0);
+  const estimatedEntries = spending.filter((entry) => entry.state === "estimated");
+  const expectedBeforeClosing = estimatedEntries.filter((entry) => entry.source === "payment").reduce((sum, entry) => sum + entry.amount, 0);
+  const voiceExpected = estimatedEntries.filter((entry) => entry.source === "voice").reduce((sum, entry) => sum + entry.amount, 0);
+  const receiptsExpected = estimatedEntries.filter((entry) => entry.source === "receipt").reduce((sum, entry) => sum + entry.amount, 0);
+  const totalExpected = spending.reduce((sum, entry) => sum + entry.amount, 0);
   return (
     <>
       <div className="toolbar">
@@ -556,7 +548,7 @@ function Dashboard({
           value={money(income)}
           hint="Entradas líquidas no mês"
           tone="good"
-          details={data.transactions.filter(t=>t.amount<0&&Math.abs(realized(t,month,"cash"))>0).map(t=><Row key={t.id} a={t.description} b={t.paymentDate||t.date} c={money(Math.abs(t.amount))}/>) }
+          details={data.transactions.filter(t=>!t.estimated&&t.amount<0&&Math.abs(realized(t,month,"cash"))>0).map(t=><Row key={t.id} a={t.description} b={t.paymentDate||t.date} c={money(Math.abs(t.amount))}/>) }
         />
         <Card
           label="Despesas no fluxo"
@@ -567,7 +559,7 @@ function Dashboard({
               : "Conforme pagamentos"
           }
           tone="bad"
-          details={data.transactions.filter(t=>t.amount>0&&Math.abs(realized(t,month,"cash"))>0).map(t=><Row key={t.id} a={t.description} b={t.paymentDate||t.date} c={money(t.amount)}/>) }
+          details={data.transactions.filter(t=>!t.estimated&&t.amount>0&&Math.abs(realized(t,month,"cash"))>0).map(t=><Row key={t.id} a={t.description} b={t.paymentDate||t.date} c={money(t.amount)}/>) }
         />
         <Card
           label="Resultado de caixa"
@@ -577,25 +569,23 @@ function Dashboard({
           details={<p>Entradas {money(income)} menos despesas realizadas {money(expenses("cash"))}.</p>}
         />
         <Card
-          label="Estimativa antes do fechamento"
+          label="Gastos acompanhados em tempo real"
           value={money(totalExpected)}
           hint={`${money(realizedExpenses)} realizado · ${money(voiceExpected + receiptsExpected + expectedBeforeClosing)} ainda previsto`}
           tone="warning"
           details={<>
             <p>Prévia formada por pagamentos realizados, registros por voz, notas e compromissos ainda abertos. Não é saldo bancário nem fatura fechada.</p>
             <Row a="Pagamentos e gastos realizados" b="Confirmados no mês" c={money(realizedExpenses)} />
-            <Row a="Registros por voz" b={`${voiceEstimates.length} estimativa(s)`} c={money(voiceExpected)} />
-            <Row a="Notas de compras" b={`${receiptEstimates.length} nota(s)`} c={money(receiptsExpected)} />
+            <Row a="Registros por voz" b={`${estimatedEntries.filter(entry=>entry.source==="voice").length} estimativa(s)`} c={money(voiceExpected)} />
+            <Row a="Notas de compras" b={`${estimatedEntries.filter(entry=>entry.source==="receipt").length} nota(s)`} c={money(receiptsExpected)} />
             <Row a="Pagamentos ainda previstos" b="Obrigações abertas" c={money(expectedBeforeClosing)} />
-            {voiceEstimates.map(t=><Row key={t.id} a={`Voz · ${t.description}`} b={t.purchaseDate||t.date} c={money(t.amount)}/>)}
-            {receiptEstimates.map(receipt=><Row key={receipt.id} a={`Nota · ${receipt.store}`} b={receipt.date} c={money(receipt.total)}/>)}
-            {data.obligations.filter(o=>monthOf(o.dueDate)===month&&!['Paga','Dispensada'].includes(o.status)).sort((a,b)=>a.dueDate.localeCompare(b.dueDate)).map(o=><Row key={o.id} a={o.name} b={`${o.dueDate} · ${o.status}`} c={money(o.planned)}/>)}
+            {spending.slice().sort((a,b)=>a.date.localeCompare(b.date)).map(entry=><Row key={entry.id} a={`${entry.state==="realized"?"Realizado":"Previsto"} · ${entry.source==="voice"?"Voz":entry.source==="receipt"?"Nota":entry.source==="payment"?"Pagamento":"Fatura/extrato"} · ${entry.description}`} b={entry.date} c={money(entry.amount)}/>)}
           </>}
         />
       </section>
       <section className="grid two">
         <div className="panel">
-          <h2>Orçado × realizado</h2>
+          <h2>Orçado × acompanhado em tempo real</h2>
           {view === "compare" ? (
             <div className="grid two">
               <div>
@@ -696,17 +686,21 @@ function BudgetBars({
   month: string;
   view: "cash" | "accrual";
 }) {
+  const spending = monthlySpending(data, month, view);
   const rows = data.categories
     .filter((c) => c.nature === "expense")
     .map((c) => {
       const planned = budgetValue(data, month, (b) => b.categoryId === c.id);
-      const actual = data.transactions
-        .filter((t) => t.categoryId === c.id)
-        .reduce((s, t) => s + Math.abs(realized(t, month, view)), 0);
-      return { name: c.name, planned, actual };
+      const actual = spending
+        .filter((entry) => entry.categoryId === c.id && entry.state === "realized")
+        .reduce((sum, entry) => sum + entry.amount, 0);
+      const estimated = spending
+        .filter((entry) => entry.categoryId === c.id && entry.state === "estimated")
+        .reduce((sum, entry) => sum + entry.amount, 0);
+      return { name: c.name, planned, actual, estimated, tracked: actual + estimated };
     })
-    .filter((x) => x.planned || x.actual)
-    .sort((a, b) => b.actual - a.actual)
+    .filter((x) => x.planned || x.tracked)
+    .sort((a, b) => b.tracked - a.tracked)
     .slice(0, 8);
   return rows.length ? (
     <div className="bars">
@@ -715,10 +709,11 @@ function BudgetBars({
           <label>
             <span>{r.name}</span>
             <span>
-              {money(r.actual)} / {money(r.planned)}
+              {money(r.tracked)} / {money(r.planned)}
             </span>
           </label>
-          <progress value={r.actual} max={r.planned || r.actual || 1} />
+          <small>{money(r.actual)} realizado · {money(r.estimated)} estimado</small>
+          <progress value={r.tracked} max={r.planned || r.tracked || 1} />
         </div>
       ))}
     </div>
@@ -1042,6 +1037,9 @@ function Receipts({
           receipt.createdAt = d.receipts[index].createdAt;
           receipt.updatedAt = now();
           receipt.version = d.receipts[index].version + 1;
+          receipt.categoryId = d.receipts[index].categoryId;
+          receipt.reconciledTransactionId =
+            d.receipts[index].reconciledTransactionId;
           d.receipts[index] = receipt;
         }
       } else {
@@ -1187,6 +1185,13 @@ function Receipts({
       const item = receipt?.items.find((entry) => entry.id === itemId);
       if (!receipt || !item) return;
       Object.assign(item, patch);
+      const recalculated = receipt.items.reduce((sum, current) => {
+        const total = Number(current.total);
+        if (Number.isFinite(total) && total > 0) return sum + total;
+        return sum + (Number(current.quantity) || 0) * (Number(current.unitPrice) || 0);
+      }, 0);
+      if (recalculated > 0)
+        receipt.total = Math.round((recalculated + Number.EPSILON) * 100) / 100;
       receipt.updatedAt = now();
       receipt.version++;
     });
@@ -1397,8 +1402,7 @@ function Receipts({
       </section>
       </Collapsible>
       <Collapsible title={`Compras confirmadas (${history.length})`}>
-      <section className="panel supermarket-panel">
-          <h2>Compras confirmadas</h2>
+      <section className="supermarket-panel confirmed-purchases-section">
           <p className="muted">
             Corrija produtos, categorias, quantidades e valores já salvos.
           </p>
@@ -1407,7 +1411,7 @@ function Receipts({
               .slice()
               .sort((a, b) => b.date.localeCompare(a.date))
               .map((receipt) => (
-                <div className="row editable-row" key={receipt.id}>
+                <div className="row editable-row confirmed-purchase-row" key={receipt.id}>
                   <div>
                     <b>{receipt.store}</b>
                     <small>
@@ -1421,6 +1425,8 @@ function Receipts({
                     </button>
                     <button
                       className="danger-button"
+                      aria-label={`Excluir compra de ${receipt.store}`}
+                      title="Excluir compra"
                       onClick={() =>
                         confirm("Excluir esta compra confirmada?") &&
                         mutate((d) => {
@@ -1761,10 +1767,15 @@ function ImportPage({
   };
   const confirm = () => {
     if (!previews.length) return;
+    let reconciled = 0;
     mutate((d) => {
-      for(const preview of previews){d.transactions.push(...preview.rows);d.imports.push({...audit(preview.operator),filename:preview.filename,hash:preview.hash,institution:preview.institution,count:preview.rows.length,duplicates:preview.duplicates})}
+      for(const preview of previews){
+        reconciled += reconcileImportedTransactions(d, preview.rows);
+        d.transactions.push(...preview.rows);
+        d.imports.push({...audit(preview.operator),filename:preview.filename,hash:preview.hash,institution:preview.institution,count:preview.rows.length,duplicates:preview.duplicates});
+      }
     });
-    setMessage(`${previews.reduce((sum,item)=>sum+item.rows.length,0)} lançamentos de ${previews.length} arquivo(s) importados.`);
+    setMessage(`${previews.reduce((sum,item)=>sum+item.rows.length,0)} lançamentos de ${previews.length} arquivo(s) importados.${reconciled ? ` ${reconciled} registro(s) preliminar(es) conciliado(s).` : ""}`);
     setPreviews([]);
   };
   return (
@@ -2212,7 +2223,7 @@ function Budgets({
             ))}
           </section>
           <section className="panel">
-            <h2>Realizado</h2>
+            <h2>Realizado e estimado</h2>
             {view === "compare" ? (
               <>
                 <h3>Fluxo</h3>
@@ -2249,6 +2260,7 @@ function Payments({
         recurrence: String(fd.get("repeat")) as Obligation["recurrence"],
         tolerance: parseCurrency(fd.get("tolerance")),
         accountId: String(fd.get("accountId") || "") || undefined,
+        categoryId: String(fd.get("categoryId") || "") || undefined,
         status: "A pagar",
       }),
     );
@@ -2258,7 +2270,7 @@ function Payments({
     const paidAmount=parseCurrency(raw); if(paidAmount<=0)return alert("Informe um valor maior que zero.");
     const paidAt=prompt("Data efetiva do pagamento (AAAA-MM-DD):",dateOnly(new Date())); if(!paidAt||!/^\d{4}-\d{2}-\d{2}$/.test(paidAt))return alert("Data inválida.");
     const account=current.accountId||data.accounts[0]?.id; if(!account)return alert("Cadastre uma conta para o pagamento.");
-    mutate(d=>{const o=d.obligations.find(x=>x.id===id)!;o.status="Paga";o.paidAt=paidAt;o.paidAmount=paidAmount;const rule=suggest(o.name,account,"Ambos",d.rules);d.transactions=d.transactions.filter(t=>t.obligationId!==id);d.transactions.push({...audit("Ambos"),date:paidAt,competence:monthOf(paidAt),purchaseDate:o.dueDate,paymentDate:paidAt,description:o.name,normalized:normalize(o.name),amount:paidAmount,accountId:account,operator:"Ambos",scope:"Familiar",categoryId:rule?.categoryId,subcategory:rule?.subcategory,classification:rule?"suggested":"pending",dedupeKey:`payment:${id}:${paidAt}`,transfer:false,movement:"expense_income",sourceKind:"statement",obligationId:id,notes:`Pagamento realizado. Previsto: ${money(o.planned)}`})});
+    mutate(d=>{const o=d.obligations.find(x=>x.id===id)!;o.status="Paga";o.paidAt=paidAt;o.paidAmount=paidAmount;o.reconciledTransactionId=undefined;const accountOwner=d.accounts.find(item=>item.id===account)?.operator||"Ambos";const rule=suggest(o.name,account,accountOwner,d.rules);const fallback=d.categories.find(category=>normalize(category.name)==="OUTROS")?.id;d.transactions=d.transactions.filter(t=>t.obligationId!==id);d.transactions.push({...audit(accountOwner),date:paidAt,competence:monthOf(paidAt),purchaseDate:o.dueDate,paymentDate:paidAt,description:o.name,normalized:normalize(o.name),amount:paidAmount,accountId:account,operator:accountOwner,scope:"Familiar",categoryId:o.categoryId||rule?.categoryId||fallback,subcategory:o.subcategory||rule?.subcategory,classification:o.categoryId?"confirmed":rule?"suggested":"pending",dedupeKey:`payment:${id}:${paidAt}`,transfer:false,movement:"expense_income",sourceKind:"statement",obligationId:id,provisional:true,notes:`Pagamento realizado. Previsto: ${money(o.planned)}`})});
   };
   const edit = (id: string) => {
     const current = data.obligations.find((o) => o.id === id)!;
@@ -2341,6 +2353,7 @@ function Payments({
                 <option value="yearly">Anual</option>
               </select>
               <select name="accountId"><option value="">Conta do pagamento</option>{data.accounts.filter(account=>account.active).map(account=><option key={account.id} value={account.id}>{account.institution} · {account.name}</option>)}</select>
+              <select name="categoryId"><option value="">Categoria da despesa</option>{data.categories.filter(category=>category.nature==="expense").map(category=><option key={category.id} value={category.id}>{category.name}</option>)}</select>
             </>
           }
         />
@@ -2387,7 +2400,7 @@ function Payments({
             );
           })}
       </div>
-      <details className="completed-block"><summary>Pagamentos confirmados ({data.obligations.filter(o=>["Paga","Confirmada","Dispensada"].includes(o.status)).length})</summary>{data.obligations.filter(o=>["Paga","Confirmada","Dispensada"].includes(o.status)).sort((a,b)=>b.dueDate.localeCompare(a.dueDate)).map(o=><div className="confirmed-row" key={o.id}><div><b>{o.name}</b><small>{o.dueDate} · {money(o.paidAmount??o.planned)} · {o.status}</small></div><button onClick={()=>mutate(d=>{const item=d.obligations.find(x=>x.id===o.id);if(item){item.status="A pagar";item.paidAt=undefined;item.paidAmount=undefined;d.transactions=d.transactions.filter(transaction=>transaction.obligationId!==o.id)}})}>Desconfirmar</button></div>)}</details>
+      <details className="completed-block"><summary>Pagamentos confirmados ({data.obligations.filter(o=>["Paga","Confirmada","Dispensada"].includes(o.status)).length})</summary>{data.obligations.filter(o=>["Paga","Confirmada","Dispensada"].includes(o.status)).sort((a,b)=>b.dueDate.localeCompare(a.dueDate)).map(o=><div className="confirmed-row" key={o.id}><div><b>{o.name}</b><small>{o.dueDate} · {money(o.paidAmount??o.planned)} · {o.status}</small></div><button onClick={()=>mutate(d=>{const item=d.obligations.find(x=>x.id===o.id);if(item){item.status="A pagar";item.paidAt=undefined;item.paidAmount=undefined;item.reconciledTransactionId=undefined;d.transactions=d.transactions.filter(transaction=>transaction.obligationId!==o.id||!transaction.provisional);for(const transaction of d.transactions)if(transaction.obligationId===o.id)transaction.obligationId=undefined}})}>Desconfirmar</button></div>)}</details>
       {!data.obligations.length && <Empty />}
     </section>
   );
@@ -3141,7 +3154,11 @@ function CategoryEditor({
 
 function Analytics({ data }: { data: FamilyData }) {
   const available = [
-    ...new Set(data.transactions.map((t) => monthOf(t.paymentDate || t.date))),
+    ...new Set(
+      data.transactions
+        .filter((transaction) => !transaction.estimated)
+        .map((transaction) => monthOf(transaction.paymentDate || transaction.date)),
+    ),
   ].sort();
   const [start, setStart] = useState(available[0] || currentMonth());
   const [end, setEnd] = useState(available.at(-1) || currentMonth());
@@ -3152,6 +3169,7 @@ function Analytics({ data }: { data: FamilyData }) {
   const [accountId, setAccountId] = useState("all");
   const months = available.filter((month) => month >= start && month <= end);
   const belongs = (t: Transaction, kind: "budget" | "reserve" | "final") =>
+    !t.estimated &&
     (accountId === "all" || t.accountId === accountId) &&
     (kind === "final"
       ? t.movement !== "transfer" && !t.transfer

@@ -93,6 +93,14 @@ export function realized(
     return (t.integralAnchor || (t.installment ?? 1) === 1) ? t.totalAmount : 0;
   return t.amount;
 }
+export function isExpenseTransaction(t: Transaction) {
+  return (
+    t.amount > 0 &&
+    !t.transfer &&
+    t.scope !== "Fora do orçamento" &&
+    (t.movement == null || t.movement === "expense_income")
+  );
+}
 export function budgetApplies(
   budget: FamilyData["budgets"][number],
   month: string,
@@ -136,7 +144,12 @@ export function personalBalance(
     const budget = budgetValue(data, month, (item) => item.member === member);
     const scope = `Pessoal — ${member}`;
     const spent = data.transactions
-      .filter((t) => t.scope === scope)
+      .filter(
+        (t) =>
+          t.scope === scope &&
+          isExpenseTransaction(t) &&
+          (!t.estimated || !t.reconciledTransactionId),
+      )
       .reduce((s, t) => s + Math.abs(realized(t, month, view)), 0);
     return balance + budget - spent;
   }, 0);

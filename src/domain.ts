@@ -54,6 +54,8 @@ export interface Transaction extends Audit {
   notes?: string;
   estimated?: boolean;
   obligationId?: string;
+  provisional?: boolean;
+  reconciledTransactionId?: string;
 }
 export interface Rule extends Audit {
   pattern: string;
@@ -103,6 +105,9 @@ export interface Obligation extends Audit {
   status: ObligationStatus;
   paidAt?: string;
   paidAmount?: number;
+  categoryId?: string;
+  subcategory?: string;
+  reconciledTransactionId?: string;
 }
 export interface GoalMovement {
   id: string;
@@ -146,7 +151,7 @@ export interface ImportBatch extends Audit {
   duplicates: number;
 }
 export interface ReceiptItem { id:string; description:string; quantity:number; unit?:string; unitPrice?:number; total:number; macroCategory?:string; }
-export interface Receipt extends Audit { store:string; date:string; total:number; confidence?:number; items:ReceiptItem[]; notes?:string[]; }
+export interface Receipt extends Audit { store:string; date:string; total:number; confidence?:number; items:ReceiptItem[]; notes?:string[]; categoryId?:string; reconciledTransactionId?:string; }
 export interface Chore extends Audit { title:string; assignee:Member; frequency:"daily"|"weekly"|"monthly"|"as_needed"; active:boolean; lastCompletedAt?:string; completionHistory:string[]; }
 export interface FamilyData {
   schemaVersion: 1;

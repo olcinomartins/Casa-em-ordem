@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-vi.mock("pdfjs-dist", () => ({ getDocument: vi.fn(), GlobalWorkerOptions: {} }));
-vi.mock("pdfjs-dist/build/pdf.worker.min.mjs?url", () => ({ default: "worker.js" }));
+vi.mock("pdfjs-dist/legacy/build/pdf.mjs", () => ({ getDocument: vi.fn(), GlobalWorkerOptions: {} }));
+vi.mock("pdfjs-dist/legacy/build/pdf.worker.min.mjs?url", () => ({ default: "worker.js" }));
 import { parseInterInvoiceItems } from "./interPdf";
 
 describe("fatura PDF Inter", () => {

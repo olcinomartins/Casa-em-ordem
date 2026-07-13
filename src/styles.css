@@ -483,7 +483,9 @@ th {
 .editable-row > .actions {
   flex-shrink: 0;
 }
-.supermarket-panel { overflow: hidden; }
+.supermarket-panel { min-width: 0; max-width: 100%; }
+.confirmed-purchases-section { padding: .15rem 0 0; }
+.confirmed-purchases-section > .muted { padding: 0 .2rem .65rem; }
 .product-catalog .editable-row {
   align-items: flex-start;
   gap: 1rem;
@@ -509,6 +511,14 @@ th {
   width: 100%;
   white-space: normal;
 }
+.confirmed-purchase-row,
+.confirmed-purchase-row > *,
+.confirmed-purchase-row > .actions { min-width: 0; max-width: 100%; }
+.confirmed-purchase-row { gap: 1rem; align-items: flex-start; }
+.confirmed-purchase-row > div:first-child { flex: 1 1 auto; }
+.confirmed-purchase-row > div:first-child b,
+.confirmed-purchase-row > div:first-child small { display: block; max-width: 100%; overflow-wrap: anywhere; word-break: break-word; }
+.confirmed-purchase-row > .actions { flex: 0 0 auto; flex-wrap: wrap; justify-content: flex-end; }
 .product-occurrences {
   border: 1px solid var(--line);
   border-radius: 14px;
@@ -1091,6 +1101,20 @@ code {
     grid-template-columns: minmax(0, 1fr);
     gap: .7rem;
   }
+  .confirmed-purchase-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: .7rem;
+  }
+  .confirmed-purchase-row > .actions {
+    width: 100%;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 44px;
+    gap: .5rem;
+    align-items: stretch;
+  }
+  .confirmed-purchase-row > .actions button { width: 100%; min-width: 0; white-space: normal; }
+  .confirmed-purchase-row > .actions .danger-button { width: 44px; padding: .65rem; }
   .product-catalog .editable-row > .actions {
     width: 100%;
     max-width: none;
