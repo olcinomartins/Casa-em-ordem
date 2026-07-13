@@ -25,6 +25,8 @@ export interface Account extends Audit {
   kind: "checking" | "card" | "investment" | "cash";
   operator: Member;
   active: boolean;
+  importAliases?: string[];
+  lastDigits?: string;
 }
 export interface Transaction extends Audit {
   date: string;

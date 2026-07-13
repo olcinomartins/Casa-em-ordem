@@ -16,7 +16,32 @@ export interface Preview {
   rows: Transaction[];
   duplicates: number;
   errors: string[];
+  accountId: string;
+  operator: Member;
+  detectedBy: string;
 }
+
+const identifyAccount = (data: FamilyData, institution: string, kind: "card" | "checking", evidence: string, fallbackAccountId?: string) => {
+  if (fallbackAccountId) {
+    const account = data.accounts.find(item => item.id === fallbackAccountId);
+    if (account) return { account, detectedBy: "seleção manual" };
+  }
+  const text = normalize(evidence);
+  const ranked = data.accounts.filter(account => account.active).map(account => {
+    let score = 0;
+    const reasons: string[] = [];
+    if (normalize(account.institution) === normalize(institution)) { score += 30; reasons.push(account.institution); }
+    if (account.kind === kind) { score += 20; reasons.push(kind === "card" ? "cartão" : "conta"); }
+    for (const alias of account.importAliases || []) if (alias && text.includes(normalize(alias))) { score += 100; reasons.push(alias); }
+    if (account.lastDigits && text.includes(account.lastDigits.replace(/\D/g, ""))) { score += 100; reasons.push(`final ${account.lastDigits}`); }
+    if (account.operator === "Olcino" && /\bOLCINO\b/.test(text)) { score += 25; reasons.push("Olcino"); }
+    if (account.operator === "Mari" && /\b(MARI|MARIANA|CAMILLE|CAMILLIE)\b/.test(text)) { score += 25; reasons.push("Mari"); }
+    if (account.operator === "Ambos" && /\b(AMBOS|CONJUNTA|NOSSA|NOS)\b/.test(text)) { score += 25; reasons.push("Ambos"); }
+    return { account, score, reasons };
+  }).sort((a, b) => b.score - a.score);
+  if (!ranked[0] || ranked[0].score < 50 || ranked[0].score === ranked[1]?.score) return undefined;
+  return { account: ranked[0].account, detectedBy: ranked[0].reasons.join(" + ") };
+};
 const parseMoney = (v: unknown) => {
   if (typeof v === "number") return v;
   let s = String(v ?? "")
@@ -57,8 +82,8 @@ const pick = (r: Record<string, unknown>, names: string[]) => {
 export async function previewFile(
   file: File,
   data: FamilyData,
-  accountId: string,
-  operator: Member,
+  accountId?: string,
+  operator?: Member,
   pdfPassword?: string,
 ): Promise<Preview> {
   const buffer = await file.arrayBuffer();
@@ -69,6 +94,10 @@ export async function previewFile(
     throw new Error("Este arquivo já foi importado.");
   if (/\.pdf$/i.test(file.name)) {
     const parsed = await readInterPdf(file, pdfPassword);
+    const identified = identifyAccount(data, "Inter", "card", `${file.name} ${parsed.documentText}`, accountId);
+    if (!identified) throw new Error("Não foi possível identificar automaticamente a conta e o titular. Configure os identificadores em Contas e cartões ou selecione a conta nesta importação.");
+    accountId = identified.account.id;
+    operator = identified.account.operator;
     const rows: Transaction[] = [];
     let duplicates = 0;
     for (const item of parsed.rows) {
@@ -82,7 +111,7 @@ export async function previewFile(
       const rule=suggest(item.description,accountId,operator,data.rules);
       rows.push({...base,dedupeKey:key,categoryId:rule?.categoryId,subcategory:rule?.subcategory,classification:rule?"suggested":"pending"});
     }
-    return {filename:file.name,hash,institution:"Inter PDF",rows,duplicates,errors:[]};
+    return {filename:file.name,hash,institution:"Inter",rows,duplicates,errors:[],accountId,operator,detectedBy:identified.detectedBy};
   }
   const wb = XLSX.read(buffer, { type: "array", cellDates: true });
   const transactionSheet =
@@ -115,6 +144,11 @@ export async function previewFile(
         : /mercado/i.test(file.name)
           ? "Mercado Pago"
           : "Outro";
+  const invoiceFile = /fatura|cart/i.test(file.name);
+  const identified = identifyAccount(data, institution, invoiceFile ? "card" : "checking", file.name, accountId);
+  if (!identified) throw new Error("Não foi possível identificar automaticamente a conta e o titular. Renomeie o arquivo com o banco/titular, configure identificadores em Contas e cartões ou selecione a conta nesta importação.");
+  accountId = identified.account.id;
+  operator = identified.account.operator;
   const rows: Transaction[] = [];
   let duplicates = 0;
   const errors: string[] = [];
@@ -135,7 +169,7 @@ export async function previewFile(
       continue;
     }
     const descString = String(desc);
-    const invoice = /fatura|cart[aã]o/i.test(file.name);
+    const invoice = invoiceFile;
     if (invoice) amount = Math.abs(amount);
     const parcel = String(pick(r, ["Parcela"]) || "").match(
       /(\d+)\s*(?:de|\/|\s)\s*(\d+)/i,
@@ -202,5 +236,5 @@ export async function previewFile(
           : "pending",
     });
   }
-  return { filename: file.name, hash, institution, rows, duplicates, errors };
+  return { filename: file.name, hash, institution, rows, duplicates, errors, accountId, operator, detectedBy: identified.detectedBy };
 }

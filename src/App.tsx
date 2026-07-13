@@ -1484,8 +1484,7 @@ function ImportPage({
   mutate: (f: (d: FamilyData) => void) => void;
   setMessage: (s: string) => void;
 }) {
-  const [account, setAccount] = useState(data.accounts[0]?.id || "");
-  const [operator, setOperator] = useState<Member>("Olcino");
+  const [account, setAccount] = useState("");
   const [previews, setPreviews] = useState<Preview[]>([]);
   const [pdfPassword, setPdfPassword] = useState(
     () => sessionStorage.getItem("inter-pdf-password") || "",
@@ -1493,13 +1492,13 @@ function ImportPage({
   const [rememberPassword, setRememberPassword] = useState(false);
   const input = useRef<HTMLInputElement>(null);
   const choose = async (files: File[]) => {
-    if (!files.length || !account)
-      return setMessage("Cadastre e selecione uma conta antes de importar.");
+    if (!files.length)
+      return;
     try {
       if (rememberPassword && pdfPassword)
         sessionStorage.setItem("inter-pdf-password", pdfPassword);
       else sessionStorage.removeItem("inter-pdf-password");
-      const loaded:Preview[]=[];for(let index=0;index<files.length;index++){setMessage(`Processando arquivo ${index+1} de ${files.length}…`);try{loaded.push(await previewFile(files[index],data,account,operator,pdfPassword))}catch(error){setMessage(`${files[index].name}: ${(error as Error).message}`)}}setPreviews(loaded);
+      const loaded:Preview[]=[];for(let index=0;index<files.length;index++){setMessage(`Processando arquivo ${index+1} de ${files.length}…`);try{loaded.push(await previewFile(files[index],data,account||undefined,undefined,pdfPassword))}catch(error){setMessage(`${files[index].name}: ${(error as Error).message}`)}}setPreviews(loaded);
     } catch (e) {
       setMessage((e as Error).message);
     }
@@ -1507,7 +1506,7 @@ function ImportPage({
   const confirm = () => {
     if (!previews.length) return;
     mutate((d) => {
-      for(const preview of previews){d.transactions.push(...preview.rows);d.imports.push({...audit(operator),filename:preview.filename,hash:preview.hash,institution:preview.institution,count:preview.rows.length,duplicates:preview.duplicates})}
+      for(const preview of previews){d.transactions.push(...preview.rows);d.imports.push({...audit(preview.operator),filename:preview.filename,hash:preview.hash,institution:preview.institution,count:preview.rows.length,duplicates:preview.duplicates})}
     });
     setMessage(`${previews.reduce((sum,item)=>sum+item.rows.length,0)} lançamentos de ${previews.length} arquivo(s) importados.`);
     setPreviews([]);
@@ -1515,23 +1514,15 @@ function ImportPage({
   return (
     <section className="panel">
       <h2>Importar extrato ou fatura</h2>
-      <p className="muted">CSV, XLS ou XLSX · Inter, XP, BTG e Mercado Pago</p>
+      <p className="muted">PDF, CSV, XLS ou XLSX · o banco, a conta e o titular serão identificados automaticamente.</p>
       <div className="form-row">
         <select value={account} onChange={(e) => setAccount(e.target.value)}>
-          <option value="">Selecione a conta/cartão</option>
+          <option value="">Identificar conta e titular automaticamente</option>
           {data.accounts.map((a) => (
             <option key={a.id} value={a.id}>
               {a.institution} · {a.name}
             </option>
           ))}
-        </select>
-        <select
-          value={operator}
-          onChange={(e) => setOperator(e.target.value as Member)}
-        >
-          <option>Olcino</option>
-          <option>Mari</option>
-          <option>Ambos</option>
         </select>
         <input
           type="password"
@@ -1562,7 +1553,7 @@ function ImportPage({
       </div>
       {previews.length>0 && (
         <>
-          {previews.map(preview=><div key={preview.hash}><div className="summary"><b>{preview.filename}</b><span>{preview.rows.length} novos</span><span>{preview.duplicates} duplicados ignorados</span><span>{preview.rows.filter(r=>r.classification==="suggested").length} sugestões</span></div><TransactionTable rows={preview.rows.slice(0,20)} data={data}/></div>)}
+          {previews.map(preview=><div key={preview.hash}><div className="summary"><b>{preview.filename}</b><span className="status confirmed">{preview.institution} · {data.accounts.find(a=>a.id===preview.accountId)?.name} · {preview.operator}</span><span>{preview.rows.length} novos</span><span>{preview.duplicates} duplicados ignorados</span><span>{preview.rows.filter(r=>r.classification==="suggested").length} sugestões</span><small>Identificado por: {preview.detectedBy}</small></div><TransactionTable rows={preview.rows.slice(0,20)} data={data}/></div>)}
           <button className="primary end" onClick={confirm}>
             Confirmar importação
           </button>
@@ -2644,6 +2635,8 @@ function Config({
         kind: String(fd.get("kind")) as Account["kind"],
         operator: String(fd.get("operator")) as Member,
         active: true,
+        importAliases: String(fd.get("importAliases") || "").split(",").map(value=>value.trim()).filter(Boolean),
+        lastDigits: String(fd.get("lastDigits") || "").replace(/\D/g, "").slice(-4) || undefined,
       }),
     );
   const editAccount = (id: string) => {
@@ -2663,12 +2656,21 @@ function Config({
     ) as Member | null;
     if (!operator || !["Olcino", "Mari", "Ambos"].includes(operator))
       return alert("Responsável inválido.");
+    const aliases = prompt(
+      "Identificadores para importação, separados por vírgula (nome completo do titular, apelido no arquivo etc.):",
+      (a.importAliases || []).join(", "),
+    );
+    if (aliases === null) return;
+    const lastDigits = prompt("Últimos 4 dígitos da conta/cartão (opcional):", a.lastDigits || "");
+    if (lastDigits === null) return;
     mutate((d) => {
       const item = d.accounts.find((x) => x.id === id)!;
       item.name = name;
       item.institution = institution;
       item.kind = kind;
       item.operator = operator;
+      item.importAliases = aliases.split(",").map(value=>value.trim()).filter(Boolean);
+      item.lastDigits = lastDigits.replace(/\D/g, "").slice(-4) || undefined;
       item.updatedAt = now();
       item.version++;
     });
@@ -2691,11 +2693,14 @@ function Config({
       {mode !== "categories" && (
         <section className="panel">
           <h2>Contas e cartões</h2>
+          <p className="muted">Defina uma vez banco, tipo e titular. Nas próximas importações o aplicativo fará a associação automaticamente.</p>
           <QuickForm
             onSubmit={addAccount}
             fields={[
               ["name", "Nome da conta/cartão", "text"],
               ["institution", "Instituição", "text"],
+              ["importAliases", "Nome do titular ou texto presente no arquivo", "text"],
+              ["lastDigits", "Final da conta/cartão (4 dígitos)", "text"],
             ]}
             extras={
               <>
@@ -2706,9 +2711,9 @@ function Config({
                   <option value="cash">Dinheiro</option>
                 </select>
                 <select name="operator">
-                  <option>Olcino</option>
-                  <option>Mari</option>
-                  <option>Ambos</option>
+                  <option value="Olcino">Titular/uso: Olcino</option>
+                  <option value="Mari">Titular/uso: Mari</option>
+                  <option value="Ambos">Titular/uso: Ambos</option>
                 </select>
               </>
             }
@@ -2720,6 +2725,7 @@ function Config({
                   <b>{a.name}</b>
                   <small>
                     {a.institution} · {a.operator} · {a.kind}
+                    {(a.lastDigits || a.importAliases?.length) && <> · reconhecimento: {[a.lastDigits&&`final ${a.lastDigits}`,...(a.importAliases||[])].filter(Boolean).join(", ")}</>}
                   </small>
                 </div>
                 <div className="actions">
