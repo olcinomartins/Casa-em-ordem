@@ -7,8 +7,9 @@ import {
   normalize,
   monthOf,
 } from "./domain";
-import { dedupeKey, hashText, suggest } from "./finance";
+import { dedupeKey, hashBytes, suggest } from "./finance";
 import { readInterPdf } from "./interPdf";
+import { readBlobArrayBuffer } from "./fileCompat";
 export interface Preview {
   filename: string;
   hash: string;
@@ -73,6 +74,10 @@ const shiftMonths = (iso: string, months: number) => {
   date.setMonth(date.getMonth() + months);
   return date.toISOString().slice(0, 10);
 };
+export const isInvoiceTransferDescription = (description: string) =>
+  /P\s*AGAMENTOS?.*(?:FATURA|ON\s*LINE|VALIDOS?\s*NORMAIS?)|FATURA.*CART[AÃ]O|TRANSFERENCIA\s+ENTRE/i.test(
+    normalize(description),
+  );
 const pick = (r: Record<string, unknown>, names: string[]) => {
   const key = Object.keys(r).find((k) =>
     names.some((n) => normalize(k).includes(normalize(n))),
@@ -86,15 +91,13 @@ export async function previewFile(
   operator?: Member,
   pdfPassword?: string,
 ): Promise<Preview> {
-  const buffer = await file.arrayBuffer();
-  const hash = await hashText(
-    String.fromCharCode(...new Uint8Array(buffer).slice(0, 50000)),
-  );
+  const buffer = await readBlobArrayBuffer(file);
+  const hash = await hashBytes(new Uint8Array(buffer));
   if (data.imports.some((i) => i.hash === hash))
     throw new Error("Este arquivo já foi importado.");
   if (/\.pdf$/i.test(file.name)) {
     const parsed = await readInterPdf(file, pdfPassword);
-    const identified = identifyAccount(data, "Inter", "card", `${file.name} ${parsed.documentText}`, accountId);
+    const identified = identifyAccount(data, parsed.institution, "card", `${file.name} ${parsed.documentText}`, accountId);
     if (!identified) throw new Error("Não foi possível identificar automaticamente a conta e o titular. Configure os identificadores em Contas e cartões ou selecione a conta nesta importação.");
     accountId = identified.account.id;
     operator = identified.account.operator;
@@ -102,7 +105,7 @@ export async function previewFile(
     let duplicates = 0;
     for (const item of parsed.rows) {
       const paymentDate = parsed.dueDate ?? item.date;
-      const isTransfer = /PAGAMENTO.*(?:FATURA|ON LINE)|FATURA.*CART/i.test(normalize(item.description));
+      const isTransfer = isInvoiceTransferDescription(item.description);
       const purchaseKey = `${normalize(item.description)}|${item.date}|${item.installments || 1}`;
       const alreadyAnchored = [...data.transactions,...rows].some(t=>`${normalize(t.description)}|${t.purchaseDate || t.date}|${t.installments || 1}`===purchaseKey && (t.integralAnchor || t.installment===1));
       const base = {...audit(operator),date:paymentDate,competence:monthOf(item.date),purchaseDate:item.date,description:item.description,normalized:normalize(item.description),amount:item.amount,accountId,operator,scope:(operator === "Ambos" ? "Familiar" : `Pessoal — ${operator}`) as Transaction["scope"],classification:"pending" as const,installment:item.installment,installments:item.installments,totalAmount:item.installments&&item.amount>0?item.amount*item.installments:undefined,integralAnchor:Boolean(item.installments&&item.amount>0&&!alreadyAnchored),paymentDate,transfer:isTransfer,movement:isTransfer?("transfer" as const):("expense_income" as const),sourceKind:"card" as const,dedupeKey:"",batchId:hash};
@@ -111,7 +114,7 @@ export async function previewFile(
       const rule=suggest(item.description,accountId,operator,data.rules);
       rows.push({...base,dedupeKey:key,categoryId:rule?.categoryId,subcategory:rule?.subcategory,classification:rule?"suggested":"pending"});
     }
-    return {filename:file.name,hash,institution:"Inter",rows,duplicates,errors:[],accountId,operator,detectedBy:identified.detectedBy};
+    return {filename:file.name,hash,institution:parsed.institution,rows,duplicates,errors:[],accountId,operator,detectedBy:identified.detectedBy};
   }
   const wb = XLSX.read(buffer, { type: "array", cellDates: true });
   const transactionSheet =
@@ -199,12 +202,8 @@ export async function previewFile(
           ? Math.abs(amount) * installments
           : undefined,
       paymentDate,
-      transfer: /PAGAMENTO.*FATURA|FATURA.*CART[AÃ]O|TRANSFERENCIA ENTRE/i.test(
-        normalize(descString),
-      ),
-      movement: /PAGAMENTO.*FATURA|FATURA.*CART[AÃ]O|TRANSFERENCIA ENTRE/i.test(
-        normalize(descString),
-      )
+      transfer: isInvoiceTransferDescription(descString),
+      movement: isInvoiceTransferDescription(descString)
         ? ("transfer" as const)
         : ("expense_income" as const),
       sourceKind: invoice ? ("card" as const) : ("statement" as const),

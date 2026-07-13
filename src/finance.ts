@@ -15,6 +15,13 @@ export async function hashText(s: string) {
     .map((x) => x.toString(16).padStart(2, "0"))
     .join("");
 }
+export async function hashBytes(bytes: Uint8Array) {
+  const copy = new Uint8Array(bytes);
+  const digest = await crypto.subtle.digest("SHA-256", copy.buffer);
+  return [...new Uint8Array(digest)]
+    .map((value) => value.toString(16).padStart(2, "0"))
+    .join("");
+}
 export async function dedupeKey(
   t: Pick<
     Transaction,

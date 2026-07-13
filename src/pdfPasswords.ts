@@ -16,19 +16,30 @@ export function identifyPdfBank(filename: string): PdfBank {
 }
 
 export async function getProtectedPdfPasswords(bank: PdfBank): Promise<string[]> {
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${await getMicrosoftAccessToken()}`,
-    },
-    body: JSON.stringify({ action: "pdf-passwords", bank }),
-  });
-  if (!response.ok) return [];
-  const result = await response.json().catch(() => ({}));
-  if (!Array.isArray(result.passwords)) return [];
-  const passwords: string[] = result.passwords.filter(
-    (value: unknown): value is string => typeof value === "string" && Boolean(value),
+  const accessToken = await getMicrosoftAccessToken();
+  // Nomes genéricos como "Fatura.pdf" não revelam o banco. Nesse caso o
+  // Worker deriva, sem expor o CPF, as opções dos três formatos aceitos.
+  const banks: Exclude<PdfBank, "unknown">[] =
+    bank === "unknown" ? ["inter", "xp", "btg"] : [bank];
+  const results = await Promise.all(
+    banks.map(async (candidate) => {
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({ action: "pdf-passwords", bank: candidate }),
+      });
+      if (!response.ok) return [];
+      const result = await response.json().catch(() => ({}));
+      return Array.isArray(result.passwords)
+        ? result.passwords.filter(
+            (value: unknown): value is string =>
+              typeof value === "string" && Boolean(value),
+          )
+        : [];
+    }),
   );
-  return [...new Set<string>(passwords)];
+  return [...new Set(results.flat())];
 }
