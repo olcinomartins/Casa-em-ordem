@@ -1202,7 +1202,8 @@ function Receipts({
         multiple
         onChange={(e) => analyze(Array.from(e.target.files || []))}
       />
-      <section className="panel">
+      <Collapsible title="Adicionar notas e compras">
+      <section className="panel supermarket-panel">
         <div className="panel-head">
           <div>
             <h2>Fotografar nota de supermercado</h2>
@@ -1394,11 +1395,10 @@ function Receipts({
           </div>
         )}
       </section>
-      <section className="panel">
-        <details>
-          <summary>
-            <b>Compras confirmadas para edição ({history.length})</b>
-          </summary>
+      </Collapsible>
+      <Collapsible title={`Compras confirmadas (${history.length})`}>
+      <section className="panel supermarket-panel">
+          <h2>Compras confirmadas</h2>
           <p className="muted">
             Corrija produtos, categorias, quantidades e valores já salvos.
           </p>
@@ -1437,9 +1437,10 @@ function Receipts({
               ))}
             {!history.length && <Empty />}
           </div>
-        </details>
       </section>
-      <section className="panel">
+      </Collapsible>
+      <Collapsible title="Sugestões para a lista de compras">
+      <section className="panel supermarket-panel">
         <h2>Sugestões para a lista de compras</h2>
         <p className="muted">
           Calculadas silenciosamente pelas datas e quantidades salvas na base.
@@ -1455,7 +1456,9 @@ function Receipts({
             />
           ))}
       </section>
-      <section className="panel">
+      </Collapsible>
+      <Collapsible title={`Catálogo de produtos (${products.length})`}>
+      <section className="panel supermarket-panel product-catalog">
         <h2>Produtos e valores médios</h2>
         <p className="muted">
           Edite diretamente o produto consolidado, sem precisar localizar cada compra.
@@ -1498,6 +1501,7 @@ function Receipts({
           <Empty />
         )}
       </section>
+      </Collapsible>
     </>
   );
 }

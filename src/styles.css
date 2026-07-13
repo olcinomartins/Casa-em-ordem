@@ -483,6 +483,53 @@ th {
 .editable-row > .actions {
   flex-shrink: 0;
 }
+.supermarket-panel { overflow: hidden; }
+.product-catalog .editable-row {
+  align-items: flex-start;
+  gap: 1rem;
+}
+.product-catalog .editable-row > div:first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.product-catalog .editable-row b,
+.product-catalog .editable-row small {
+  overflow-wrap: anywhere;
+}
+.product-catalog .editable-row > .actions {
+  flex: 0 1 230px;
+  max-width: 230px;
+  flex-direction: column;
+  align-items: stretch;
+}
+.product-catalog .editable-row > .actions span {
+  text-align: right;
+}
+.product-catalog .editable-row button {
+  width: 100%;
+  white-space: normal;
+}
+.product-occurrences {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 1rem;
+  margin-bottom: 1rem;
+  background: #f8faf7;
+}
+.product-occurrence-edit {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 1rem;
+  margin-top: .8rem;
+}
+.product-occurrence-edit > * { min-width: 0; width: 100%; }
+.product-occurrence-edit .occurrence-context,
+.product-occurrence-edit > button {
+  grid-column: 1 / -1;
+}
+.occurrence-context small { display: block; color: #718078; }
 .goal-section {
   margin-top: 1.5rem;
 }
@@ -1038,4 +1085,20 @@ code {
   .task-list article > .badge, .task-actions { grid-column: 2; }
   .receipt-item-edit { grid-template-columns: 1fr 1fr; }
   .receipt-item-edit > input:first-child, .receipt-item-edit > select, .receipt-item-edit > button { grid-column: 1 / -1; }
+  .receipt-item-edit > *, .receipt-item-edit label, .receipt-item-edit input, .receipt-item-edit select { min-width: 0; max-width: 100%; width: 100%; }
+  .product-catalog .editable-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: .7rem;
+  }
+  .product-catalog .editable-row > .actions {
+    width: 100%;
+    max-width: none;
+    align-items: stretch;
+  }
+  .product-catalog .editable-row > .actions span { text-align: left; }
+  .product-occurrences { padding: .7rem; }
+  .product-occurrence-edit { grid-template-columns: minmax(0, 1fr); padding: .8rem; }
+  .product-occurrence-edit .occurrence-context,
+  .product-occurrence-edit > button { grid-column: 1; }
 }
