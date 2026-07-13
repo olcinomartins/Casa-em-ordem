@@ -906,6 +906,7 @@ function Receipts({
   setMessage: (s: string) => void;
 }) {
   const [draft, setDraft] = useState<ReadReceipt>();
+  const [editingReceiptId, setEditingReceiptId] = useState<string>();
   const [busy, setBusy] = useState(false);
   const libraryInput = useRef<HTMLInputElement>(null);
   const [photoProgress, setPhotoProgress] = useState<{
@@ -993,10 +994,54 @@ function Receipts({
       })),
     };
     mutate((d) => {
-      (d.receipts ??= []).push(receipt);
+      if (editingReceiptId) {
+        const index = (d.receipts ??= []).findIndex(
+          (item) => item.id === editingReceiptId,
+        );
+        if (index >= 0) {
+          receipt.id = editingReceiptId;
+          receipt.createdAt = d.receipts[index].createdAt;
+          receipt.updatedAt = now();
+          receipt.version = d.receipts[index].version + 1;
+          d.receipts[index] = receipt;
+        }
+      } else {
+        (d.receipts ??= []).push(receipt);
+      }
     });
     setDraft(undefined);
-    setMessage("Compra registrada e sincronização automática iniciada.");
+    setEditingReceiptId(undefined);
+    setMessage(
+      editingReceiptId
+        ? "Compra atualizada e sincronização automática iniciada."
+        : "Compra registrada e sincronização automática iniciada.",
+    );
+  };
+  const editSavedReceipt = (receipt: Receipt) => {
+    setEditingReceiptId(receipt.id);
+    setDraft({
+      estabelecimento: receipt.store,
+      data: receipt.date,
+      total: receipt.total,
+      confianca: receipt.confidence,
+      observacoes: receipt.notes,
+      itens: receipt.items.map((item) => ({
+        descricao: item.description,
+        quantidade: item.quantity,
+        unidade: item.unit,
+        valorUnitario: item.unitPrice,
+        valorTotal: item.total,
+        categoriaMacro: item.macroCategory,
+      })),
+    });
+    setMessage("Compra aberta para edição.");
+    window.setTimeout(
+      () =>
+        document
+          .querySelector(".receipt-review")
+          ?.scrollIntoView({ behavior: "smooth", block: "start" }),
+      50,
+    );
   };
   const updateItem = (
     index: number,
@@ -1247,11 +1292,70 @@ function Receipts({
                 </button>
               </div>
             ))}
-            <button className="primary" onClick={save}>
-              Confirmar e salvar nota
-            </button>
+            <div className="actions">
+              <button className="primary" onClick={save}>
+                {editingReceiptId
+                  ? "Salvar alterações"
+                  : "Confirmar e salvar nota"}
+              </button>
+              {editingReceiptId && (
+                <button
+                  onClick={() => {
+                    setDraft(undefined);
+                    setEditingReceiptId(undefined);
+                  }}
+                >
+                  Cancelar edição
+                </button>
+              )}
+            </div>
           </div>
         )}
+      </section>
+      <section className="panel">
+        <details>
+          <summary>
+            <b>Compras confirmadas para edição ({history.length})</b>
+          </summary>
+          <p className="muted">
+            Corrija produtos, categorias, quantidades e valores já salvos.
+          </p>
+          <div className="list">
+            {history
+              .slice()
+              .sort((a, b) => b.date.localeCompare(a.date))
+              .map((receipt) => (
+                <div className="row editable-row" key={receipt.id}>
+                  <div>
+                    <b>{receipt.store}</b>
+                    <small>
+                      {receipt.date} · {receipt.items.length} item(ns) ·{" "}
+                      {money(receipt.total)}
+                    </small>
+                  </div>
+                  <div className="actions">
+                    <button onClick={() => editSavedReceipt(receipt)}>
+                      Editar produtos
+                    </button>
+                    <button
+                      className="danger-button"
+                      onClick={() =>
+                        confirm("Excluir esta compra confirmada?") &&
+                        mutate((d) => {
+                          d.receipts = (d.receipts || []).filter(
+                            (item) => item.id !== receipt.id,
+                          );
+                        })
+                      }
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            {!history.length && <Empty />}
+          </div>
+        </details>
       </section>
       <section className="panel">
         <h2>Sugestões para a lista de compras</h2>
