@@ -70,7 +70,7 @@ import {
 import { previewFile, Preview } from "./importer";
 import { tasksToIcs } from "./ics";
 import { readReceipt, ReadReceipt } from "./receipts";
-import { getProtectedPdfPasswords } from "./pdfPasswords";
+import { getProtectedPdfPasswords, identifyPdfBank } from "./pdfPasswords";
 import { readVoiceExpense, VoiceTransaction } from "./voice";
 
 type Page = "visao" | "rotinas" | "planejamento" | "importar" | "supermercado";
@@ -1531,12 +1531,9 @@ function ImportPage({
       if (rememberPassword && pdfPassword)
         sessionStorage.setItem("inter-pdf-password", pdfPassword);
       else sessionStorage.removeItem("inter-pdf-password");
-      let protectedPasswords: string[] = [];
-      if (!pdfPassword && files.some(file => /\.pdf$/i.test(file.name))) {
-        protectedPasswords = await getProtectedPdfPasswords().catch(() => []);
-      }
       const loaded:Preview[]=[];for(let index=0;index<files.length;index++){
         const file=files[index];setMessage(`Processando arquivo ${index+1} de ${files.length}…`);
+        const protectedPasswords=!pdfPassword&&/\.pdf$/i.test(file.name)?await getProtectedPdfPasswords(identifyPdfBank(file.name)).catch(()=>[]):[];
         const attempts=/\.pdf$/i.test(file.name)?(pdfPassword?[pdfPassword]:[...protectedPasswords,undefined]):[undefined];
         let lastError:unknown;
         for(const password of attempts){try{loaded.push(await previewFile(file,data,account||undefined,undefined,password));lastError=undefined;break}catch(error){lastError=error}}
