@@ -520,6 +520,29 @@ function Dashboard({
           !["Paga", "Dispensada"].includes(o.status),
     )
     .reduce((sum, o) => sum + o.planned, 0);
+  const realizedTransactions = data.transactions.filter(
+    (t) => !t.estimated && t.amount > 0 && Math.abs(realized(t, month, "cash")) > 0,
+  );
+  const realizedExpenses = realizedTransactions.reduce(
+    (sum, transaction) => sum + Math.abs(realized(transaction, month, "cash")),
+    0,
+  );
+  const sameExpense = (amount: number, date: string, description?: string) =>
+    realizedTransactions.some((transaction) => {
+      const transactionDate = transaction.purchaseDate || transaction.date;
+      const days = Math.abs(new Date(`${transactionDate}T12:00:00`).getTime() - new Date(`${date}T12:00:00`).getTime()) / 864e5;
+      const descriptionMatches = !description || normalize(transaction.description).includes(normalize(description)) || normalize(description).includes(normalize(transaction.description));
+      return Math.abs(Math.abs(transaction.amount) - Math.abs(amount)) < 0.02 && days <= 3 && descriptionMatches;
+    });
+  const voiceEstimates = data.transactions.filter(
+    (t) => t.estimated && t.amount > 0 && monthOf(t.purchaseDate || t.date) === month && !sameExpense(t.amount, t.purchaseDate || t.date, t.description),
+  );
+  const voiceExpected = voiceEstimates.reduce((sum, transaction) => sum + Math.abs(transaction.amount), 0);
+  const receiptEstimates = (data.receipts || []).filter(
+    (receipt) => monthOf(receipt.date) === month && receipt.total > 0 && !sameExpense(receipt.total, receipt.date, receipt.store),
+  );
+  const receiptsExpected = receiptEstimates.reduce((sum, receipt) => sum + receipt.total, 0);
+  const totalExpected = realizedExpenses + expectedBeforeClosing + voiceExpected + receiptsExpected;
   return (
     <>
       <div className="toolbar">
@@ -553,10 +576,19 @@ function Dashboard({
         />
         <Card
           label="Estimativa antes do fechamento"
-          value={money(expenses("cash") + expectedBeforeClosing)}
-          hint={`${money(expenses("cash"))} realizado · ${money(expectedBeforeClosing)} ainda previsto`}
+          value={money(totalExpected)}
+          hint={`${money(realizedExpenses)} realizado · ${money(voiceExpected + receiptsExpected + expectedBeforeClosing)} ainda previsto`}
           tone="warning"
-          details={<><p>Despesas realizadas mais compromissos ainda previstos para {month}. Não é saldo bancário nem fatura fechada.</p>{data.obligations.filter(o=>monthOf(o.dueDate)===month&&!['Paga','Dispensada'].includes(o.status)).sort((a,b)=>a.dueDate.localeCompare(b.dueDate)).map(o=><Row key={o.id} a={o.name} b={`${o.dueDate} · ${o.status}`} c={money(o.planned)}/>)}</>}
+          details={<>
+            <p>Prévia formada por pagamentos realizados, registros por voz, notas e compromissos ainda abertos. Não é saldo bancário nem fatura fechada.</p>
+            <Row a="Pagamentos e gastos realizados" b="Confirmados no mês" c={money(realizedExpenses)} />
+            <Row a="Registros por voz" b={`${voiceEstimates.length} estimativa(s)`} c={money(voiceExpected)} />
+            <Row a="Notas de compras" b={`${receiptEstimates.length} nota(s)`} c={money(receiptsExpected)} />
+            <Row a="Pagamentos ainda previstos" b="Obrigações abertas" c={money(expectedBeforeClosing)} />
+            {voiceEstimates.map(t=><Row key={t.id} a={`Voz · ${t.description}`} b={t.purchaseDate||t.date} c={money(t.amount)}/>)}
+            {receiptEstimates.map(receipt=><Row key={receipt.id} a={`Nota · ${receipt.store}`} b={receipt.date} c={money(receipt.total)}/>)}
+            {data.obligations.filter(o=>monthOf(o.dueDate)===month&&!['Paga','Dispensada'].includes(o.status)).sort((a,b)=>a.dueDate.localeCompare(b.dueDate)).map(o=><Row key={o.id} a={o.name} b={`${o.dueDate} · ${o.status}`} c={money(o.planned)}/>)}
+          </>}
         />
       </section>
       <section className="grid two">
