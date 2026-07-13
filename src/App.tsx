@@ -339,7 +339,7 @@ export default function App() {
         )}
         {page === "visao" && (
           <>
-            <Collapsible title="Painel" open>
+            <Collapsible title="Painel">
               <Dashboard
                 data={data}
                 month={month}
@@ -354,7 +354,7 @@ export default function App() {
         )}
         {page === "rotinas" && (
           <>
-            <Collapsible title="Responsabilidades, tarefas e agenda" open>
+            <Collapsible title="Responsabilidades, tarefas e agenda">
               <Tasks
                 data={data}
                 mutate={mutate}
@@ -368,7 +368,7 @@ export default function App() {
         )}
         {page === "planejamento" && (
           <>
-            <Collapsible title="Contas e cartões" open>
+            <Collapsible title="Contas e cartões">
               <Config
                 mode="accounts"
                 data={data}
@@ -404,7 +404,7 @@ export default function App() {
         )}
         {page === "importar" && (
           <>
-            <Collapsible title="Registrar despesa por voz" open>
+            <Collapsible title="Registrar despesa por voz">
               <VoiceExpense
                 data={data}
                 mutate={mutate}
@@ -907,6 +907,12 @@ function Receipts({
 }) {
   const [draft, setDraft] = useState<ReadReceipt>();
   const [editingReceiptId, setEditingReceiptId] = useState<string>();
+  const [editingProduct, setEditingProduct] = useState<{
+    key: string;
+    name: string;
+    category: string;
+    unit: string;
+  }>();
   const [busy, setBusy] = useState(false);
   const libraryInput = useRef<HTMLInputElement>(null);
   const [photoProgress, setPhotoProgress] = useState<{
@@ -1064,6 +1070,18 @@ function Receipts({
     "Bebidas e lanches",
     "Outros",
   ];
+  const unitOptions = [
+    ["un", "Unidade"],
+    ["kg", "Quilograma (kg)"],
+    ["g", "Grama (g)"],
+    ["l", "Litro (L)"],
+    ["ml", "Mililitro (ml)"],
+    ["pct", "Pacote"],
+    ["cx", "Caixa"],
+    ["dz", "Dúzia"],
+    ["m", "Metro"],
+    ["outro", "Outro"],
+  ];
   const history = data.receipts || [];
   const allPurchases = history.flatMap((r) => r.items.map((i) => ({ r, i })));
   const keys = Array.from(
@@ -1100,6 +1118,7 @@ function Receipts({
         )
         .filter((value): value is number => Number.isFinite(value));
       return {
+        key,
         name: last?.i.description || key,
         category:
           last?.i.macroCategory || groceryMacro(last?.i.description || key),
@@ -1110,11 +1129,29 @@ function Receipts({
           ? prices.reduce((a, b) => a + b, 0) / prices.length
           : undefined,
         store: last?.r.store,
+        unit: last?.i.unit || "un",
         averageDays,
         next,
       };
     })
     .sort((a, b) => b.count - a.count);
+  const saveProduct = () => {
+    if (!editingProduct?.name.trim()) return;
+    mutate((d) => {
+      for (const receipt of d.receipts || []) {
+        for (const item of receipt.items) {
+          if (normalize(item.description) !== editingProduct.key) continue;
+          item.description = editingProduct.name.trim();
+          item.macroCategory = editingProduct.category;
+          item.unit = editingProduct.unit;
+          receipt.updatedAt = now();
+          receipt.version++;
+        }
+      }
+    });
+    setEditingProduct(undefined);
+    setMessage("Produto atualizado em todo o histórico e sincronização iniciada.");
+  };
   return (
     <>
       <input
@@ -1252,12 +1289,17 @@ function Receipts({
                 </label>
                 <label>
                   Unidade
-                  <input
+                  <select
                     value={item.unidade || ""}
                     onChange={(e) =>
                       updateItem(index, { unidade: e.target.value })
                     }
-                  />
+                  >
+                    <option value="">Selecione</option>
+                    {unitOptions.map(([value, label]) => (
+                      <option key={value} value={value}>{label}</option>
+                    ))}
+                  </select>
                 </label>
                 <label>
                   Valor unitário
@@ -1376,16 +1418,62 @@ function Receipts({
       <section className="panel">
         <h2>Produtos e valores médios</h2>
         <p className="muted">
-          Catálogo consolidado por categoria, sem exibir as notas individuais.
+          Edite diretamente o produto consolidado, sem precisar localizar cada compra.
         </p>
+        {editingProduct && (
+          <div className="receipt-item-edit product-direct-edit">
+            <input
+              value={editingProduct.name}
+              placeholder="Nome do produto"
+              onChange={(event) =>
+                setEditingProduct({ ...editingProduct, name: event.target.value })
+              }
+            />
+            <select
+              value={editingProduct.category}
+              onChange={(event) =>
+                setEditingProduct({ ...editingProduct, category: event.target.value })
+              }
+            >
+              {macroCategories.map((category) => <option key={category}>{category}</option>)}
+            </select>
+            <select
+              value={editingProduct.unit}
+              onChange={(event) =>
+                setEditingProduct({ ...editingProduct, unit: event.target.value })
+              }
+            >
+              {unitOptions.map(([value, label]) => (
+                <option key={value} value={value}>{label}</option>
+              ))}
+            </select>
+            <button className="primary" onClick={saveProduct}>Salvar produto</button>
+            <button onClick={() => setEditingProduct(undefined)}>Cancelar</button>
+          </div>
+        )}
         {products.length ? (
           products.map((p) => (
-            <Row
-              key={p.name}
-              a={p.name}
-              b={`${p.category} · ${p.count} ocorrência(s) · quantidade média ${p.averageQuantity.toFixed(1)} · último local: ${p.store || "não identificado"}`}
-              c={p.price == null ? "—" : `${money(p.price)} médio`}
-            />
+            <div className="row editable-row" key={p.key}>
+              <div>
+                <b>{p.name}</b>
+                <small>{`${p.category} · ${p.unit} · ${p.count} ocorrência(s) · quantidade média ${p.averageQuantity.toFixed(1)} · último local: ${p.store || "não identificado"}`}</small>
+              </div>
+              <div className="actions">
+                <span>{p.price == null ? "—" : `${money(p.price)} médio`}</span>
+                <button
+                  onClick={() =>
+                    setEditingProduct({
+                      key: p.key,
+                      name: p.name,
+                      category: p.category,
+                      unit: p.unit,
+                    })
+                  }
+                >
+                  Editar produto
+                </button>
+              </div>
+            </div>
           ))
         ) : (
           <Empty />
