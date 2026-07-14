@@ -152,6 +152,18 @@ export interface ImportBatch extends Audit {
 }
 export interface ReceiptItem { id:string; description:string; quantity:number; unit?:string; unitPrice?:number; total:number; macroCategory?:string; }
 export interface Receipt extends Audit { store:string; date:string; total:number; confidence?:number; items:ReceiptItem[]; notes?:string[]; categoryId?:string; reconciledTransactionId?:string; }
+export interface ShoppingListItem extends Audit {
+  name: string;
+  quantity: number;
+  unit: string;
+  macroCategory: string;
+  notes?: string;
+  source: "manual" | "voice" | "suggestion";
+  status: "pending" | "completed" | "dismissed";
+  completedAt?: string;
+  dismissedAt?: string;
+  suggestionKey?: string;
+}
 export interface Chore extends Audit { title:string; assignee:Member; frequency:"daily"|"weekly"|"monthly"|"as_needed"; active:boolean; lastCompletedAt?:string; completionHistory:string[]; }
 export interface FamilyData {
   schemaVersion: 1;
@@ -166,6 +178,7 @@ export interface FamilyData {
   tasks: Task[];
   imports: ImportBatch[];
   receipts?: Receipt[];
+  shoppingList?: ShoppingListItem[];
   chores?: Chore[];
   lastSavedAt: string;
 }

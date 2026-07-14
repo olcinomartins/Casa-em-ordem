@@ -82,6 +82,12 @@ import {
   tryPdfPasswordCandidates,
 } from "./pdfPasswords";
 import { readVoiceExpense, VoiceTransaction } from "./voice";
+import { ShoppingListManager } from "./ShoppingListManager";
+import {
+  inferShoppingMacro,
+  shoppingMacroCategories,
+  shoppingUnitOptions,
+} from "./shoppingList";
 
 type Page = "visao" | "rotinas" | "planejamento" | "importar" | "supermercado";
 const nav: [Page, string, typeof BarChart3][] = [
@@ -431,7 +437,12 @@ export default function App() {
           </>
         )}
         {page === "supermercado" && (
-          <Receipts data={data} mutate={mutate} setMessage={setMessage} />
+          <Receipts
+            data={data}
+            mutate={mutate}
+            setMessage={setMessage}
+            currentMember={currentMember}
+          />
         )}
       </main>
     </div>
@@ -880,23 +891,7 @@ function Chores({
   );
 }
 
-const groceryMacro = (description: string) => {
-  const n = normalize(description);
-  if (/CARNE|FRANGO|PEIXE|LINGUICA|OVO/.test(n)) return "Proteínas";
-  if (/LEITE|QUEIJO|IOGUR|MANTEIGA|REQUEI/.test(n)) return "Laticínios";
-  if (/ARROZ|FEIJAO|MACARR|FARINHA|ACUCAR|CAFE|OLEO/.test(n))
-    return "Mercearia";
-  if (
-    /BANANA|MACA|LARANJA|UVA|MAMAO|BATATA|TOMATE|CEBOLA|ALFACE|CENOURA/.test(n)
-  )
-    return "Hortifruti";
-  if (/SABAO|DETERG|DESINF|AMACIANTE|ESPONJA/.test(n)) return "Limpeza";
-  if (/SHAMPOO|SABONETE|PAPEL HIG|CREME DENT/.test(n)) return "Higiene";
-  if (/RACAO|PETISCO|CACHORR/.test(n)) return "Pet";
-  if (/BISCOITO|CHOCOLATE|REFRIG|SUCO|CERVEJA/.test(n))
-    return "Bebidas e lanches";
-  return "Outros";
-};
+const groceryMacro = inferShoppingMacro;
 
 function ProductOccurrenceEditor({
   receipt,
@@ -936,10 +931,12 @@ function Receipts({
   data,
   mutate,
   setMessage,
+  currentMember,
 }: {
   data: FamilyData;
   mutate: (f: (d: FamilyData) => void) => void;
   setMessage: (s: string) => void;
+  currentMember: Member;
 }) {
   const [draft, setDraft] = useState<ReadReceipt>();
   const [editingReceiptId, setEditingReceiptId] = useState<string>();
@@ -1015,7 +1012,7 @@ function Receipts({
   const save = () => {
     if (!draft) return;
     const receipt: Receipt = {
-      ...audit(),
+      ...audit(currentMember),
       store: draft.estabelecimento || "Estabelecimento não identificado",
       date: draft.data || dateOnly(new Date()),
       total: Number(draft.total) || 0,
@@ -1095,29 +1092,8 @@ function Receipts({
       itens[index] = { ...itens[index], ...patch };
       return { ...current, itens };
     });
-  const macroCategories = [
-    "Proteínas",
-    "Laticínios",
-    "Mercearia",
-    "Hortifruti",
-    "Limpeza",
-    "Higiene",
-    "Pet",
-    "Bebidas e lanches",
-    "Outros",
-  ];
-  const unitOptions = [
-    ["un", "Unidade"],
-    ["kg", "Quilograma (kg)"],
-    ["g", "Grama (g)"],
-    ["l", "Litro (L)"],
-    ["ml", "Mililitro (ml)"],
-    ["pct", "Pacote"],
-    ["cx", "Caixa"],
-    ["dz", "Dúzia"],
-    ["m", "Metro"],
-    ["outro", "Outro"],
-  ];
+  const macroCategories = [...shoppingMacroCategories];
+  const unitOptions = shoppingUnitOptions.map((option) => [...option]);
   const history = data.receipts || [];
   const allPurchases = history.flatMap((r) => r.items.map((i) => ({ r, i })));
   const keys = Array.from(
@@ -1406,6 +1382,27 @@ function Receipts({
         )}
       </section>
       </Collapsible>
+      <Collapsible
+        title={`Lista de compras e sugestões (${(data.shoppingList || []).filter((item) => item.status === "pending").length})`}
+      >
+        <ShoppingListManager
+          data={data}
+          currentMember={currentMember}
+          mutate={mutate}
+          setMessage={setMessage}
+          suggestions={products
+            .filter((product) => product.next)
+            .map((product) => ({
+              key: `${product.key}|${product.next}`,
+              name: product.name,
+              category: product.category,
+              quantity: product.averageQuantity,
+              unit: product.unit,
+              next: product.next!,
+              averageDays: product.averageDays,
+            }))}
+        />
+      </Collapsible>
       <Collapsible title={`Compras confirmadas (${history.length})`}>
       <section className="supermarket-panel confirmed-purchases-section">
           <p className="muted">
@@ -1448,24 +1445,6 @@ function Receipts({
               ))}
             {!history.length && <Empty />}
           </div>
-      </section>
-      </Collapsible>
-      <Collapsible title="Sugestões para a lista de compras">
-      <section className="panel supermarket-panel">
-        <h2>Sugestões para a lista de compras</h2>
-        <p className="muted">
-          Calculadas silenciosamente pelas datas e quantidades salvas na base.
-        </p>
-        {products
-          .filter((p) => p.next)
-          .map((p) => (
-            <Row
-              key={p.name}
-              a={p.name}
-              b={`${p.category} · comprar cerca de ${p.averageQuantity.toFixed(1)} un. · intervalo médio ${p.averageDays} dias`}
-              c={p.next || "—"}
-            />
-          ))}
       </section>
       </Collapsible>
       <Collapsible title={`Catálogo de produtos (${products.length})`}>
