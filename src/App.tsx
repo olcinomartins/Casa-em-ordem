@@ -44,7 +44,13 @@ import {
   uid,
 } from "./domain";
 import {
-  loadLocal,
+  loadLocalIfPresent,
+  loadLocalRecovery,
+  saveLocalRecovery,
+  clearLocalRecovery,
+  markLocalPending,
+  hasLocalPending,
+  clearLocalPending,
   saveLocal,
   exportJson,
   restoreJson,
@@ -52,6 +58,7 @@ import {
 } from "./storage";
 import {
   getCloudLocation,
+  hasCloudVersion,
   isConfigured,
   loadCloud,
   saveCloud,
@@ -59,6 +66,7 @@ import {
   signIn,
   signOut,
   resumeSignIn,
+  waitForCloudIdle,
 } from "./onedrive";
 import { createSeed } from "./seed";
 import {
@@ -88,12 +96,30 @@ import {
 import { readVoiceExpense, VoiceTransaction } from "./voice";
 import { ShoppingListManager } from "./ShoppingListManager";
 import {
+  loadUiPreferences,
+  saveUiPreferences,
+  UI_PREFERENCES_STORAGE_KEY,
+} from "./uiPreferences";
+import {
+  dashboardBlockIds,
+  dashboardOrderStorageKey,
+  moveDashboardBlock,
+  normalizeDashboardOrder,
+  type DashboardBlockId,
+} from "./dashboardLayout";
+import { selectActionSummary } from "./actionSummary";
+import {
   inferShoppingMacro,
   shoppingMacroCategories,
   shoppingUnitOptions,
 } from "./shoppingList";
 
 type Page = "visao" | "rotinas" | "planejamento" | "importar" | "supermercado";
+type QuickExpenseNotice = {
+  transactionId: string;
+  date: string;
+  message: string;
+};
 const nav: [Page, string, typeof BarChart3][] = [
   ["visao", "Painel e Análises", BarChart3],
   ["rotinas", "Responsabilidades, Tarefas e Pagamentos", CheckSquare],
@@ -107,10 +133,26 @@ const dateOnly = (date: Date) => {
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
 };
-const currentMonth = () => dateOnly(new Date()).slice(0, 7);
+const sameFamilyContent = (left: FamilyData, right: FamilyData) =>
+  JSON.stringify({ ...left, lastSavedAt: "" }) ===
+  JSON.stringify({ ...right, lastSavedAt: "" });
 
 export default function App() {
+  const [hadStoredUiPreferences] = useState(() => {
+    try {
+      return Boolean(localStorage.getItem(UI_PREFERENCES_STORAGE_KEY));
+    } catch {
+      return false;
+    }
+  });
+  const [initialUiPreferences] = useState(() => loadUiPreferences());
   const [data, setData] = useState<FamilyData>();
+  const dataRef = useRef<FamilyData>();
+  const localMutationGeneration = useRef(0);
+  const refreshGeneration = useRef(0);
+  const allowAccountGeneration = useRef(0);
+  const connectionGeneration = useRef(0);
+  const [localRecovery, setLocalRecovery] = useState<FamilyData>();
   const [authenticated, setAuthenticated] = useState(false);
   const [currentMember, setCurrentMember] = useState<"Olcino" | "Mari">(
     "Olcino",
@@ -125,27 +167,59 @@ export default function App() {
     page: Page;
     sectionId: string;
   } | null>(null);
-  const [month, setMonth] = useState(currentMonth());
-  const [view, setView] = useState<CashView>("cash");
+  const [month, setMonth] = useState(initialUiPreferences.month);
+  const [view, setView] = useState<CashView>(initialUiPreferences.view);
   const [message, setMessage] = useState("");
+  const [quickExpenseNotice, setQuickExpenseNotice] =
+    useState<QuickExpenseNotice>();
+  const [focusedTransactionId, setFocusedTransactionId] = useState<string>();
   const [cloud, setCloud] = useState<"local" | "syncing" | "connected">(
     "local",
   );
   useEffect(() => {
+    if (!quickExpenseNotice) return;
+    const timer = window.setTimeout(
+      () => setQuickExpenseNotice(undefined),
+      15_000,
+    );
+    return () => window.clearTimeout(timer);
+  }, [quickExpenseNotice]);
+  useEffect(() => {
+    dataRef.current = data;
+  }, [data]);
+  useEffect(() => {
+    const current = loadUiPreferences();
+    saveUiPreferences({ ...current, month, view });
+  }, [month, view]);
+  useEffect(() => {
     if (authenticated && data) saveLocal(data);
   }, [authenticated, data]);
   const autosaveReady = useRef(false);
+  const skipNextAutosave = useRef(false);
+  const autosaveGeneration = useRef(0);
   useEffect(() => {
     if (!authenticated || !data) return;
+    if (skipNextAutosave.current) {
+      skipNextAutosave.current = false;
+      return;
+    }
     if (!autosaveReady.current) {
       autosaveReady.current = true;
       return;
     }
+    const generation = ++autosaveGeneration.current;
     setCloud("syncing");
     const timer = window.setTimeout(() => {
+      if (generation !== autosaveGeneration.current) return;
       saveCloud(data)
-        .then(() => setCloud("connected"))
+        .then(() => {
+          if (generation === autosaveGeneration.current) {
+            clearLocalPending();
+            setCloud("connected");
+          }
+        })
         .catch((error) => {
+          if (generation !== autosaveGeneration.current) return;
           setCloud("local");
           setMessage(
             `Falha no salvamento automático: ${(error as Error).message}`,
@@ -155,32 +229,52 @@ export default function App() {
     return () => window.clearTimeout(timer);
   }, [authenticated, data]);
   useEffect(() => {
-    if (!authenticated) return;
-    const refresh = () => {
+    if (!authenticated || cloud !== "connected") return;
+    const refresh = async () => {
       if (document.visibilityState !== "visible") return;
-      loadCloud()
-        .then((remote) => {
-          if (remote)
-            setData((current) =>
-              !current || remote.lastSavedAt > current.lastSavedAt
-                ? remote
-                : current,
-            );
-        })
-        .catch((error) =>
-          setMessage(
-            `Não foi possível atualizar do OneDrive: ${(error as Error).message}`,
-          ),
+      const refreshRequest = ++refreshGeneration.current;
+      const mutationAtStart = localMutationGeneration.current;
+      try {
+        // O eTag só é adotado se nenhuma edição local ocorrer enquanto a
+        // leitura estiver em andamento.
+        const remote = await loadCloud(
+          () =>
+            refreshRequest === refreshGeneration.current &&
+            mutationAtStart === localMutationGeneration.current,
         );
+        if (
+          refreshRequest !== refreshGeneration.current ||
+          mutationAtStart !== localMutationGeneration.current
+        )
+          return;
+        const current = dataRef.current;
+        if (!remote || !current) return;
+        if (JSON.stringify(remote) === JSON.stringify(current)) return;
+        // Como o estado estava totalmente sincronizado ao iniciar a consulta,
+        // uma diferença pertence ao OneDrive.
+        if (
+          refreshRequest === refreshGeneration.current &&
+          mutationAtStart === localMutationGeneration.current
+        ) {
+          skipNextAutosave.current = true;
+          setData(remote);
+        }
+      } catch (error) {
+        setMessage(
+          `Não foi possível atualizar do OneDrive: ${(error as Error).message}`,
+        );
+      }
     };
     window.addEventListener("focus", refresh);
     document.addEventListener("visibilitychange", refresh);
     return () => {
+      refreshGeneration.current += 1;
       window.removeEventListener("focus", refresh);
       document.removeEventListener("visibilitychange", refresh);
     };
-  }, [authenticated]);
+  }, [authenticated, cloud]);
   const allowAccount = async (account: { username: string }) => {
+    const attempt = ++allowAccountGeneration.current;
     const email = account.username.toLowerCase();
     const allowed = String(import.meta.env.VITE_ALLOWED_EMAILS || "")
       .toLowerCase()
@@ -191,17 +285,46 @@ export default function App() {
       await signOut();
       throw new Error(`O e-mail ${email} não está autorizado.`);
     }
-    setCurrentMember(
-      email === "mariana_camillie@hotmail.com" ? "Mari" : "Olcino",
-    );
-    const remote = await loadCloud();
+    const localWasPending = hasLocalPending();
+    const result = await Promise.all([
+      loadCloud(() => attempt === allowAccountGeneration.current),
+      loadLocalIfPresent(),
+      loadLocalRecovery(),
+    ]).catch((error) => {
+      if (attempt !== allowAccountGeneration.current) return undefined;
+      throw error;
+    });
+    if (!result || attempt !== allowAccountGeneration.current) return;
+    const [remote, cached, previousRecovery] = result;
     if (!remote)
       throw new Error(
         "A base familiar do OneDrive não foi encontrada. O aplicativo não abrirá uma cópia local antiga.",
       );
+    const hasDivergentCache = Boolean(
+      cached &&
+        !sameFamilyContent(cached, remote) &&
+        (localWasPending || cached.lastSavedAt > remote.lastSavedAt),
+    );
+    if (hasDivergentCache) {
+      await saveLocalRecovery(cached!);
+      if (attempt !== allowAccountGeneration.current) return;
+      setLocalRecovery(cached);
+      setMessage(
+        "O OneDrive foi carregado sem sobrescrever alterações da outra pessoa. Uma cópia local divergente foi preservada para download.",
+      );
+    } else {
+      setLocalRecovery(previousRecovery);
+    }
+    // O OneDrive é a fonte oficial. Cache nunca é enviado automaticamente
+    // sobre uma versão remota diferente.
+    if (attempt !== allowAccountGeneration.current) return;
+    setCurrentMember(
+      email === "mariana_camillie@hotmail.com" ? "Mari" : "Olcino",
+    );
     setData(remote);
-    setAuthenticated(true);
+    clearLocalPending();
     setCloud("connected");
+    setAuthenticated(true);
   };
   useEffect(() => {
     resumeSignIn()
@@ -220,15 +343,38 @@ export default function App() {
       setAuthBusy(false);
     }
   };
-  const mutate = (fn: (draft: FamilyData) => void) =>
+  const mutate = (fn: (draft: FamilyData) => void) => {
+    localMutationGeneration.current += 1;
     setData((old) => {
       if (!old) return old;
       const draft = structuredClone(old);
       fn(draft);
       draft.lastSavedAt = now();
+      markLocalPending(draft.lastSavedAt);
       return draft;
     });
-  const configureShared = () => {
+  };
+  const undoQuickExpense = (transactionId: string) => {
+    if (!data?.transactions.some((item) => item.id === transactionId)) {
+      setQuickExpenseNotice(undefined);
+      setMessage("Esse lançamento já não está disponível para desfazer.");
+      return;
+    }
+    mutate((draft) => {
+      draft.transactions = draft.transactions.filter(
+        (item) => item.id !== transactionId,
+      );
+    });
+    setQuickExpenseNotice(undefined);
+    setMessage("Despesa desfeita e sincronização automática iniciada.");
+  };
+  const viewQuickExpense = (notice: QuickExpenseNotice) => {
+    setMonth(monthOf(notice.date));
+    setFocusedTransactionId(notice.transactionId);
+    setQuickExpenseNotice(undefined);
+    goToQuickAction("importar", "quick-transactions");
+  };
+  const configureShared = async () => {
     const current = getCloudLocation();
     const driveId = prompt(
       "ID do drive compartilhado:",
@@ -240,8 +386,24 @@ export default function App() {
       current?.itemId || "",
     );
     if (!itemId) return;
+    const currentData = dataRef.current;
+    const localWasPending = Boolean(currentData && hasLocalPending());
+    if (currentData && localWasPending) {
+      await saveLocalRecovery(currentData);
+      setLocalRecovery(currentData);
+    }
+    // Uma gravação já iniciada pertence à localização anterior e não pode
+    // concluir visualmente a conexão da nova base.
+    autosaveGeneration.current += 1;
+    refreshGeneration.current += 1;
+    connectionGeneration.current += 1;
     setCloudLocation({ driveId, itemId });
-    setMessage("Base compartilhada configurada. Conecte novamente.");
+    setCloud("local");
+    setMessage(
+      localWasPending
+        ? "Base compartilhada configurada. A cópia local pendente foi preservada; conecte novamente."
+        : "Base compartilhada configurada. Conecte novamente.",
+    );
   };
   const toggleValues = () =>
     setHideValues((current) => {
@@ -249,15 +411,50 @@ export default function App() {
       return !current;
     });
   const connect = async () => {
+    const attempt = ++connectionGeneration.current;
     try {
+      refreshGeneration.current += 1;
       setCloud("syncing");
       await signIn();
-      const remote = await loadCloud();
-      if (remote) setData(remote);
-      else if (data) await saveCloud(data);
+      await waitForCloudIdle();
+      if (attempt !== connectionGeneration.current) return;
+      const currentData = dataRef.current;
+      let preservedLocalCopy = false;
+      if (authenticated && currentData && hasCloudVersion()) {
+        // Usa o eTag da última versão aceita. Se outra pessoa alterou a base,
+        // o OneDrive responderá 412 e nada será sobrescrito.
+        await saveCloud(currentData);
+      } else {
+        const localWasPending = hasLocalPending();
+        const remote = await loadCloud(
+          () => attempt === connectionGeneration.current,
+        );
+        if (attempt !== connectionGeneration.current) return;
+        if (remote) {
+          if (
+            currentData &&
+            localWasPending &&
+            !sameFamilyContent(currentData, remote)
+          ) {
+            await saveLocalRecovery(currentData);
+            if (attempt !== connectionGeneration.current) return;
+            setLocalRecovery(currentData);
+            preservedLocalCopy = true;
+          }
+          skipNextAutosave.current = true;
+          setData(remote);
+        } else if (currentData) await saveCloud(currentData);
+      }
+      if (attempt !== connectionGeneration.current) return;
+      clearLocalPending();
       setCloud("connected");
-      setMessage("OneDrive conectado.");
+      setMessage(
+        preservedLocalCopy
+          ? "OneDrive conectado. A cópia local pendente foi preservada para recuperação."
+          : "OneDrive conectado.",
+      );
     } catch (e) {
+      if (attempt !== connectionGeneration.current) return;
       setCloud("local");
       setMessage((e as Error).message);
     }
@@ -280,6 +477,13 @@ export default function App() {
       }
       section.open = true;
       section.scrollIntoView({ behavior: "smooth", block: "start" });
+      const keepTransactionFocus =
+        pendingQuickTarget.sectionId === "quick-transactions" &&
+        Boolean(focusedTransactionId);
+      if (keepTransactionFocus) {
+        setPendingQuickTarget(null);
+        return;
+      }
       const target = section.querySelector<HTMLElement>(
         "[data-quick-focus], input:not([type='hidden']), select, textarea, button",
       );
@@ -302,7 +506,7 @@ export default function App() {
       cancelled = true;
       window.cancelAnimationFrame(frame);
     };
-  }, [page, pendingQuickTarget]);
+  }, [focusedTransactionId, page, pendingQuickTarget]);
   if (!authenticated)
     return (
       <div className="login-page">
@@ -336,9 +540,10 @@ export default function App() {
         </div>
         <nav>
           {nav.map(([id, label, Icon]) => (
-            <button
+           <button
               key={id}
               className={page === id ? "active" : ""}
+              aria-current={page === id ? "page" : undefined}
               onClick={() => setPage(id)}
             >
               <Icon size={19} />
@@ -393,6 +598,7 @@ export default function App() {
               onClick={toggleValues}
               title={hideValues ? "Mostrar valores" : "Esconder valores"}
               aria-label={hideValues ? "Mostrar valores" : "Esconder valores"}
+              aria-pressed={hideValues}
             >
               {hideValues ? <EyeOff size={18} /> : <Eye size={18} />}
               <span>{hideValues ? "Mostrar" : "Esconder"}</span>
@@ -403,8 +609,70 @@ export default function App() {
           </div>
         </header>
         {message && (
-          <div className="toast" onClick={() => setMessage("")}>
-            {message}
+          <div className="toast" role="status" aria-live="polite">
+            <span>{message}</span>
+            <button
+              aria-label="Fechar mensagem"
+              onClick={() => setMessage("")}
+            >
+              <X size={17} />
+            </button>
+          </div>
+        )}
+        {localRecovery && (
+          <section className="recovery-banner" role="alert">
+            <div>
+              <b>Cópia local preservada</b>
+              <p>
+                Ela não foi enviada sobre o OneDrive. Baixe o arquivo para
+                conferir antes de descartá-la.
+              </p>
+            </div>
+            <div className="actions">
+              <button onClick={() => exportJson(localRecovery)}>
+                <Download size={17} /> Baixar cópia local
+              </button>
+              <button
+                onClick={async () => {
+                  await clearLocalRecovery();
+                  setLocalRecovery(undefined);
+                  setMessage("Cópia local divergente descartada.");
+                }}
+              >
+                Descartar cópia
+              </button>
+            </div>
+          </section>
+        )}
+        {quickExpenseNotice && (
+          <div className="action-toast">
+            <span
+              className="action-toast-message"
+              role="status"
+              aria-live="polite"
+              aria-atomic="true"
+            >
+              {quickExpenseNotice.message}
+            </span>
+            <div className="action-toast-buttons">
+              <button
+                onClick={() =>
+                  undoQuickExpense(quickExpenseNotice.transactionId)
+                }
+              >
+                Desfazer
+              </button>
+              <button onClick={() => viewQuickExpense(quickExpenseNotice)}>
+                Ver lançamento
+              </button>
+              <button
+                className="action-toast-close"
+                aria-label="Fechar notificação"
+                onClick={() => setQuickExpenseNotice(undefined)}
+              >
+                <X size={18} />
+              </button>
+            </div>
           </div>
         )}
         {page === "visao" && (
@@ -416,10 +684,16 @@ export default function App() {
                 view={view}
                 setView={setView}
                 hideValues={hideValues}
+                currentMember={currentMember}
+                cloud={cloud}
+                onNavigate={goToQuickAction}
               />
             </Collapsible>
             <Collapsible title="Análises históricas">
-              <Analytics data={data} />
+              <Analytics
+                data={data}
+                hadStoredPreferences={hadStoredUiPreferences}
+              />
             </Collapsible>
           </>
         )}
@@ -433,7 +707,7 @@ export default function App() {
               />
             </Collapsible>
             <Collapsible id="quick-payments" title="Central de pagamentos">
-              <Payments data={data} mutate={mutate} />
+              <Payments data={data} mutate={mutate} hideValues={hideValues} />
             </Collapsible>
           </>
         )}
@@ -459,13 +733,14 @@ export default function App() {
                 setMessage={setMessage}
               />
             </Collapsible>
-            <Collapsible title="Orçamentos">
+            <Collapsible id="budgets-section" title="Orçamentos">
               <Budgets
                 data={data}
                 month={month}
                 view={view}
                 setView={setView}
                 mutate={mutate}
+                hideValues={hideValues}
               />
             </Collapsible>
             <Collapsible title="Metas e reservas">
@@ -484,10 +759,17 @@ export default function App() {
               />
             </Collapsible>
             <Collapsible id="quick-import" title="Importar extratos e faturas">
-              <ImportPage data={data} mutate={mutate} setMessage={setMessage} />
+              <ImportPage data={data} mutate={mutate} setMessage={setMessage} hideValues={hideValues} />
             </Collapsible>
-            <Collapsible title="Transações e revisão">
-              <Transactions data={data} month={month} mutate={mutate} />
+            <Collapsible id="quick-transactions" title="Transações e revisão">
+              <Transactions
+                data={data}
+                month={month}
+                mutate={mutate}
+                focusTransactionId={focusedTransactionId}
+                onFocusHandled={() => setFocusedTransactionId(undefined)}
+                hideValues={hideValues}
+              />
             </Collapsible>
           </>
         )}
@@ -497,6 +779,7 @@ export default function App() {
             mutate={mutate}
             setMessage={setMessage}
             currentMember={currentMember}
+            hideValues={hideValues}
           />
         )}
       </main>
@@ -504,8 +787,14 @@ export default function App() {
         data={data}
         mutate={mutate}
         currentMember={currentMember}
-        setMessage={setMessage}
         onNavigate={goToQuickAction}
+        onExpenseCreated={(transaction) =>
+          setQuickExpenseNotice({
+            transactionId: transaction.id,
+            date: transaction.date,
+            message: "Despesa adicionada à prévia do mês.",
+          })
+        }
       />
     </div>
   );
@@ -541,14 +830,14 @@ function QuickActions({
   data,
   mutate,
   currentMember,
-  setMessage,
   onNavigate,
+  onExpenseCreated,
 }: {
   data: FamilyData;
   mutate: (f: (data: FamilyData) => void) => void;
   currentMember: Exclude<Member, "Ambos">;
-  setMessage: (message: string) => void;
   onNavigate: (page: Page, sectionId: string) => void;
+  onExpenseCreated: (transaction: Transaction) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<"menu" | "expense">("menu");
@@ -564,9 +853,11 @@ function QuickActions({
       )?.id || data.accounts.find((account) => account.active)?.id || "",
   );
   const [saving, setSaving] = useState(false);
+  const [dialogError, setDialogError] = useState("");
   const savingRef = useRef(false);
   const fabRef = useRef<HTMLButtonElement>(null);
   const sheetRef = useRef<HTMLDivElement>(null);
+  const errorRef = useRef<HTMLDivElement>(null);
   const expenseCategories = data.categories.filter(
     (category) => category.nature === "expense",
   );
@@ -595,8 +886,14 @@ function QuickActions({
   const close = (restoreFocus = true) => {
     setOpen(false);
     setMode("menu");
+    setDialogError("");
     if (restoreFocus)
       window.setTimeout(() => fabRef.current?.focus(), 0);
+  };
+
+  const showDialogError = (error: string) => {
+    setDialogError(error);
+    window.setTimeout(() => errorRef.current?.focus(), 0);
   };
 
   useEffect(() => {
@@ -669,12 +966,13 @@ function QuickActions({
     const scope = String(form.get("scope") || "Familiar") as Transaction["scope"];
     const account = data.accounts.find((item) => item.id === selectedAccountId);
     if (!amount || !cleanDescription || !date || !account || !categoryId) {
-      setMessage(
+      showDialogError(
         "Preencha valor, descrição, categoria, conta ou cartão e data.",
       );
       savingRef.current = false;
       return;
     }
+    setDialogError("");
     setSaving(true);
     try {
       const transaction: Transaction = {
@@ -707,11 +1005,11 @@ function QuickActions({
       setCategoryTouched(false);
       setDescription("");
       close();
-      setMessage(
-        "Despesa adicionada à prévia do mês e sincronização automática iniciada.",
-      );
+      onExpenseCreated(transaction);
     } catch (error) {
-      setMessage(`Não foi possível registrar: ${(error as Error).message}`);
+      showDialogError(
+        `Não foi possível registrar: ${(error as Error).message}`,
+      );
     } finally {
       savingRef.current = false;
       setSaving(false);
@@ -744,21 +1042,42 @@ function QuickActions({
               </div>
               <button
                 className="quick-action-close"
-                onClick={() =>
-                  mode === "expense" ? setMode("menu") : close()
-                }
+                onClick={() => {
+                  if (mode === "expense") {
+                    setDialogError("");
+                    setMode("menu");
+                  } else {
+                    close();
+                  }
+                }}
                 aria-label={mode === "expense" ? "Voltar" : "Fechar"}
               >
                 {mode === "expense" ? "Voltar" : <X size={21} />}
               </button>
             </div>
 
+            {dialogError && (
+              <div
+                ref={errorRef}
+                className="quick-action-error"
+                role="alert"
+                aria-live="assertive"
+                aria-atomic="true"
+                tabIndex={-1}
+              >
+                {dialogError}
+              </div>
+            )}
+
             {mode === "menu" ? (
               <>
                 <div className="quick-action-grid">
                   <button
                     className="quick-action-primary"
-                    onClick={() => setMode("expense")}
+                    onClick={() => {
+                      setDialogError("");
+                      setMode("expense");
+                    }}
                   >
                     <CircleDollarSign size={22} />
                     <span>
@@ -810,7 +1129,13 @@ function QuickActions({
                 </button>
               </>
             ) : (
-              <form className="quick-expense-form" onSubmit={saveExpense}>
+              <form
+                className="quick-expense-form"
+                onSubmit={saveExpense}
+                onChangeCapture={() => {
+                  if (dialogError) setDialogError("");
+                }}
+              >
                 <p className="muted">
                   Entra como prévia do mês e será conciliada quando a fatura ou
                   o extrato forem importados.
@@ -950,6 +1275,9 @@ function QuickActions({
         ref={fabRef}
         className={`quick-action-fab ${open ? "menu-open" : ""}`}
         onClick={() => (open ? close() : setOpen(true))}
+        disabled={open}
+        aria-hidden={open ? "true" : undefined}
+        tabIndex={open ? -1 : undefined}
         aria-label={open ? "Fechar ações rápidas" : "Abrir ações rápidas"}
         aria-expanded={open}
         aria-controls="quick-action-sheet"
@@ -971,18 +1299,21 @@ function ViewSwitch({
     <div className="segmented">
       <button
         className={view === "cash" ? "on" : ""}
+        aria-pressed={view === "cash"}
         onClick={() => setView("cash")}
       >
         Fluxo das parcelas
       </button>
       <button
         className={view === "accrual" ? "on" : ""}
+        aria-pressed={view === "accrual"}
         onClick={() => setView("accrual")}
       >
         Compra integral
       </button>
       <button
         className={view === "compare" ? "on" : ""}
+        aria-pressed={view === "compare"}
         onClick={() => setView("compare")}
       >
         Comparar integral × parcelas
@@ -991,19 +1322,68 @@ function ViewSwitch({
   );
 }
 
+function HiddenValue() {
+  return (
+    <span role="img" aria-label="valor oculto">
+      <span aria-hidden="true">*****</span>
+    </span>
+  );
+}
+
+function SensitiveMoney({
+  value,
+  hidden,
+}: {
+  value: number;
+  hidden: boolean;
+}) {
+  return hidden ? <HiddenValue /> : <>{money(value)}</>;
+}
+
+const dashboardBlockLabels: Record<DashboardBlockId, string> = {
+  summary: "Resumo financeiro",
+  categories: "Gastos por categoria",
+  budget: "Orçado × acompanhado",
+  personal: "Orçamentos pessoais",
+  commitments: "Próximos compromissos",
+  goals: "Metas prioritárias",
+};
+
 function Dashboard({
   data,
   month,
   view,
   setView,
   hideValues,
+  currentMember,
+  cloud,
+  onNavigate,
 }: {
   data: FamilyData;
   month: string;
   view: CashView;
   setView: (v: CashView) => void;
   hideValues: boolean;
+  currentMember: Exclude<Member, "Ambos">;
+  cloud: "local" | "syncing" | "connected";
+  onNavigate: (page: Page, sectionId: string) => void;
 }) {
+  const orderKey = dashboardOrderStorageKey(currentMember);
+  const [blockOrder, setBlockOrder] = useState<DashboardBlockId[]>(() => {
+    try {
+      return normalizeDashboardOrder(localStorage.getItem(orderKey));
+    } catch {
+      return [...dashboardBlockIds];
+    }
+  });
+  const [organizing, setOrganizing] = useState(false);
+  useEffect(() => {
+    try {
+      localStorage.setItem(orderKey, JSON.stringify(blockOrder));
+    } catch {
+      // A ordem é opcional e nunca deve bloquear o painel financeiro.
+    }
+  }, [blockOrder, orderKey]);
   const calc = (v: "cash" | "accrual") =>
     data.transactions.reduce(
       (sum, transaction) =>
@@ -1027,14 +1407,6 @@ function Dashboard({
         monthOf(t.paymentDate || t.date) === month,
     )
     .reduce((s, t) => s + Math.abs(t.amount), 0);
-  const pending = data.transactions.filter(
-    (t) => t.classification !== "confirmed",
-  ).length;
-  const due = data.obligations.filter(
-    (o) =>
-      !["Paga", "Confirmada", "Dispensada"].includes(o.status) &&
-      o.dueDate <= dateOnly(new Date(Date.now() + 14 * 864e5)),
-  ).length;
   const spending = monthlySpending(
     data,
     month,
@@ -1053,36 +1425,129 @@ function Dashboard({
         0,
       )
     : undefined;
+  const actionSummary = selectActionSummary(data, { month, view });
+  const commitments = data.obligations
+    .filter(
+      (obligation) =>
+        !["Paga", "Confirmada", "Dispensada"].includes(obligation.status),
+    )
+    .slice()
+    .sort(
+      (left, right) =>
+        left.dueDate.localeCompare(right.dueDate) ||
+        left.name.localeCompare(right.name, "pt-BR"),
+    )
+    .slice(0, 5);
+  const priorityGoals = data.goals
+    .filter((goal) => goal.active)
+    .slice()
+    .sort((left, right) => left.priority - right.priority)
+    .slice(0, 4);
   return (
     <>
-      <div className="toolbar">
+      <div className="toolbar dashboard-toolbar">
         <ViewSwitch view={view} setView={setView} />
+        <button
+          aria-expanded={organizing}
+          onClick={() => setOrganizing((current) => !current)}
+        >
+          <Settings size={17} />
+          {organizing ? "Concluir organização" : "Organizar painel"}
+        </button>
       </div>
+      {organizing && (
+        <section className="panel dashboard-organizer">
+          <div className="panel-head">
+            <div>
+              <h2>Organizar painel</h2>
+              <p className="muted">
+                A ordem é salva automaticamente neste aparelho para{" "}
+                {currentMember}.
+              </p>
+            </div>
+            <button onClick={() => setBlockOrder([...dashboardBlockIds])}>
+              Restaurar padrão
+            </button>
+          </div>
+          <div className="dashboard-order-list">
+            {blockOrder.map((blockId, index) => (
+              <div key={blockId}>
+                <span>
+                  <b>{dashboardBlockLabels[blockId]}</b>
+                  <small>
+                    Posição {index + 1} de {blockOrder.length}
+                  </small>
+                </span>
+                <div className="actions">
+                  <button
+                    disabled={index === 0}
+                    aria-label={`Subir ${dashboardBlockLabels[blockId]}`}
+                    onClick={() =>
+                      setBlockOrder((current) =>
+                        moveDashboardBlock(current, blockId, "up"),
+                      )
+                    }
+                  >
+                    ↑
+                  </button>
+                  <button
+                    disabled={index === blockOrder.length - 1}
+                    aria-label={`Descer ${dashboardBlockLabels[blockId]}`}
+                    onClick={() =>
+                      setBlockOrder((current) =>
+                        moveDashboardBlock(current, blockId, "down"),
+                      )
+                    }
+                  >
+                    ↓
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+      <DashboardActionSummary
+        summary={actionSummary}
+        cloud={cloud}
+        hideValues={hideValues}
+        onNavigate={onNavigate}
+      />
+      <div className="dashboard-blocks" role="list" aria-label="Blocos do painel">
+      {blockOrder.map((blockId, index) =>
+        blockId === "summary" ? (
+      <div
+        key={blockId}
+        className="dashboard-block wide"
+        role="listitem"
+        aria-posinset={index + 1}
+        aria-setsize={blockOrder.length}
+      >
       <section className="cards">
         <Card
           label="Renda familiar"
-          value={money(income)}
+          value={<SensitiveMoney value={income} hidden={hideValues} />}
           hint="Entradas líquidas no mês"
           tone="good"
-          details={data.transactions.filter(t=>!t.estimated&&t.amount<0&&Math.abs(realized(t,month,"cash"))>0).map(t=><Row key={t.id} a={t.description} b={t.paymentDate||t.date} c={money(Math.abs(t.amount))}/>) }
+          details={data.transactions.filter(t=>!t.estimated&&t.amount<0&&Math.abs(realized(t,month,"cash"))>0).map(t=><Row key={t.id} a={t.description} b={t.paymentDate||t.date} c={<SensitiveMoney value={Math.abs(t.amount)} hidden={hideValues} />}/>) }
         />
         <Card
           label="Despesas no fluxo"
-          value={money(expenses("cash"))}
+          value={<SensitiveMoney value={expenses("cash")} hidden={hideValues} />}
           hint={
             view === "compare"
-              ? `Integral: ${money(expenses("accrual"))}`
+              ? <>Integral: <SensitiveMoney value={expenses("accrual")} hidden={hideValues} /></>
               : "Conforme pagamentos"
           }
           tone="bad"
-          details={data.transactions.filter(t=>!t.estimated&&t.amount>0&&Math.abs(realized(t,month,"cash"))>0).map(t=><Row key={t.id} a={t.description} b={t.paymentDate||t.date} c={money(t.amount)}/>) }
+          details={data.transactions.filter(t=>!t.estimated&&t.amount>0&&Math.abs(realized(t,month,"cash"))>0).map(t=><Row key={t.id} a={t.description} b={t.paymentDate||t.date} c={<SensitiveMoney value={t.amount} hidden={hideValues} />}/>) }
         />
         <Card
           label="Resultado de caixa"
-          value={money(income - expenses("cash"))}
+          value={<SensitiveMoney value={income - expenses("cash")} hidden={hideValues} />}
           hint="Antes dos aportes"
           tone={income - expenses("cash") < 0 ? "bad" : "good"}
-          details={<p>Entradas {money(income)} menos despesas realizadas {money(expenses("cash"))}.</p>}
+          details={<p>Entradas <SensitiveMoney value={income} hidden={hideValues} /> menos despesas realizadas <SensitiveMoney value={expenses("cash")} hidden={hideValues} />.</p>}
         />
         <Card
           label={
@@ -1090,48 +1555,74 @@ function Dashboard({
               ? "Gastos acompanhados — fluxo"
               : "Gastos acompanhados em tempo real"
           }
-          value={money(totalExpected)}
+          value={<SensitiveMoney value={totalExpected} hidden={hideValues} />}
           hint={
             view === "compare"
-              ? `Compra integral acompanhada: ${money(integralExpected || 0)}`
-              : `${money(realizedExpenses)} realizado · ${money(voiceExpected + manualExpected + receiptsExpected + expectedBeforeClosing)} ainda previsto`
+              ? <>Compra integral acompanhada: <SensitiveMoney value={integralExpected || 0} hidden={hideValues} /></>
+              : <><SensitiveMoney value={realizedExpenses} hidden={hideValues} /> realizado · <SensitiveMoney value={voiceExpected + manualExpected + receiptsExpected + expectedBeforeClosing} hidden={hideValues} /> ainda previsto</>
           }
           tone="warning"
           details={<>
             <p>Prévia formada por pagamentos realizados, registros manuais ou por voz, notas e compromissos ainda abertos. Não é saldo bancário nem fatura fechada.</p>
-            <Row a="Pagamentos e gastos realizados" b="Confirmados no mês" c={money(realizedExpenses)} />
-            <Row a="Registros por voz" b={`${estimatedEntries.filter(entry=>entry.source==="voice").length} estimativa(s)`} c={money(voiceExpected)} />
-            <Row a="Registros manuais rápidos" b={`${estimatedEntries.filter(entry=>entry.source==="manual").length} estimativa(s)`} c={money(manualExpected)} />
-            <Row a="Notas de compras" b={`${estimatedEntries.filter(entry=>entry.source==="receipt").length} nota(s)`} c={money(receiptsExpected)} />
-            <Row a="Pagamentos ainda previstos" b="Obrigações abertas" c={money(expectedBeforeClosing)} />
-            {spending.slice().sort((a,b)=>a.date.localeCompare(b.date)).map(entry=><Row key={entry.id} a={`${entry.state==="realized"?"Realizado":"Previsto"} · ${entry.source==="voice"?"Voz":entry.source==="manual"?"Manual":entry.source==="receipt"?"Nota":entry.source==="payment"?"Pagamento":"Fatura/extrato"} · ${entry.description}`} b={entry.date} c={money(entry.amount)}/>)}
+            <Row a="Pagamentos e gastos realizados" b="Confirmados no mês" c={<SensitiveMoney value={realizedExpenses} hidden={hideValues} />} />
+            <Row a="Registros por voz" b={`${estimatedEntries.filter(entry=>entry.source==="voice").length} estimativa(s)`} c={<SensitiveMoney value={voiceExpected} hidden={hideValues} />} />
+            <Row a="Registros manuais rápidos" b={`${estimatedEntries.filter(entry=>entry.source==="manual").length} estimativa(s)`} c={<SensitiveMoney value={manualExpected} hidden={hideValues} />} />
+            <Row a="Notas de compras" b={`${estimatedEntries.filter(entry=>entry.source==="receipt").length} nota(s)`} c={<SensitiveMoney value={receiptsExpected} hidden={hideValues} />} />
+            <Row a="Pagamentos ainda previstos" b="Obrigações abertas" c={<SensitiveMoney value={expectedBeforeClosing} hidden={hideValues} />} />
+            {spending.slice().sort((a,b)=>a.date.localeCompare(b.date)).map(entry=><Row key={entry.id} a={`${entry.state==="realized"?"Realizado":"Previsto"} · ${entry.source==="voice"?"Voz":entry.source==="manual"?"Manual":entry.source==="receipt"?"Nota":entry.source==="payment"?"Pagamento":"Fatura/extrato"} · ${entry.description}`} b={entry.date} c={<SensitiveMoney value={entry.amount} hidden={hideValues} />}/>)}
           </>}
         />
       </section>
-      <CategorySpendingCharts
-        data={data}
-        month={month}
-        view={view}
-        hideValues={hideValues}
-      />
-      <section className="grid two">
+      </div>
+        ) : blockId === "categories" ? (
+      <div
+        key={blockId}
+        className="dashboard-block wide"
+        role="listitem"
+        aria-posinset={index + 1}
+        aria-setsize={blockOrder.length}
+      >
+        <CategorySpendingCharts
+          data={data}
+          month={month}
+          view={view}
+          hideValues={hideValues}
+        />
+      </div>
+        ) : blockId === "budget" ? (
+      <div
+        key={blockId}
+        className="dashboard-block wide"
+        role="listitem"
+        aria-posinset={index + 1}
+        aria-setsize={blockOrder.length}
+      >
         <div className="panel">
           <h2>Orçado × acompanhado em tempo real</h2>
           {view === "compare" ? (
             <div className="grid two">
               <div>
                 <h3>Fluxo das parcelas</h3>
-                <BudgetBars data={data} month={month} view="cash" />
+                <BudgetBars data={data} month={month} view="cash" hideValues={hideValues} />
               </div>
               <div>
                 <h3>Compra integral</h3>
-                <BudgetBars data={data} month={month} view="accrual" />
+                <BudgetBars data={data} month={month} view="accrual" hideValues={hideValues} />
               </div>
             </div>
           ) : (
-            <BudgetBars data={data} month={month} view={view} />
+            <BudgetBars data={data} month={month} view={view} hideValues={hideValues} />
           )}
         </div>
+      </div>
+        ) : blockId === "personal" ? (
+      <div
+        key={blockId}
+        className="dashboard-block compact"
+        role="listitem"
+        aria-posinset={index + 1}
+        aria-setsize={blockOrder.length}
+      >
         <div className="panel">
           <h2>Orçamentos pessoais acumulados</h2>
           {(["Olcino", "Mari"] as const).map((m) => (
@@ -1145,51 +1636,224 @@ function Dashboard({
                   personalBalance(data, m, month) >= 0 ? "positive" : "negative"
                 }
               >
-                {money(personalBalance(data, m, month))}
+                <SensitiveMoney value={personalBalance(data, m, month)} hidden={hideValues} />
               </strong>
             </div>
           ))}
         </div>
-      </section>
-      <section className="grid two">
+      </div>
+        ) : blockId === "commitments" ? (
+      <div
+        key={blockId}
+        className="dashboard-block compact"
+        role="listitem"
+        aria-posinset={index + 1}
+        aria-setsize={blockOrder.length}
+      >
         <div className="panel">
           <h2>Próximos compromissos</h2>
-          {data.obligations
-            .filter(
-              (o) => !["Paga", "Confirmada", "Dispensada"].includes(o.status),
-            )
-            .slice(0, 5)
-            .map((o) => (
-              <Row key={o.id} a={o.name} b={o.dueDate} c={money(o.planned)} />
-            )) || <Empty />}
+          {commitments.length ? (
+            commitments.map((obligation) => (
+              <Row
+                key={obligation.id}
+                a={obligation.name}
+                b={obligation.dueDate}
+                c={<SensitiveMoney value={obligation.planned} hidden={hideValues} />}
+              />
+            ))
+          ) : (
+            <Empty />
+          )}
         </div>
+      </div>
+        ) : blockId === "goals" ? (
+      <div
+        key={blockId}
+        className="dashboard-block compact"
+        role="listitem"
+        aria-posinset={index + 1}
+        aria-setsize={blockOrder.length}
+      >
         <div className="panel">
           <h2>Metas prioritárias</h2>
-          {data.goals
-            .filter((g) => g.active)
-            .sort((a, b) => a.priority - b.priority)
-            .slice(0, 4)
-            .map((g) => {
-              const total = g.movements.reduce((s, x) => s + x.amount, 0);
+          {priorityGoals.length ? (
+            priorityGoals.map((goal) => {
+              const total = goal.movements.reduce(
+                (sum, movement) => sum + movement.amount,
+                0,
+              );
               return (
-                <div key={g.id} className="goal-mini">
-                  <span>{g.name}</span>
+                <div key={goal.id} className="goal-mini">
+                  <span>{goal.name}</span>
                   <b>
-                    {money(total)} / {money(g.target)}
+                    <SensitiveMoney value={total} hidden={hideValues} /> /{" "}
+                    <SensitiveMoney value={goal.target} hidden={hideValues} />
                   </b>
-                  <progress value={total} max={g.target || 1} />
+                  <progress
+                    value={Math.max(0, total)}
+                    max={goal.target || 1}
+                    aria-label={hideValues ? "valor oculto" : `${goal.name}: ${money(total)} de ${money(goal.target)}`}
+                    aria-valuetext={hideValues ? "valor oculto" : `${money(total)} de ${money(goal.target)}`}
+                  />
                 </div>
               );
-            })}
+            })
+          ) : (
+            <Empty />
+          )}
         </div>
-      </section>
+      </div>
+        ) : null
+      )}
+      </div>
       {view === "compare" && (
         <p className="note">
-          Resultado reconhecido: fluxo {money(cash)} · compra integral{" "}
-          {money(acc)}. A visualização não altera os lançamentos.
+          Resultado reconhecido: fluxo <SensitiveMoney value={cash} hidden={hideValues} /> · compra integral{" "}
+          <SensitiveMoney value={acc} hidden={hideValues} />. A visualização não altera os lançamentos.
         </p>
       )}
     </>
+  );
+}
+
+function DashboardActionSummary({
+  summary,
+  cloud,
+  hideValues,
+  onNavigate,
+}: {
+  summary: ReturnType<typeof selectActionSummary>;
+  cloud: "local" | "syncing" | "connected";
+  hideValues: boolean;
+  onNavigate: (page: Page, sectionId: string) => void;
+}) {
+  const hasFinancialAlerts = Boolean(
+    summary.overduePayments.length ||
+      summary.budgetOverruns.length ||
+      summary.pendingTransactions.length ||
+      summary.upcomingPayments.length,
+  );
+  const paymentPreview = (items: Obligation[]) =>
+    items
+      .slice(0, 3)
+      .map((item) => `${item.name} · ${item.dueDate}`)
+      .join(" | ");
+  return (
+    <section className="panel attention-summary">
+      <div className="panel-head attention-head">
+        <div>
+          <h2>Resumo que pede atenção</h2>
+          <p className="muted">
+            Orçamentos e lançamentos do período selecionado; contas vencidas e
+            próximas calculadas a partir de hoje.
+          </p>
+        </div>
+        <span
+          className={`sync-pill ${cloud}`}
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+        >
+          {cloud === "connected"
+            ? "OneDrive atualizado"
+            : cloud === "syncing"
+              ? "Salvando…"
+              : "OneDrive sem confirmação"}
+        </span>
+      </div>
+      <div className="attention-list">
+        {cloud === "local" && (
+          <div className="attention-item danger" role="alert">
+            <span aria-hidden="true">!</span>
+            <div>
+              <b>As últimas alterações podem não estar no OneDrive</b>
+              <small>Verifique a mensagem acima antes de continuar.</small>
+            </div>
+          </div>
+        )}
+        {summary.overduePayments.length > 0 && (
+          <button
+            className="attention-item danger"
+            onClick={() => onNavigate("rotinas", "quick-payments")}
+          >
+            <span aria-hidden="true">!</span>
+            <div>
+              <b>{summary.overduePayments.length} pagamento(s) vencido(s)</b>
+              <small>{paymentPreview(summary.overduePayments)}</small>
+            </div>
+            <em>Ver</em>
+          </button>
+        )}
+        {summary.budgetOverruns.length > 0 && (
+          <button
+            className="attention-item danger"
+            onClick={() => onNavigate("planejamento", "budgets-section")}
+          >
+            <span aria-hidden="true">!</span>
+            <div>
+              <b>
+                {summary.budgetOverruns.length} categoria(s) acima do orçamento
+              </b>
+              <small>
+                {summary.budgetOverruns.slice(0, 3).map((item, index) => (
+                  <span key={item.categoryId}>
+                    {index > 0 && " | "}
+                    {item.name} ·{" "}
+                    <SensitiveMoney value={item.overage} hidden={hideValues} /> acima
+                  </span>
+                ))}
+              </small>
+            </div>
+            <em>Ver</em>
+          </button>
+        )}
+        {summary.pendingTransactions.length > 0 && (
+          <button
+            className="attention-item warning"
+            onClick={() => onNavigate("importar", "quick-transactions")}
+          >
+            <span aria-hidden="true">?</span>
+            <div>
+              <b>
+                {summary.pendingTransactions.length} lançamento(s) para revisar
+              </b>
+              <small>
+                {summary.pendingTransactions
+                  .slice(0, 3)
+                  .map((item) => item.description)
+                  .join(" | ")}
+              </small>
+            </div>
+            <em>Revisar</em>
+          </button>
+        )}
+        {summary.upcomingPayments.length > 0 && (
+          <button
+            className="attention-item info"
+            onClick={() => onNavigate("rotinas", "quick-payments")}
+          >
+            <span aria-hidden="true">i</span>
+            <div>
+              <b>
+                {summary.upcomingPayments.length} pagamento(s) nos próximos 14
+                dias
+              </b>
+              <small>{paymentPreview(summary.upcomingPayments)}</small>
+            </div>
+            <em>Ver</em>
+          </button>
+        )}
+        {!hasFinancialAlerts && cloud !== "local" && (
+          <div className="attention-item success">
+            <CheckCircle2 size={20} aria-hidden="true" />
+            <div>
+              <b>Tudo em ordem neste período</b>
+              <small>Nenhuma pendência financeira encontrada.</small>
+            </div>
+          </div>
+        )}
+      </div>
+    </section>
   );
 }
 
@@ -1265,6 +1929,11 @@ function CategoryDonut({
   const selected =
     slices.find((slice) => slice.key === selectedKey) || slices[0];
   let offset = 0;
+  const chartTitle = `${title ? `${title}. ` : ""}${
+    hideValues
+      ? "Distribuição dos gastos por categoria; valores ocultos"
+      : `Distribuição de ${money(result.total)} em gastos por categoria`
+  }`;
 
   if (!slices.length)
     return (
@@ -1282,12 +1951,9 @@ function CategoryDonut({
           <svg
             viewBox="0 0 42 42"
             role="img"
-            aria-label={
-              hideValues
-                ? "Distribuição dos gastos por categoria; valores ocultos"
-                : `Distribuição de ${money(result.total)} em gastos por categoria`
-            }
+            aria-label={chartTitle}
           >
+            <title>{chartTitle}</title>
             <circle
               className="category-donut-track"
               cx="21"
@@ -1329,10 +1995,10 @@ function CategoryDonut({
             <small>{selected?.name || "Total"}</small>
             <strong>
               {hideValues
-                ? "*****"
+                ? <HiddenValue />
                 : `${selected?.percentage.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`}
             </strong>
-            <span>{hideValues ? "*****" : money(selected?.amount || result.total)}</span>
+            <span>{hideValues ? <HiddenValue /> : money(selected?.amount || result.total)}</span>
           </div>
         </div>
         <div className="category-donut-legend">
@@ -1347,9 +2013,9 @@ function CategoryDonut({
               <span>{slice.name}</span>
               <b>
                 {hideValues
-                  ? "*****"
+                  ? <HiddenValue />
                   : `${slice.percentage.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`}
-                <small>{hideValues ? "*****" : money(slice.amount)}</small>
+                <small>{hideValues ? <HiddenValue /> : money(slice.amount)}</small>
               </b>
             </button>
           ))}
@@ -1361,7 +2027,7 @@ function CategoryDonut({
                   <span>{row.name}</span>
                   <b>
                     {hideValues
-                      ? "*****"
+                      ? <HiddenValue />
                       : `${row.percentage.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}% · ${money(row.amount)}`}
                   </b>
                 </div>
@@ -1431,8 +2097,8 @@ function Card({
   details,
 }: {
   label: string;
-  value: string;
-  hint: string;
+  value: React.ReactNode;
+  hint: React.ReactNode;
   tone?: string;
   details?: React.ReactNode;
 }) {
@@ -1443,10 +2109,12 @@ function BudgetBars({
   data,
   month,
   view,
+  hideValues = false,
 }: {
   data: FamilyData;
   month: string;
   view: "cash" | "accrual";
+  hideValues?: boolean;
 }) {
   const spending = monthlySpending(data, month, view);
   const rows = data.categories
@@ -1471,11 +2139,17 @@ function BudgetBars({
           <label>
             <span>{r.name}</span>
             <span>
-              {money(r.tracked)} / {money(r.planned)}
+              <SensitiveMoney value={r.tracked} hidden={hideValues} /> /{" "}
+              <SensitiveMoney value={r.planned} hidden={hideValues} />
             </span>
           </label>
-          <small>{money(r.actual)} realizado · {money(r.estimated)} estimado</small>
-          <progress value={r.tracked} max={r.planned || r.tracked || 1} />
+          <small><SensitiveMoney value={r.actual} hidden={hideValues} /> realizado · <SensitiveMoney value={r.estimated} hidden={hideValues} /> estimado</small>
+          <progress
+            value={r.tracked}
+            max={r.planned || r.tracked || 1}
+            aria-label={hideValues ? "valor oculto" : `${r.name}: ${money(r.tracked)} de ${money(r.planned)}`}
+            aria-valuetext={hideValues ? "valor oculto" : `${money(r.tracked)} de ${money(r.planned)}`}
+          />
         </div>
       ))}
     </div>
@@ -1645,12 +2319,14 @@ function ProductOccurrenceEditor({
   macroCategories,
   unitOptions,
   onSave,
+  hideValues,
 }: {
   receipt: Receipt;
   item: ReceiptItem;
   macroCategories: string[];
   unitOptions: string[][];
   onSave: (receiptId: string, itemId: string, patch: Partial<ReceiptItem>) => void;
+  hideValues: boolean;
 }) {
   const [draft, setDraft] = useState({ ...item });
   useEffect(() => setDraft({ ...item }), [item]);
@@ -1666,8 +2342,8 @@ function ProductOccurrenceEditor({
       </select>
       <label>Quantidade<input type="number" inputMode="decimal" step="0.001" value={draft.quantity} onChange={(event)=>setDraft({...draft,quantity:Number(event.target.value)})}/></label>
       <label>Unidade<select value={draft.unit||"un"} onChange={(event)=>setDraft({...draft,unit:event.target.value})}>{unitOptions.map(([value,label])=><option key={value} value={value}>{label}</option>)}</select></label>
-      <label>Valor unitário<CurrencyInput value={Number(draft.unitPrice)||0} onChange={(value)=>setDraft({...draft,unitPrice:value})}/></label>
-      <label>Valor total<CurrencyInput value={Number(draft.total)||0} onChange={(value)=>setDraft({...draft,total:value})}/></label>
+      <label>Valor unitário{hideValues ? <span className="hidden-input"><HiddenValue /></span> : <CurrencyInput value={Number(draft.unitPrice)||0} onChange={(value)=>setDraft({...draft,unitPrice:value})}/>}</label>
+      <label>Valor total{hideValues ? <span className="hidden-input"><HiddenValue /></span> : <CurrencyInput value={Number(draft.total)||0} onChange={(value)=>setDraft({...draft,total:value})}/>}</label>
       <button className="primary" onClick={()=>onSave(receipt.id,item.id,draft)}>Salvar esta ocorrência</button>
     </div>
   );
@@ -1678,11 +2354,13 @@ function Receipts({
   mutate,
   setMessage,
   currentMember,
+  hideValues,
 }: {
   data: FamilyData;
   mutate: (f: (d: FamilyData) => void) => void;
   setMessage: (s: string) => void;
   currentMember: Member;
+  hideValues: boolean;
 }) {
   const [draft, setDraft] = useState<ReadReceipt>();
   const [editingReceiptId, setEditingReceiptId] = useState<string>();
@@ -2000,10 +2678,14 @@ function Receipts({
                 value={draft.data || ""}
                 onChange={(e) => setDraft({ ...draft, data: e.target.value })}
               />
-              <CurrencyInput
-                value={Number(draft.total) || 0}
-                onChange={(value) => setDraft({ ...draft, total: value })}
-              />
+              {hideValues ? (
+                <span className="hidden-input"><HiddenValue /></span>
+              ) : (
+                <CurrencyInput
+                  value={Number(draft.total) || 0}
+                  onChange={(value) => setDraft({ ...draft, total: value })}
+                />
+              )}
             </div>
             <div className="panel-head">
               <h3>Itens identificados</h3>
@@ -2077,21 +2759,25 @@ function Receipts({
                 </label>
                 <label>
                   Valor unitário
-                  <CurrencyInput
-                    value={Number(item.valorUnitario) || 0}
-                    onChange={(value) =>
-                      updateItem(index, { valorUnitario: value })
-                    }
-                  />
+                  {hideValues ? <span className="hidden-input"><HiddenValue /></span> : (
+                    <CurrencyInput
+                      value={Number(item.valorUnitario) || 0}
+                      onChange={(value) =>
+                        updateItem(index, { valorUnitario: value })
+                      }
+                    />
+                  )}
                 </label>
                 <label>
                   Valor total
-                  <CurrencyInput
-                    value={Number(item.valorTotal) || 0}
-                    onChange={(value) =>
-                      updateItem(index, { valorTotal: value })
-                    }
-                  />
+                  {hideValues ? <span className="hidden-input"><HiddenValue /></span> : (
+                    <CurrencyInput
+                      value={Number(item.valorTotal) || 0}
+                      onChange={(value) =>
+                        updateItem(index, { valorTotal: value })
+                      }
+                    />
+                  )}
                 </label>
                 <button
                   className="danger-button"
@@ -2166,7 +2852,7 @@ function Receipts({
                     <b>{receipt.store}</b>
                     <small>
                       {receipt.date} · {receipt.items.length} item(ns) ·{" "}
-                      {money(receipt.total)}
+                      <SensitiveMoney value={receipt.total} hidden={hideValues} />
                     </small>
                   </div>
                   <div className="actions">
@@ -2210,7 +2896,7 @@ function Receipts({
               <button onClick={()=>setEditingProductKey(undefined)}>Fechar ocorrências</button>
             </div>
             <p className="muted">{productOccurrences.length} ocorrência(s), da mais recente para a mais antiga. Salve somente as que desejar alterar.</p>
-            {productOccurrences.map(({r,i})=><ProductOccurrenceEditor key={`${r.id}:${i.id}`} receipt={r} item={i} macroCategories={macroCategories} unitOptions={unitOptions} onSave={saveProductOccurrence}/>)}
+            {productOccurrences.map(({r,i})=><ProductOccurrenceEditor key={`${r.id}:${i.id}`} receipt={r} item={i} macroCategories={macroCategories} unitOptions={unitOptions} onSave={saveProductOccurrence} hideValues={hideValues}/>)}
             {!productOccurrences.length&&<Empty/>}
           </div>
         )}
@@ -2222,7 +2908,7 @@ function Receipts({
                 <small>{`${p.category} · ${p.unit} · ${p.count} ocorrência(s) · quantidade média ${p.averageQuantity.toFixed(1)} · último local: ${p.store || "não identificado"}`}</small>
               </div>
               <div className="actions">
-                <span>{p.price == null ? "—" : `${money(p.price)} médio`}</span>
+                <span>{p.price == null ? "—" : <><SensitiveMoney value={p.price} hidden={hideValues} /> médio</>}</span>
                 <button
                   onClick={() => {
                     setEditingProductKey(p.key);
@@ -2467,10 +3153,12 @@ function ImportPage({
   data,
   mutate,
   setMessage,
+  hideValues,
 }: {
   data: FamilyData;
   mutate: (f: (d: FamilyData) => void) => void;
   setMessage: (s: string) => void;
+  hideValues: boolean;
 }) {
   const [account, setAccount] = useState("");
   const [previews, setPreviews] = useState<Preview[]>([]);
@@ -2589,7 +3277,7 @@ function ImportPage({
       </div>
       {previews.length>0 && (
         <>
-          {previews.map(preview=><div key={preview.hash}><div className="summary"><b>{preview.filename}</b><span className="status confirmed">{preview.institution} · {data.accounts.find(a=>a.id===preview.accountId)?.name} · {preview.operator}</span><span>{preview.rows.length} novos</span><span>{preview.duplicates} duplicados ignorados</span><span>{preview.rows.filter(r=>r.classification==="suggested").length} sugestões</span><small>Identificado por: {preview.detectedBy}</small></div><TransactionTable rows={preview.rows.slice(0,20)} data={data}/></div>)}
+          {previews.map(preview=><div key={preview.hash}><div className="summary"><b>{preview.filename}</b><span className="status confirmed">{preview.institution} · {data.accounts.find(a=>a.id===preview.accountId)?.name} · {preview.operator}</span><span>{preview.rows.length} novos</span><span>{preview.duplicates} duplicados ignorados</span><span>{preview.rows.filter(r=>r.classification==="suggested").length} sugestões</span><small>Identificado por: {preview.detectedBy}</small></div><TransactionTable rows={preview.rows.slice(0,20)} data={data} hideValues={hideValues}/></div>)}
           <button className="primary end" onClick={confirm}>
             Confirmar importação
           </button>
@@ -2601,9 +3289,11 @@ function ImportPage({
 function TransactionTable({
   rows,
   data,
+  hideValues,
 }: {
   rows: Transaction[];
   data: FamilyData;
+  hideValues: boolean;
 }) {
   return (
     <div className="table-wrap">
@@ -2627,7 +3317,7 @@ function TransactionTable({
                   {data.accounts.find((a) => a.id === t.accountId)?.name}
                 </small>
               </td>
-              <td>{money(t.amount)}</td>
+              <td><SensitiveMoney value={t.amount} hidden={hideValues} /></td>
               <td>
                 {data.categories.find((c) => c.id === t.categoryId)?.name ||
                   "—"}
@@ -2657,10 +3347,16 @@ function Transactions({
   data,
   month,
   mutate,
+  focusTransactionId,
+  onFocusHandled,
+  hideValues,
 }: {
   data: FamilyData;
   month: string;
   mutate: (f: (d: FamilyData) => void) => void;
+  focusTransactionId?: string;
+  onFocusHandled?: () => void;
+  hideValues: boolean;
 }) {
   const [filter, setFilter] = useState("review");
   const [selected,setSelected]=useState<Set<string>>(new Set());
@@ -2668,6 +3364,7 @@ function Transactions({
   const undoTransactions=useRef<Transaction[]>();
   const [startDate, setStartDate] = useState(`${month}-01`);
   const [endDate, setEndDate] = useState(`${month}-31`);
+  const [pendingFocusId, setPendingFocusId] = useState<string>();
   useEffect(() => {
     setStartDate(`${month}-01`);
     setEndDate(`${month}-31`);
@@ -2678,6 +3375,45 @@ function Transactions({
       t.date <= endDate &&
       (filter === "all" || (filter==="review"?t.classification!=="confirmed":t.classification === filter)),
   );
+  useEffect(() => {
+    if (!focusTransactionId) return;
+    const transaction = data.transactions.find(
+      (item) => item.id === focusTransactionId,
+    );
+    if (!transaction) {
+      onFocusHandled?.();
+      return;
+    }
+    setFilter("all");
+    setStartDate(transaction.date);
+    setEndDate(transaction.date);
+    setPendingFocusId(transaction.id);
+  }, [focusTransactionId]);
+  useEffect(() => {
+    if (!pendingFocusId) return;
+    let cancelled = false;
+    let frame = 0;
+    let attempts = 0;
+    const focusWhenVisible = () => {
+      if (cancelled) return;
+      const element = document.getElementById(`transaction-${pendingFocusId}`);
+      if (!element || element.getClientRects().length === 0) {
+        attempts += 1;
+        if (attempts < 12)
+          frame = window.requestAnimationFrame(focusWhenVisible);
+        return;
+      }
+      element.scrollIntoView({ behavior: "smooth", block: "center" });
+      element.focus({ preventScroll: true });
+      setPendingFocusId(undefined);
+      onFocusHandled?.();
+    };
+    frame = window.requestAnimationFrame(focusWhenVisible);
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(frame);
+    };
+  }, [pendingFocusId, filter, startDate, endDate]);
   const update = (id: string, patch: Partial<Transaction>, learn = false) =>
     mutate((d) => {
       const t = d.transactions.find((x) => x.id === id)!;
@@ -2696,7 +3432,7 @@ function Transactions({
   };
   const selectedRows=rows.filter(row=>selected.has(row.id));
   const remember=()=>{undoTransactions.current=structuredClone(data.transactions)};
-  const bulkApply=(action:"confirm"|"category"|"delete")=>{if(!selectedRows.length)return;const total=selectedRows.reduce((sum,row)=>sum+Math.abs(row.amount),0);if(!confirm(`${action==="delete"?"Excluir":"Alterar"} ${selectedRows.length} lançamento(s), total ${money(total)}?`))return;remember();mutate(d=>{if(action==="delete")d.transactions=d.transactions.filter(row=>!selected.has(row.id));else d.transactions.filter(row=>selected.has(row.id)).forEach(row=>{if(action==="confirm")row.classification="confirmed";if(action==="category"){const category=d.categories.find(c=>c.id===bulkCategory);row.categoryId=bulkCategory;row.subcategory=category?.subcategories[0];row.classification="confirmed"}row.updatedAt=now();row.version++})});setSelected(new Set())};
+  const bulkApply=(action:"confirm"|"category"|"delete")=>{if(!selectedRows.length)return;const total=selectedRows.reduce((sum,row)=>sum+Math.abs(row.amount),0);if(!confirm(`${action==="delete"?"Excluir":"Alterar"} ${selectedRows.length} lançamento(s)${hideValues?"":`, total ${money(total)}`}?`))return;remember();mutate(d=>{if(action==="delete")d.transactions=d.transactions.filter(row=>!selected.has(row.id));else d.transactions.filter(row=>selected.has(row.id)).forEach(row=>{if(action==="confirm")row.classification="confirmed";if(action==="category"){const category=d.categories.find(c=>c.id===bulkCategory);row.categoryId=bulkCategory;row.subcategory=category?.subcategories[0];row.classification="confirmed"}row.updatedAt=now();row.version++})});setSelected(new Set())};
   const undoBulk=()=>{if(!undoTransactions.current)return;const snapshot=undoTransactions.current;mutate(d=>{d.transactions=snapshot});undoTransactions.current=undefined};
   return (
     <section className="panel">
@@ -2734,14 +3470,19 @@ function Transactions({
           />
         </label>
       </div>
-      <div className="bulk-toolbar"><label><input type="checkbox" checked={rows.length>0&&selectedRows.length===rows.length} onChange={e=>setSelected(e.target.checked?new Set(rows.map(row=>row.id)):new Set())}/> Selecionar todos os filtrados</label><b>{selectedRows.length} selecionado(s) · {money(selectedRows.reduce((sum,row)=>sum+Math.abs(row.amount),0))}</b><button onClick={()=>bulkApply("confirm")}>Confirmar em massa</button><select value={bulkCategory} onChange={e=>setBulkCategory(e.target.value)}><option value="">Categoria em massa</option>{data.categories.map(category=><option key={category.id} value={category.id}>{category.name}</option>)}</select><button disabled={!bulkCategory} onClick={()=>bulkApply("category")}>Aplicar categoria</button><button className="danger-button" onClick={()=>bulkApply("delete")}>Excluir selecionados</button>{undoTransactions.current&&<button onClick={undoBulk}>Desfazer última operação</button>}</div>
+      <div className="bulk-toolbar"><label><input type="checkbox" checked={rows.length>0&&selectedRows.length===rows.length} onChange={e=>setSelected(e.target.checked?new Set(rows.map(row=>row.id)):new Set())}/> Selecionar todos os filtrados</label><b>{selectedRows.length} selecionado(s) · <SensitiveMoney value={selectedRows.reduce((sum,row)=>sum+Math.abs(row.amount),0)} hidden={hideValues} /></b><button onClick={()=>bulkApply("confirm")}>Confirmar em massa</button><select value={bulkCategory} onChange={e=>setBulkCategory(e.target.value)}><option value="">Categoria em massa</option>{data.categories.map(category=><option key={category.id} value={category.id}>{category.name}</option>)}</select><button disabled={!bulkCategory} onClick={()=>bulkApply("category")}>Aplicar categoria</button><button className="danger-button" onClick={()=>bulkApply("delete")}>Excluir selecionados</button>{undoTransactions.current&&<button onClick={undoBulk}>Desfazer última operação</button>}</div>
       <div className="transaction-list">
         {rows.map((t) => (
-          <div className={`transaction-edit ${t.classification==="confirmed"?"confirmed-item":""}`} key={t.id}>
+          <div
+            id={`transaction-${t.id}`}
+            tabIndex={-1}
+            className={`transaction-edit ${t.classification==="confirmed"?"confirmed-item":""}`}
+            key={t.id}
+          >
             <input type="checkbox" checked={selected.has(t.id)} onChange={e=>setSelected(current=>{const next=new Set(current);e.target.checked?next.add(t.id):next.delete(t.id);return next})}/>
             <div className="tx-main">
               <input value={t.description} onChange={e=>update(t.id,{description:e.target.value,normalized:normalize(e.target.value)})}/>
-              <div className="tx-core-fields"><input type="date" value={t.date} onChange={e=>update(t.id,{date:e.target.value,paymentDate:e.target.value,competence:monthOf(e.target.value)})}/><CurrencyInput value={Math.abs(t.amount)} onChange={value=>update(t.id,{amount:t.amount<0?-Math.abs(value):Math.abs(value)})}/></div>
+              <div className="tx-core-fields"><input type="date" value={t.date} onChange={e=>update(t.id,{date:e.target.value,paymentDate:e.target.value,competence:monthOf(e.target.value)})}/>{hideValues ? <span className="hidden-input"><HiddenValue /></span> : <CurrencyInput value={Math.abs(t.amount)} onChange={value=>update(t.id,{amount:t.amount<0?-Math.abs(value):Math.abs(value)})}/>}</div>
               <small>{t.estimated?`Estimativa ${t.estimateOrigin==="manual"?"manual":"por voz"} · `:""}{t.classification==="confirmed"?"Confirmado":"Em revisão"}</small>
             </div>
             <select value={t.accountId} onChange={e=>update(t.id,{accountId:e.target.value})}>{data.accounts.filter(account=>account.active).map(account=><option key={account.id} value={account.id}>{account.institution} · {account.name}</option>)}</select>
@@ -2815,12 +3556,14 @@ function Budgets({
   view,
   setView,
   mutate,
+  hideValues,
 }: {
   data: FamilyData;
   month: string;
   view: CashView;
   setView: (v: CashView) => void;
   mutate: (f: (d: FamilyData) => void) => void;
+  hideValues: boolean;
 }) {
   const [editing, setEditing] = useState<Budget>();
   const saveBudget = (form: FormData) => {
@@ -2996,12 +3739,12 @@ function Budgets({
             {view === "compare" ? (
               <>
                 <h3>Fluxo</h3>
-                <BudgetBars data={data} month={month} view="cash" />
+                <BudgetBars data={data} month={month} view="cash" hideValues={hideValues} />
                 <h3>Compra integral</h3>
-                <BudgetBars data={data} month={month} view="accrual" />
+                <BudgetBars data={data} month={month} view="accrual" hideValues={hideValues} />
               </>
             ) : (
-              <BudgetBars data={data} month={month} view={view} />
+              <BudgetBars data={data} month={month} view={view} hideValues={hideValues} />
             )}
           </section>
         </div>
@@ -3013,9 +3756,11 @@ function Budgets({
 function Payments({
   data,
   mutate,
+  hideValues,
 }: {
   data: FamilyData;
   mutate: (f: (d: FamilyData) => void) => void;
+  hideValues: boolean;
 }) {
   const [show, setShow] = useState(false);
   const add = (fd: FormData) =>
@@ -3034,18 +3779,22 @@ function Payments({
       }),
     );
   const mark = (id: string) => {
+    if (hideValues)
+      return alert("Mostre os valores pelo botão do olho para confirmar o pagamento.");
     const current=data.obligations.find(o=>o.id===id)!;
-    const raw=prompt("Valor efetivamente pago:",money(current.planned)); if(raw===null)return;
+    const raw=prompt("Valor efetivamente pago:",hideValues?"":money(current.planned)); if(raw===null)return;
     const paidAmount=parseCurrency(raw); if(paidAmount<=0)return alert("Informe um valor maior que zero.");
     const paidAt=prompt("Data efetiva do pagamento (AAAA-MM-DD):",dateOnly(new Date())); if(!paidAt||!/^\d{4}-\d{2}-\d{2}$/.test(paidAt))return alert("Data inválida.");
     const account=current.accountId||data.accounts[0]?.id; if(!account)return alert("Cadastre uma conta para o pagamento.");
     mutate(d=>{const o=d.obligations.find(x=>x.id===id)!;o.status="Paga";o.paidAt=paidAt;o.paidAmount=paidAmount;o.reconciledTransactionId=undefined;const accountOwner=d.accounts.find(item=>item.id===account)?.operator||"Ambos";const rule=suggest(o.name,account,accountOwner,d.rules);const fallback=d.categories.find(category=>normalize(category.name)==="OUTROS")?.id;d.transactions=d.transactions.filter(t=>t.obligationId!==id);d.transactions.push({...audit(accountOwner),date:paidAt,competence:monthOf(paidAt),purchaseDate:o.dueDate,paymentDate:paidAt,description:o.name,normalized:normalize(o.name),amount:paidAmount,accountId:account,operator:accountOwner,scope:"Familiar",categoryId:o.categoryId||rule?.categoryId||fallback,subcategory:o.subcategory||rule?.subcategory,classification:o.categoryId?"confirmed":rule?"suggested":"pending",dedupeKey:`payment:${id}:${paidAt}`,transfer:false,movement:"expense_income",sourceKind:"statement",obligationId:id,provisional:true,notes:`Pagamento realizado. Previsto: ${money(o.planned)}`})});
   };
   const edit = (id: string) => {
+    if (hideValues)
+      return alert("Mostre os valores pelo botão do olho para editar este pagamento.");
     const current = data.obligations.find((o) => o.id === id)!;
     const name = prompt("Nome do compromisso:", current.name);
     if (!name) return;
-    const planned = prompt("Valor planejado:", money(current.planned));
+    const planned = prompt("Valor planejado:", hideValues ? "" : money(current.planned));
     if (planned === null) return;
     const due = prompt("Vencimento (AAAA-MM-DD):", current.dueDate);
     if (!due || !/^\d{4}-\d{2}-\d{2}$/.test(due))
@@ -3060,7 +3809,7 @@ function Payments({
     ) as Obligation["recurrence"] | null;
     if (!recurrence || !["none", "monthly", "yearly"].includes(recurrence))
       return alert("Repetição inválida.");
-    const tolerance = prompt("Tolerância de valor:", money(current.tolerance));
+    const tolerance = prompt("Tolerância de valor:", hideValues ? "" : money(current.tolerance));
     if (tolerance === null) return;
     mutate((d) => {
       const o = d.obligations.find((x) => x.id === id)!;
@@ -3157,7 +3906,7 @@ function Payments({
                     {o.kind} · vence {o.dueDate}
                   </small>
                 </div>
-                <strong>{money(o.planned)}</strong>
+                <strong><SensitiveMoney value={o.planned} hidden={hideValues} /></strong>
                 {check && <Badge text={check} />}{" "}
                 {!["Paga", "Confirmada"].includes(o.status) && (
                   <button onClick={() => mark(o.id)}>Marcar como paga</button>
@@ -3175,7 +3924,7 @@ function Payments({
             );
           })}
       </div>
-      <details className="completed-block"><summary>Pagamentos confirmados ({data.obligations.filter(o=>["Paga","Confirmada","Dispensada"].includes(o.status)).length})</summary>{data.obligations.filter(o=>["Paga","Confirmada","Dispensada"].includes(o.status)).sort((a,b)=>b.dueDate.localeCompare(a.dueDate)).map(o=><div className="confirmed-row" key={o.id}><div><b>{o.name}</b><small>{o.dueDate} · {money(o.paidAmount??o.planned)} · {o.status}</small></div><button onClick={()=>mutate(d=>{const item=d.obligations.find(x=>x.id===o.id);if(item){item.status="A pagar";item.paidAt=undefined;item.paidAmount=undefined;item.reconciledTransactionId=undefined;d.transactions=d.transactions.filter(transaction=>transaction.obligationId!==o.id||!transaction.provisional);for(const transaction of d.transactions)if(transaction.obligationId===o.id)transaction.obligationId=undefined}})}>Desconfirmar</button></div>)}</details>
+      <details className="completed-block"><summary>Pagamentos confirmados ({data.obligations.filter(o=>["Paga","Confirmada","Dispensada"].includes(o.status)).length})</summary>{data.obligations.filter(o=>["Paga","Confirmada","Dispensada"].includes(o.status)).sort((a,b)=>b.dueDate.localeCompare(a.dueDate)).map(o=><div className="confirmed-row" key={o.id}><div><b>{o.name}</b><small>{o.dueDate} · <SensitiveMoney value={o.paidAmount??o.planned} hidden={hideValues} /> · {o.status}</small></div><button onClick={()=>mutate(d=>{const item=d.obligations.find(x=>x.id===o.id);if(item){item.status="A pagar";item.paidAt=undefined;item.paidAmount=undefined;item.reconciledTransactionId=undefined;d.transactions=d.transactions.filter(transaction=>transaction.obligationId!==o.id||!transaction.provisional);for(const transaction of d.transactions)if(transaction.obligationId===o.id)transaction.obligationId=undefined}})}>Desconfirmar</button></div>)}</details>
       {!data.obligations.length && <Empty />}
     </section>
   );
@@ -3670,7 +4419,8 @@ function Config({
   const restore = async (file?: File) => {
     if (!file) return;
     try {
-      setData(await restoreJson(file));
+      const restored = { ...(await restoreJson(file)), lastSavedAt: now() };
+      mutate((draft) => Object.assign(draft, restored));
       setMessage("Backup restaurado.");
     } catch (e) {
       setMessage((e as Error).message);
@@ -3933,7 +4683,14 @@ function CategoryEditor({
   );
 }
 
-function Analytics({ data }: { data: FamilyData }) {
+function Analytics({
+  data,
+  hadStoredPreferences,
+}: {
+  data: FamilyData;
+  hadStoredPreferences: boolean;
+}) {
+  const [initialPreferences] = useState(() => loadUiPreferences().analytics);
   const available = [
     ...new Set(
       data.transactions
@@ -3941,13 +4698,43 @@ function Analytics({ data }: { data: FamilyData }) {
         .map((transaction) => monthOf(transaction.paymentDate || transaction.date)),
     ),
   ].sort();
-  const [start, setStart] = useState(available[0] || currentMonth());
-  const [end, setEnd] = useState(available.at(-1) || currentMonth());
-  const [mode, setMode] = useState<"cash" | "accrual">("accrual");
-  const [report, setReport] = useState<"budget" | "reserve" | "final">(
-    "budget",
+  const [start, setStart] = useState(
+    hadStoredPreferences
+      ? initialPreferences.start
+      : available[0] || initialPreferences.start,
   );
-  const [accountId, setAccountId] = useState("all");
+  const [end, setEnd] = useState(
+    hadStoredPreferences
+      ? initialPreferences.end
+      : available.at(-1) || initialPreferences.end,
+  );
+  const [mode, setMode] = useState<"cash" | "accrual">(
+    initialPreferences.mode,
+  );
+  const [report, setReport] = useState<"budget" | "reserve" | "final">(
+    initialPreferences.report,
+  );
+  const [accountId, setAccountId] = useState(
+    initialPreferences.accountId === "all" ||
+      data.accounts.some((account) => account.id === initialPreferences.accountId)
+      ? initialPreferences.accountId
+      : "all",
+  );
+  useEffect(() => {
+    if (
+      accountId !== "all" &&
+      !data.accounts.some((account) => account.id === accountId)
+    ) {
+      setAccountId("all");
+    }
+  }, [accountId, data.accounts]);
+  useEffect(() => {
+    const current = loadUiPreferences();
+    saveUiPreferences({
+      ...current,
+      analytics: { start, end, mode, report, accountId },
+    });
+  }, [start, end, mode, report, accountId]);
   const months = available.filter((month) => month >= start && month <= end);
   const belongs = (t: Transaction, kind: "budget" | "reserve" | "final") =>
     !t.estimated &&
@@ -4349,7 +5136,7 @@ function QuickForm({
     </form>
   );
 }
-function Row({ a, b, c }: { a: string; b: string; c: string }) {
+function Row({ a, b, c }: { a: string; b: string; c: React.ReactNode }) {
   return (
     <div className="row">
       <div>
