@@ -11,6 +11,7 @@ import { createSeed } from "./seed";
 import {
   monthlySpending,
   reconcileImportedTransactions,
+  spendingByCategory,
 } from "./spending";
 
 const setup = () => {
@@ -106,6 +107,25 @@ describe("acompanhamento em tempo real", () => {
     expect(entries.every((entry) => Boolean(entry.categoryId))).toBe(true);
   });
 
+  it("identifica a origem de uma estimativa digitada na ação rápida", () => {
+    const data = setup();
+    data.transactions = [
+      transaction(data, {
+        estimated: true,
+        estimateOrigin: "manual",
+        amount: 32.5,
+      }),
+    ];
+
+    const entries = monthlySpending(data, "2026-07", "cash");
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      source: "manual",
+      state: "estimated",
+      amount: 32.5,
+    });
+  });
+
   it("não trata transferência, aporte ou fora do orçamento como despesa", () => {
     const data = setup();
     data.transactions = [
@@ -145,12 +165,140 @@ describe("acompanhamento em tempo real", () => {
         amount: 74.77,
         date: "2026-07-13",
         purchaseDate: "2026-07-13",
-        description: "Remédios",
+        description: "Mercado Bom",
       }),
     ];
     const entries = monthlySpending(data, "2026-07", "cash");
     expect(entries).toHaveLength(1);
     expect(entries[0].source).toBe("receipt");
+  });
+
+  it("não oculta duas compras diferentes de mesmo valor e data", () => {
+    const data = setup();
+    data.receipts = [receipt({ total: 74.77, date: "2026-07-13" })];
+    data.transactions = [
+      transaction(data, {
+        estimated: true,
+        estimateOrigin: "manual",
+        amount: 74.77,
+        date: "2026-07-13",
+        purchaseDate: "2026-07-13",
+        description: "Farmácia Central",
+      }),
+    ];
+
+    const entries = monthlySpending(data, "2026-07", "cash");
+    expect(entries).toHaveLength(2);
+    expect(entries.map((entry) => entry.source).sort()).toEqual([
+      "manual",
+      "receipt",
+    ]);
+  });
+});
+
+describe("gastos por categoria", () => {
+  it("agrega, calcula percentuais e ordena da maior para a menor categoria", () => {
+    const data = setup();
+    const food = data.categories.find(
+      (category) => normalize(category.name) === "ALIMENTACAO",
+    )!;
+    const health = data.categories.find(
+      (category) => normalize(category.name) === "SAUDE",
+    )!;
+    data.transactions = [
+      transaction(data, {
+        amount: 120,
+        categoryId: food.id,
+        dedupeKey: "food-1",
+      }),
+      transaction(data, {
+        amount: 80,
+        categoryId: food.id,
+        dedupeKey: "food-2",
+      }),
+      transaction(data, {
+        amount: 50,
+        categoryId: health.id,
+        dedupeKey: "health-1",
+      }),
+    ];
+
+    const result = spendingByCategory(data, "2026-07", "cash");
+
+    expect(result.total).toBe(250);
+    expect(result.categories.map((category) => category.name)).toEqual([
+      food.name,
+      health.name,
+    ]);
+    expect(result.categories.map((category) => category.amount)).toEqual([
+      200,
+      50,
+    ]);
+    expect(result.categories[0].percentage).toBeCloseTo(80);
+    expect(result.categories[1].percentage).toBeCloseTo(20);
+    expect(
+      result.categories.reduce(
+        (sum, category) => sum + category.percentage,
+        0,
+      ),
+    ).toBeCloseTo(100);
+  });
+
+  it("respeita a diferença entre fluxo das parcelas e compra integral", () => {
+    const data = setup();
+    data.transactions = [
+      transaction(data, {
+        amount: 100,
+        purchaseDate: "2026-07-10",
+        paymentDate: "2026-08-10",
+        installment: 1,
+        installments: 12,
+        totalAmount: 1200,
+        integralAnchor: true,
+      }),
+    ];
+
+    expect(spendingByCategory(data, "2026-07", "cash").total).toBe(0);
+    expect(spendingByCategory(data, "2026-07", "accrual").total).toBe(1200);
+    expect(spendingByCategory(data, "2026-08", "cash").total).toBe(100);
+  });
+
+  it("reúne categorias ausentes em Sem categoria", () => {
+    const data = setup();
+    data.categories = data.categories.filter(
+      (category) => normalize(category.name) !== "OUTROS",
+    );
+    data.transactions = [
+      transaction(data, {
+        amount: 30,
+        categoryId: "categoria-excluida-1",
+        dedupeKey: "unknown-1",
+      }),
+      transaction(data, {
+        amount: 45,
+        categoryId: "categoria-excluida-2",
+        dedupeKey: "unknown-2",
+      }),
+    ];
+
+    const result = spendingByCategory(data, "2026-07", "cash");
+
+    expect(result).toEqual({
+      total: 75,
+      categories: [
+        {
+          categoryId: undefined,
+          name: "Sem categoria",
+          amount: 75,
+          percentage: 100,
+        },
+      ],
+    });
+  });
+
+  it("retorna resultado vazio quando não há gastos no mês", () => {
+    const result = spendingByCategory(setup(), "2026-07", "cash");
+    expect(result).toEqual({ total: 0, categories: [] });
   });
 });
 

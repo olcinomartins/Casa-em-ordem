@@ -84,6 +84,18 @@ const pick = (r: Record<string, unknown>, names: string[]) => {
   );
   return key ? r[key] : undefined;
 };
+
+/**
+ * Uma estimativa manual ou por voz não pode bloquear o fato bancário que irá
+ * conciliá-la. Somente fatos já importados participam desta deduplicação.
+ */
+export const hasImportedFactWithKey = (
+  transactions: Transaction[],
+  key: string,
+) => transactions.some((transaction) =>
+  !transaction.estimated && transaction.dedupeKey === key,
+);
+
 export async function previewFile(
   file: File,
   data: FamilyData,
@@ -110,7 +122,7 @@ export async function previewFile(
       const alreadyAnchored = [...data.transactions,...rows].some(t=>`${normalize(t.description)}|${t.purchaseDate || t.date}|${t.installments || 1}`===purchaseKey && (t.integralAnchor || t.installment===1));
       const base = {...audit(operator),date:paymentDate,competence:monthOf(item.date),purchaseDate:item.date,description:item.description,normalized:normalize(item.description),amount:item.amount,accountId,operator,scope:(operator === "Ambos" ? "Familiar" : `Pessoal — ${operator}`) as Transaction["scope"],classification:"pending" as const,installment:item.installment,installments:item.installments,totalAmount:item.installments&&item.amount>0?item.amount*item.installments:undefined,integralAnchor:Boolean(item.installments&&item.amount>0&&!alreadyAnchored),paymentDate,transfer:isTransfer,movement:isTransfer?("transfer" as const):("expense_income" as const),sourceKind:"card" as const,dedupeKey:"",batchId:hash};
       const key = await dedupeKey(base);
-      if (data.transactions.some(t=>t.dedupeKey===key)||rows.some(t=>t.dedupeKey===key)){duplicates++;continue;}
+      if (hasImportedFactWithKey(data.transactions,key)||rows.some(t=>t.dedupeKey===key)){duplicates++;continue;}
       const rule=suggest(item.description,accountId,operator,data.rules);
       rows.push({...base,dedupeKey:key,categoryId:rule?.categoryId,subcategory:rule?.subcategory,classification:rule?"suggested":"pending"});
     }
@@ -211,7 +223,7 @@ export async function previewFile(
       batchId: hash,
     };
     const key = await dedupeKey(base);
-    if (data.transactions.some((t) => t.dedupeKey === key)) {
+    if (hasImportedFactWithKey(data.transactions, key)) {
       duplicates++;
       continue;
     }

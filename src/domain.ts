@@ -53,6 +53,7 @@ export interface Transaction extends Audit {
   sourceKind?: "card" | "statement";
   notes?: string;
   estimated?: boolean;
+  estimateOrigin?: "voice" | "manual";
   obligationId?: string;
   provisional?: boolean;
   reconciledTransactionId?: string;

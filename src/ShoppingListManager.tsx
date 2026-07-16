@@ -96,6 +96,7 @@ function ShoppingFields({
       <label className="shopping-product-name">
         Produto
         <input
+          data-quick-focus
           ref={nameRef}
           value={draft.name}
           placeholder="Ex.: arroz integral"

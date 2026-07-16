@@ -20,6 +20,9 @@ import {
   ShoppingCart,
   Mic,
   Square,
+  X,
+  CircleDollarSign,
+  Camera,
 } from "lucide-react";
 import {
   Account,
@@ -71,6 +74,7 @@ import {
 import {
   monthlySpending,
   reconcileImportedTransactions,
+  spendingByCategory,
 } from "./spending";
 import { previewFile, Preview } from "./importer";
 import { tasksToIcs } from "./ics";
@@ -97,8 +101,13 @@ const nav: [Page, string, typeof BarChart3][] = [
   ["importar", "Importar extratos e faturas", Upload],
   ["supermercado", "Supermercado", ShoppingCart],
 ];
-const currentMonth = () => new Date().toISOString().slice(0, 7);
-const dateOnly = (d: Date) => d.toISOString().slice(0, 10);
+const dateOnly = (date: Date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+const currentMonth = () => dateOnly(new Date()).slice(0, 7);
 
 export default function App() {
   const [data, setData] = useState<FamilyData>();
@@ -112,6 +121,10 @@ export default function App() {
     () => localStorage.getItem("casa-em-ordem-hide-values") === "true",
   );
   const [page, setPage] = useState<Page>("visao");
+  const [pendingQuickTarget, setPendingQuickTarget] = useState<{
+    page: Page;
+    sectionId: string;
+  } | null>(null);
   const [month, setMonth] = useState(currentMonth());
   const [view, setView] = useState<CashView>("cash");
   const [message, setMessage] = useState("");
@@ -249,6 +262,47 @@ export default function App() {
       setMessage((e as Error).message);
     }
   };
+  const goToQuickAction = (targetPage: Page, sectionId: string) => {
+    setPendingQuickTarget({ page: targetPage, sectionId });
+    setPage(targetPage);
+  };
+  useEffect(() => {
+    if (!pendingQuickTarget || pendingQuickTarget.page !== page) return;
+    let cancelled = false;
+    const frame = window.requestAnimationFrame(() => {
+      if (cancelled) return;
+      const section = document.getElementById(
+        pendingQuickTarget.sectionId,
+      ) as HTMLDetailsElement | null;
+      if (!section) {
+        setPendingQuickTarget(null);
+        return;
+      }
+      section.open = true;
+      section.scrollIntoView({ behavior: "smooth", block: "start" });
+      const target = section.querySelector<HTMLElement>(
+        "[data-quick-focus], input:not([type='hidden']), select, textarea, button",
+      );
+      const shouldExpand =
+        target?.dataset.quickExpand === "true" &&
+        target.getAttribute("aria-expanded") !== "true";
+      if (shouldExpand) target.click();
+      window.requestAnimationFrame(() => {
+        if (cancelled) return;
+        const focusTarget = target?.dataset.quickExpand === "true"
+          ? section.querySelector<HTMLElement>(
+              ".quick-form input:not([type='hidden']), .quick-form select, .quick-form textarea",
+            ) || target
+          : target;
+        focusTarget?.focus({ preventScroll: true });
+        setPendingQuickTarget(null);
+      });
+    });
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(frame);
+    };
+  }, [page, pendingQuickTarget]);
   if (!authenticated)
     return (
       <div className="login-page">
@@ -355,12 +409,13 @@ export default function App() {
         )}
         {page === "visao" && (
           <>
-            <Collapsible title="Painel">
+            <Collapsible id="dashboard-panel" title="Painel">
               <Dashboard
                 data={data}
                 month={month}
                 view={view}
                 setView={setView}
+                hideValues={hideValues}
               />
             </Collapsible>
             <Collapsible title="Análises históricas">
@@ -370,14 +425,14 @@ export default function App() {
         )}
         {page === "rotinas" && (
           <>
-            <Collapsible title="Responsabilidades, tarefas e agenda">
+            <Collapsible id="quick-tasks" title="Responsabilidades, tarefas e agenda">
               <Tasks
                 data={data}
                 mutate={mutate}
                 currentMember={currentMember}
               />
             </Collapsible>
-            <Collapsible title="Central de pagamentos">
+            <Collapsible id="quick-payments" title="Central de pagamentos">
               <Payments data={data} mutate={mutate} />
             </Collapsible>
           </>
@@ -420,7 +475,7 @@ export default function App() {
         )}
         {page === "importar" && (
           <>
-            <Collapsible title="Registrar despesa por voz">
+            <Collapsible id="quick-voice" title="Registrar despesa por voz">
               <VoiceExpense
                 data={data}
                 mutate={mutate}
@@ -428,7 +483,7 @@ export default function App() {
                 currentMember={currentMember}
               />
             </Collapsible>
-            <Collapsible title="Importar extratos e faturas">
+            <Collapsible id="quick-import" title="Importar extratos e faturas">
               <ImportPage data={data} mutate={mutate} setMessage={setMessage} />
             </Collapsible>
             <Collapsible title="Transações e revisão">
@@ -445,27 +500,463 @@ export default function App() {
           />
         )}
       </main>
+      <QuickActions
+        data={data}
+        mutate={mutate}
+        currentMember={currentMember}
+        setMessage={setMessage}
+        onNavigate={goToQuickAction}
+      />
     </div>
   );
 }
 
 function Collapsible({
+  id,
   title,
   open = false,
   children,
 }: {
+  id?: string;
   title: string;
   open?: boolean;
   children: React.ReactNode;
 }) {
   return (
-    <details className="collapsible" open={open}>
+    <details
+      id={id}
+      className="collapsible"
+      {...(open ? { open: true } : {})}
+    >
       <summary>
         {title}
         <span aria-hidden="true">⌄</span>
       </summary>
       <div className="collapsible-content">{children}</div>
     </details>
+  );
+}
+
+function QuickActions({
+  data,
+  mutate,
+  currentMember,
+  setMessage,
+  onNavigate,
+}: {
+  data: FamilyData;
+  mutate: (f: (data: FamilyData) => void) => void;
+  currentMember: Exclude<Member, "Ambos">;
+  setMessage: (message: string) => void;
+  onNavigate: (page: Page, sectionId: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [mode, setMode] = useState<"menu" | "expense">("menu");
+  const [categoryId, setCategoryId] = useState("");
+  const [subcategory, setSubcategory] = useState("");
+  const [categoryTouched, setCategoryTouched] = useState(false);
+  const [description, setDescription] = useState("");
+  const [operator, setOperator] = useState<Member>(currentMember);
+  const [accountId, setAccountId] = useState(
+    () =>
+      data.accounts.find(
+        (account) => account.active && account.operator === currentMember,
+      )?.id || data.accounts.find((account) => account.active)?.id || "",
+  );
+  const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
+  const fabRef = useRef<HTMLButtonElement>(null);
+  const sheetRef = useRef<HTMLDivElement>(null);
+  const expenseCategories = data.categories.filter(
+    (category) => category.nature === "expense",
+  );
+  const activeAccounts = data.accounts.filter((account) => account.active);
+
+  const applyCategorySuggestion = (
+    nextDescription: string,
+    nextAccountId = accountId,
+    nextOperator = operator,
+  ) => {
+    if (categoryTouched || !nextDescription.trim() || !nextAccountId) return;
+    const rule = suggest(
+      nextDescription,
+      nextAccountId,
+      nextOperator,
+      data.rules,
+    );
+    if (
+      !rule ||
+      !expenseCategories.some((category) => category.id === rule.categoryId)
+    ) return;
+    setCategoryId(rule.categoryId);
+    setSubcategory(rule.subcategory || "");
+  };
+
+  const close = (restoreFocus = true) => {
+    setOpen(false);
+    setMode("menu");
+    if (restoreFocus)
+      window.setTimeout(() => fabRef.current?.focus(), 0);
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const background = Array.from(
+      document.querySelectorAll<HTMLElement>(".app > aside, .app > main"),
+    );
+    const previousInert = background.map((element) => element.inert);
+    background.forEach((element) => {
+      element.inert = true;
+    });
+    const handleKeyboard = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        close();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const focusable = Array.from(
+        sheetRef.current?.querySelectorAll<HTMLElement>(
+          "button:not([disabled]), input:not([disabled]):not([type='hidden']), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex='-1'])",
+        ) || [],
+      ).filter((element) => element.getClientRects().length > 0);
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", handleKeyboard);
+    window.requestAnimationFrame(
+      () =>
+        sheetRef.current
+          ?.querySelector<HTMLElement>("button, input, select")
+          ?.focus(),
+    );
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      background.forEach((element, index) => {
+        element.inert = previousInert[index];
+      });
+      document.removeEventListener("keydown", handleKeyboard);
+    };
+  }, [open]);
+
+  const navigate = (page: Page, sectionId: string) => {
+    close(false);
+    onNavigate(page, sectionId);
+  };
+
+  const saveExpense = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (savingRef.current) return;
+    savingRef.current = true;
+    const form = new FormData(event.currentTarget);
+    const amount = Math.abs(parseCurrency(form.get("amount")));
+    const cleanDescription = String(form.get("description") || "").trim();
+    const date = String(form.get("date") || dateOnly(new Date()));
+    const selectedAccountId = String(form.get("accountId") || "");
+    const selectedOperator = String(
+      form.get("operator") || currentMember,
+    ) as Member;
+    const scope = String(form.get("scope") || "Familiar") as Transaction["scope"];
+    const account = data.accounts.find((item) => item.id === selectedAccountId);
+    if (!amount || !cleanDescription || !date || !account || !categoryId) {
+      setMessage(
+        "Preencha valor, descrição, categoria, conta ou cartão e data.",
+      );
+      savingRef.current = false;
+      return;
+    }
+    setSaving(true);
+    try {
+      const transaction: Transaction = {
+        ...audit(currentMember),
+        date,
+        competence: monthOf(date),
+        purchaseDate: date,
+        paymentDate: date,
+        description: cleanDescription,
+        normalized: normalize(cleanDescription),
+        amount,
+        accountId: selectedAccountId,
+        operator: selectedOperator,
+        scope,
+        categoryId,
+        subcategory: subcategory || undefined,
+        classification: "confirmed",
+        dedupeKey: "",
+        transfer: false,
+        movement: "expense_income",
+        sourceKind: account.kind === "card" ? "card" : "statement",
+        estimated: true,
+        estimateOrigin: "manual",
+        notes: "Estimativa manual registrada pelo botão de ação rápida.",
+      };
+      transaction.dedupeKey = await dedupeKey(transaction);
+      mutate((family) => family.transactions.push(transaction));
+      setCategoryId("");
+      setSubcategory("");
+      setCategoryTouched(false);
+      setDescription("");
+      close();
+      setMessage(
+        "Despesa adicionada à prévia do mês e sincronização automática iniciada.",
+      );
+    } catch (error) {
+      setMessage(`Não foi possível registrar: ${(error as Error).message}`);
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="quick-action-root">
+      {open && (
+        <div
+          className="quick-action-backdrop"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) close();
+          }}
+        >
+          <div
+            ref={sheetRef}
+            id="quick-action-sheet"
+            className="quick-action-sheet"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="quick-action-title"
+          >
+            <div className="quick-action-head">
+              <div>
+                <p className="eyebrow">AÇÃO RÁPIDA</p>
+                <h2 id="quick-action-title">
+                  {mode === "expense" ? "Nova despesa" : "O que deseja fazer?"}
+                </h2>
+              </div>
+              <button
+                className="quick-action-close"
+                onClick={() =>
+                  mode === "expense" ? setMode("menu") : close()
+                }
+                aria-label={mode === "expense" ? "Voltar" : "Fechar"}
+              >
+                {mode === "expense" ? "Voltar" : <X size={21} />}
+              </button>
+            </div>
+
+            {mode === "menu" ? (
+              <>
+                <div className="quick-action-grid">
+                  <button
+                    className="quick-action-primary"
+                    onClick={() => setMode("expense")}
+                  >
+                    <CircleDollarSign size={22} />
+                    <span>
+                      <b>Nova despesa</b>
+                      <small>Digitar agora</small>
+                    </span>
+                  </button>
+                  <button onClick={() => navigate("importar", "quick-voice")}>
+                    <Mic size={22} />
+                    <span>
+                      <b>Por voz</b>
+                      <small>Falar o gasto</small>
+                    </span>
+                  </button>
+                  <button onClick={() => navigate("rotinas", "quick-payments")}>
+                    <WalletCards size={22} />
+                    <span>
+                      <b>Conta ou pagamento</b>
+                      <small>Registrar ou confirmar</small>
+                    </span>
+                  </button>
+                  <button onClick={() => navigate("supermercado", "quick-receipts")}>
+                    <Camera size={22} />
+                    <span>
+                      <b>Fotografar nota</b>
+                      <small>Compra de mercado</small>
+                    </span>
+                  </button>
+                  <button onClick={() => navigate("supermercado", "quick-shopping")}>
+                    <ShoppingCart size={22} />
+                    <span>
+                      <b>Item de compras</b>
+                      <small>Adicionar à lista</small>
+                    </span>
+                  </button>
+                  <button onClick={() => navigate("rotinas", "quick-tasks")}>
+                    <CheckSquare size={22} />
+                    <span>
+                      <b>Nova tarefa</b>
+                      <small>Casa ou agenda</small>
+                    </span>
+                  </button>
+                </div>
+                <button
+                  className="quick-import-link"
+                  onClick={() => navigate("importar", "quick-import")}
+                >
+                  <Upload size={18} /> Importar extrato ou fatura
+                </button>
+              </>
+            ) : (
+              <form className="quick-expense-form" onSubmit={saveExpense}>
+                <p className="muted">
+                  Entra como prévia do mês e será conciliada quando a fatura ou
+                  o extrato forem importados.
+                </p>
+                <label className="quick-expense-value">
+                  Valor
+                  <MoneyInput
+                    name="amount"
+                    required
+                    autoFocus
+                    placeholder="R$ 0,00"
+                  />
+                </label>
+                <label>
+                  Descrição ou estabelecimento
+                  <input
+                    name="description"
+                    required
+                    placeholder="Ex.: farmácia"
+                    value={description}
+                    onChange={(event) => setDescription(event.target.value)}
+                    onBlur={(event) =>
+                      applyCategorySuggestion(event.target.value)
+                    }
+                  />
+                </label>
+                <div className="quick-expense-row">
+                  <label>
+                    Data
+                    <input
+                      name="date"
+                      type="date"
+                      required
+                      defaultValue={dateOnly(new Date())}
+                    />
+                  </label>
+                  <label>
+                    Quem gastou
+                    <select
+                      name="operator"
+                      value={operator}
+                      onChange={(event) => {
+                        const nextOperator = event.target.value as Member;
+                        setOperator(nextOperator);
+                        applyCategorySuggestion(
+                          description,
+                          accountId,
+                          nextOperator,
+                        );
+                      }}
+                    >
+                      <option>Olcino</option>
+                      <option>Mari</option>
+                      <option>Ambos</option>
+                    </select>
+                  </label>
+                </div>
+                <label>
+                  Categoria
+                  <select
+                    required
+                    value={categoryId}
+                    onChange={(event) => {
+                      const next = event.target.value;
+                      setCategoryTouched(true);
+                      setCategoryId(next);
+                      setSubcategory(
+                        data.categories.find((item) => item.id === next)
+                          ?.subcategories[0] || "",
+                      );
+                    }}
+                  >
+                    <option value="">Selecione</option>
+                    {expenseCategories.map((category) => (
+                      <option key={category.id} value={category.id}>
+                        {category.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Subcategoria
+                  <select
+                    value={subcategory}
+                    onChange={(event) => setSubcategory(event.target.value)}
+                  >
+                    <option value="">Sem subcategoria</option>
+                    {data.categories
+                      .find((item) => item.id === categoryId)
+                      ?.subcategories.map((item) => (
+                        <option key={item}>{item}</option>
+                      ))}
+                  </select>
+                </label>
+                <label>
+                  Conta ou cartão
+                  <select
+                    name="accountId"
+                    required
+                    value={accountId}
+                    onChange={(event) => {
+                      const nextAccountId = event.target.value;
+                      setAccountId(nextAccountId);
+                      applyCategorySuggestion(
+                        description,
+                        nextAccountId,
+                        operator,
+                      );
+                    }}
+                  >
+                    <option value="">Selecione</option>
+                    {activeAccounts.map((account) => (
+                      <option key={account.id} value={account.id}>
+                        {account.institution} · {account.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Uso do gasto
+                  <select name="scope" defaultValue="Familiar">
+                    <option>Familiar</option>
+                    <option>Pessoal — Olcino</option>
+                    <option>Pessoal — Mari</option>
+                    <option>Fora do orçamento</option>
+                  </select>
+                </label>
+                <button className="primary quick-expense-save" disabled={saving}>
+                  {saving ? "Salvando…" : "Adicionar à prévia"}
+                </button>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
+      <button
+        ref={fabRef}
+        className={`quick-action-fab ${open ? "menu-open" : ""}`}
+        onClick={() => (open ? close() : setOpen(true))}
+        aria-label={open ? "Fechar ações rápidas" : "Abrir ações rápidas"}
+        aria-expanded={open}
+        aria-controls="quick-action-sheet"
+      >
+        {open ? <X size={27} /> : <Plus size={29} />}
+      </button>
+    </div>
   );
 }
 
@@ -505,11 +996,13 @@ function Dashboard({
   month,
   view,
   setView,
+  hideValues,
 }: {
   data: FamilyData;
   month: string;
   view: CashView;
   setView: (v: CashView) => void;
+  hideValues: boolean;
 }) {
   const calc = (v: "cash" | "accrual") =>
     data.transactions.reduce(
@@ -551,8 +1044,15 @@ function Dashboard({
   const estimatedEntries = spending.filter((entry) => entry.state === "estimated");
   const expectedBeforeClosing = estimatedEntries.filter((entry) => entry.source === "payment").reduce((sum, entry) => sum + entry.amount, 0);
   const voiceExpected = estimatedEntries.filter((entry) => entry.source === "voice").reduce((sum, entry) => sum + entry.amount, 0);
+  const manualExpected = estimatedEntries.filter((entry) => entry.source === "manual").reduce((sum, entry) => sum + entry.amount, 0);
   const receiptsExpected = estimatedEntries.filter((entry) => entry.source === "receipt").reduce((sum, entry) => sum + entry.amount, 0);
   const totalExpected = spending.reduce((sum, entry) => sum + entry.amount, 0);
+  const integralExpected = view === "compare"
+    ? monthlySpending(data, month, "accrual").reduce(
+        (sum, entry) => sum + entry.amount,
+        0,
+      )
+    : undefined;
   return (
     <>
       <div className="toolbar">
@@ -585,20 +1085,35 @@ function Dashboard({
           details={<p>Entradas {money(income)} menos despesas realizadas {money(expenses("cash"))}.</p>}
         />
         <Card
-          label="Gastos acompanhados em tempo real"
+          label={
+            view === "compare"
+              ? "Gastos acompanhados — fluxo"
+              : "Gastos acompanhados em tempo real"
+          }
           value={money(totalExpected)}
-          hint={`${money(realizedExpenses)} realizado · ${money(voiceExpected + receiptsExpected + expectedBeforeClosing)} ainda previsto`}
+          hint={
+            view === "compare"
+              ? `Compra integral acompanhada: ${money(integralExpected || 0)}`
+              : `${money(realizedExpenses)} realizado · ${money(voiceExpected + manualExpected + receiptsExpected + expectedBeforeClosing)} ainda previsto`
+          }
           tone="warning"
           details={<>
-            <p>Prévia formada por pagamentos realizados, registros por voz, notas e compromissos ainda abertos. Não é saldo bancário nem fatura fechada.</p>
+            <p>Prévia formada por pagamentos realizados, registros manuais ou por voz, notas e compromissos ainda abertos. Não é saldo bancário nem fatura fechada.</p>
             <Row a="Pagamentos e gastos realizados" b="Confirmados no mês" c={money(realizedExpenses)} />
             <Row a="Registros por voz" b={`${estimatedEntries.filter(entry=>entry.source==="voice").length} estimativa(s)`} c={money(voiceExpected)} />
+            <Row a="Registros manuais rápidos" b={`${estimatedEntries.filter(entry=>entry.source==="manual").length} estimativa(s)`} c={money(manualExpected)} />
             <Row a="Notas de compras" b={`${estimatedEntries.filter(entry=>entry.source==="receipt").length} nota(s)`} c={money(receiptsExpected)} />
             <Row a="Pagamentos ainda previstos" b="Obrigações abertas" c={money(expectedBeforeClosing)} />
-            {spending.slice().sort((a,b)=>a.date.localeCompare(b.date)).map(entry=><Row key={entry.id} a={`${entry.state==="realized"?"Realizado":"Previsto"} · ${entry.source==="voice"?"Voz":entry.source==="receipt"?"Nota":entry.source==="payment"?"Pagamento":"Fatura/extrato"} · ${entry.description}`} b={entry.date} c={money(entry.amount)}/>)}
+            {spending.slice().sort((a,b)=>a.date.localeCompare(b.date)).map(entry=><Row key={entry.id} a={`${entry.state==="realized"?"Realizado":"Previsto"} · ${entry.source==="voice"?"Voz":entry.source==="manual"?"Manual":entry.source==="receipt"?"Nota":entry.source==="payment"?"Pagamento":"Fatura/extrato"} · ${entry.description}`} b={entry.date} c={money(entry.amount)}/>)}
           </>}
         />
       </section>
+      <CategorySpendingCharts
+        data={data}
+        month={month}
+        view={view}
+        hideValues={hideValues}
+      />
       <section className="grid two">
         <div className="panel">
           <h2>Orçado × acompanhado em tempo real</h2>
@@ -677,6 +1192,237 @@ function Dashboard({
     </>
   );
 }
+
+const categoryPalette = [
+  "#a8483e",
+  "#c78b45",
+  "#527a6c",
+  "#596f9d",
+  "#9b6a83",
+  "#6c8050",
+  "#b76e4c",
+];
+
+const categoryColor = (key: string) => {
+  let hash = 0;
+  for (let index = 0; index < key.length; index += 1)
+    hash = (hash * 31 + key.charCodeAt(index)) | 0;
+  return categoryPalette[Math.abs(hash) % categoryPalette.length];
+};
+
+type CategorySlice = {
+  key: string;
+  name: string;
+  amount: number;
+  percentage: number;
+  color: string;
+};
+
+function CategoryDonut({
+  title,
+  result,
+  hideValues,
+}: {
+  title?: string;
+  result: ReturnType<typeof spendingByCategory>;
+  hideValues: boolean;
+}) {
+  const condensed = result.categories.length <= 6
+    ? result.categories
+    : [
+        ...result.categories.slice(0, 6),
+        {
+          name: "Outras categorias",
+          categoryId: undefined,
+          amount: result.categories
+            .slice(6)
+            .reduce((sum, row) => sum + row.amount, 0),
+          percentage: result.categories
+            .slice(6)
+            .reduce((sum, row) => sum + row.percentage, 0),
+        },
+      ];
+  const usedColors = new Set<string>();
+  const slices: CategorySlice[] = condensed.map((row) => {
+    const key = row.categoryId || row.name;
+    let color = categoryColor(key);
+    if (usedColors.has(color))
+      color = categoryPalette.find((candidate) => !usedColors.has(candidate)) || color;
+    usedColors.add(color);
+    return {
+      key,
+      name: row.name,
+      amount: row.amount,
+      percentage: row.percentage,
+      color,
+    };
+  });
+  const [selectedKey, setSelectedKey] = useState(slices[0]?.key || "");
+  useEffect(() => {
+    if (!slices.some((slice) => slice.key === selectedKey))
+      setSelectedKey(slices[0]?.key || "");
+  }, [result.total, slices.map((slice) => slice.key).join("|")]);
+  const selected =
+    slices.find((slice) => slice.key === selectedKey) || slices[0];
+  let offset = 0;
+
+  if (!slices.length)
+    return (
+      <div className="category-donut-card category-donut-empty">
+        {title && <h3>{title}</h3>}
+        <Empty />
+      </div>
+    );
+
+  return (
+    <div className="category-donut-card">
+      {title && <h3>{title}</h3>}
+      <div className="category-donut-layout">
+        <div className="category-donut-visual">
+          <svg
+            viewBox="0 0 42 42"
+            role="img"
+            aria-label={
+              hideValues
+                ? "Distribuição dos gastos por categoria; valores ocultos"
+                : `Distribuição de ${money(result.total)} em gastos por categoria`
+            }
+          >
+            <circle
+              className="category-donut-track"
+              cx="21"
+              cy="21"
+              r="15.9155"
+              fill="none"
+              strokeWidth="6"
+            />
+            {slices.map((slice) => {
+              const currentOffset = offset;
+              offset += slice.percentage;
+              const label = hideValues
+                ? slice.name
+                : `${slice.name}: ${slice.percentage.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}% e ${money(slice.amount)}`;
+              return (
+                <circle
+                  key={slice.key}
+                  className={`category-donut-slice ${selected?.key === slice.key ? "selected" : ""}`}
+                  cx="21"
+                  cy="21"
+                  r="15.9155"
+                  fill="none"
+                  pathLength="100"
+                  stroke={slice.color}
+                  strokeWidth={selected?.key === slice.key ? "7" : "6"}
+                  strokeDasharray={`${slice.percentage} ${100 - slice.percentage}`}
+                  strokeDashoffset={-currentOffset}
+                  transform="rotate(-90 21 21)"
+                  aria-hidden="true"
+                  focusable="false"
+                  onClick={() => setSelectedKey(slice.key)}
+                >
+                  <title>{label}</title>
+                </circle>
+              );
+            })}
+          </svg>
+          <div className="category-donut-center" aria-live="polite">
+            <small>{selected?.name || "Total"}</small>
+            <strong>
+              {hideValues
+                ? "*****"
+                : `${selected?.percentage.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`}
+            </strong>
+            <span>{hideValues ? "*****" : money(selected?.amount || result.total)}</span>
+          </div>
+        </div>
+        <div className="category-donut-legend">
+          {slices.map((slice) => (
+            <button
+              key={slice.key}
+              className={selected?.key === slice.key ? "selected" : ""}
+              onClick={() => setSelectedKey(slice.key)}
+              aria-pressed={selected?.key === slice.key}
+            >
+              <i style={{ background: slice.color }} aria-hidden="true" />
+              <span>{slice.name}</span>
+              <b>
+                {hideValues
+                  ? "*****"
+                  : `${slice.percentage.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`}
+                <small>{hideValues ? "*****" : money(slice.amount)}</small>
+              </b>
+            </button>
+          ))}
+          {result.categories.length > 6 && (
+            <details className="category-donut-others">
+              <summary>Ver categorias agrupadas em “Outras”</summary>
+              {result.categories.slice(6).map((row) => (
+                <div key={row.categoryId || row.name}>
+                  <span>{row.name}</span>
+                  <b>
+                    {hideValues
+                      ? "*****"
+                      : `${row.percentage.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}% · ${money(row.amount)}`}
+                  </b>
+                </div>
+              ))}
+            </details>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CategorySpendingCharts({
+  data,
+  month,
+  view,
+  hideValues,
+}: {
+  data: FamilyData;
+  month: string;
+  view: CashView;
+  hideValues: boolean;
+}) {
+  const cash = spendingByCategory(data, month, "cash");
+  const accrual = spendingByCategory(data, month, "accrual");
+  return (
+    <section className="panel category-spending-panel">
+      <div className="panel-head">
+        <div>
+          <h2>Gastos por categoria</h2>
+          <p className="muted">
+            Participação do realizado e das estimativas acompanhadas no mês.
+            Toque em uma categoria para destacá-la.
+          </p>
+        </div>
+      </div>
+      <div className={view === "compare" ? "category-donut-compare" : ""}>
+        {view === "compare" ? (
+          <>
+            <CategoryDonut
+              title="Fluxo das parcelas"
+              result={cash}
+              hideValues={hideValues}
+            />
+            <CategoryDonut
+              title="Compra integral"
+              result={accrual}
+              hideValues={hideValues}
+            />
+          </>
+        ) : (
+          <CategoryDonut
+            result={view === "accrual" ? accrual : cash}
+            hideValues={hideValues}
+          />
+        )}
+      </div>
+    </section>
+  );
+}
+
 function Card({
   label,
   value,
@@ -1188,7 +1934,7 @@ function Receipts({
         multiple
         onChange={(e) => analyze(Array.from(e.target.files || []))}
       />
-      <Collapsible title="Adicionar notas e compras">
+      <Collapsible id="quick-receipts" title="Adicionar notas e compras">
       <section className="panel supermarket-panel">
         <div className="panel-head">
           <div>
@@ -1200,6 +1946,7 @@ function Receipts({
           </div>
           <div className="actions">
             <button
+              data-quick-focus
               className="primary"
               disabled={busy}
               onClick={() => libraryInput.current?.click()}
@@ -1383,6 +2130,7 @@ function Receipts({
       </section>
       </Collapsible>
       <Collapsible
+        id="quick-shopping"
         title={`Lista de compras e sugestões (${(data.shoppingList || []).filter((item) => item.status === "pending").length})`}
       >
         <ShoppingListManager
@@ -1618,6 +2366,7 @@ function VoiceExpense({
       sourceKind: "card" as const,
       dedupeKey: "",
       estimated: true,
+      estimateOrigin: "voice" as const,
       notes: `Estimativa por voz: ${draft.transcricao || ""}`,
     };
     base.dedupeKey = await dedupeKey(base);
@@ -1633,6 +2382,7 @@ function VoiceExpense({
           <p className="muted">O lançamento será uma estimativa editável.</p>
         </div>
         <button
+          data-quick-focus
           className={recording ? "danger-button" : "primary"}
           disabled={processing}
           onClick={recording ? stop : start}
@@ -1833,7 +2583,7 @@ function ImportPage({
           hidden
           onChange={(e) => choose(Array.from(e.target.files||[]))}
         />
-        <button className="primary" onClick={() => input.current?.click()}>
+        <button data-quick-focus className="primary" onClick={() => input.current?.click()}>
           <Upload size={17} /> Escolher arquivo
         </button>
       </div>
@@ -1992,7 +2742,7 @@ function Transactions({
             <div className="tx-main">
               <input value={t.description} onChange={e=>update(t.id,{description:e.target.value,normalized:normalize(e.target.value)})}/>
               <div className="tx-core-fields"><input type="date" value={t.date} onChange={e=>update(t.id,{date:e.target.value,paymentDate:e.target.value,competence:monthOf(e.target.value)})}/><CurrencyInput value={Math.abs(t.amount)} onChange={value=>update(t.id,{amount:t.amount<0?-Math.abs(value):Math.abs(value)})}/></div>
-              <small>{t.estimated?"Estimativa por voz · ":""}{t.classification==="confirmed"?"Confirmado":"Em revisão"}</small>
+              <small>{t.estimated?`Estimativa ${t.estimateOrigin==="manual"?"manual":"por voz"} · `:""}{t.classification==="confirmed"?"Confirmado":"Em revisão"}</small>
             </div>
             <select value={t.accountId} onChange={e=>update(t.id,{accountId:e.target.value})}>{data.accounts.filter(account=>account.active).map(account=><option key={account.id} value={account.id}>{account.institution} · {account.name}</option>)}</select>
             <select value={t.operator} onChange={e=>update(t.id,{operator:e.target.value as Member})}><option>Olcino</option><option>Mari</option><option>Ambos</option></select>
@@ -2339,7 +3089,13 @@ function Payments({
             Ações manuais e conferência de cobranças automáticas.
           </p>
         </div>
-        <button className="primary" onClick={() => setShow(!show)}>
+        <button
+          data-quick-focus
+          data-quick-expand="true"
+          className="primary"
+          aria-expanded={show}
+          onClick={() => setShow(!show)}
+        >
           <Plus size={17} /> Compromisso
         </button>
       </div>
@@ -2820,7 +3576,13 @@ function Tasks({
           >
             <Download size={16} /> Calendário
           </button>
-          <button className="primary" onClick={() => setShow(!show)}>
+          <button
+            data-quick-focus
+            data-quick-expand="true"
+            className="primary"
+            aria-expanded={show}
+            onClick={() => setShow(!show)}
+          >
             <Plus size={17} /> Tarefa
           </button>
         </div>
@@ -3518,11 +4280,13 @@ function MoneyInput({
   defaultValue,
   placeholder,
   required,
+  autoFocus,
 }: {
   name: string;
   defaultValue?: number;
   placeholder?: string;
   required?: boolean;
+  autoFocus?: boolean;
 }) {
   const format = (value: number) =>
     value
@@ -3539,6 +4303,7 @@ function MoneyInput({
       name={name}
       inputMode="decimal"
       required={required}
+      autoFocus={autoFocus}
       placeholder={placeholder}
       value={display}
       onChange={(event) => setDisplay(event.target.value)}

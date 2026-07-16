@@ -15,7 +15,19 @@ export type SpendingEntry = {
   amount: number;
   categoryId?: string;
   state: "realized" | "estimated";
-  source: "transaction" | "voice" | "receipt" | "payment";
+  source: "transaction" | "voice" | "manual" | "receipt" | "payment";
+};
+
+export type CategorySpending = {
+  categoryId?: string;
+  name: string;
+  amount: number;
+  percentage: number;
+};
+
+export type SpendingByCategoryResult = {
+  total: number;
+  categories: CategorySpending[];
 };
 
 type Matchable = {
@@ -216,7 +228,8 @@ export function monthlySpending(
       activeReceipts.some(
         (receipt) =>
           Math.abs(receipt.total - transaction.amount) < 0.02 &&
-          dateDistance(receipt.date, date) === 0,
+          dateDistance(receipt.date, date) === 0 &&
+          descriptionsMatch(receipt.store, transaction.description),
       )
     ) continue;
     entries.push({
@@ -226,7 +239,7 @@ export function monthlySpending(
       amount: Math.abs(transaction.amount),
       categoryId: transaction.categoryId || otherCategory,
       state: "estimated",
-      source: "voice",
+      source: transaction.estimateOrigin === "manual" ? "manual" : "voice",
     });
   }
 
@@ -275,6 +288,50 @@ export function monthlySpending(
     });
   }
   return entries;
+}
+
+/**
+ * Consolida o acompanhamento mensal por categoria. O percentual usa a escala
+ * de 0 a 100 e considera a mesma combinação de fatos e estimativas já
+ * conciliadas por `monthlySpending`.
+ */
+export function spendingByCategory(
+  data: FamilyData,
+  month: string,
+  view: "cash" | "accrual",
+): SpendingByCategoryResult {
+  const categoriesById = new Map(
+    data.categories.map((category) => [category.id, category]),
+  );
+  const uncategorizedKey = "__uncategorized__";
+  const totals = new Map<string, number>();
+
+  for (const entry of monthlySpending(data, month, view)) {
+    if (!Number.isFinite(entry.amount) || entry.amount <= 0) continue;
+    const key =
+      entry.categoryId && categoriesById.has(entry.categoryId)
+        ? entry.categoryId
+        : uncategorizedKey;
+    totals.set(key, (totals.get(key) || 0) + entry.amount);
+  }
+
+  const total = [...totals.values()].reduce((sum, amount) => sum + amount, 0);
+  const categories = [...totals.entries()]
+    .map(([categoryId, amount]): CategorySpending => {
+      const category = categoriesById.get(categoryId);
+      return {
+        categoryId: category?.id,
+        name: category?.name || "Sem categoria",
+        amount,
+        percentage: total > 0 ? (amount / total) * 100 : 0,
+      };
+    })
+    .sort(
+      (left, right) =>
+        right.amount - left.amount || left.name.localeCompare(right.name, "pt-BR"),
+    );
+
+  return { total, categories };
 }
 
 /**
