@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import { Transaction, audit } from "./domain";
 import {
   hasImportedFactWithKey,
+  identifyAccount,
   isInvoiceTransferDescription,
 } from "./importer";
+import { createSeed } from "./seed";
 
 const transaction = (estimated: boolean): Transaction => ({
   ...audit("Olcino"),
@@ -49,5 +51,42 @@ describe("deduplicação da importação", () => {
     expect(
       hasImportedFactWithKey([transaction(false)], "mesma-chave"),
     ).toBe(true);
+  });
+});
+
+describe("titularidade e responsabilidade na importação", () => {
+  it("reconhece o titular sem transformar uma conta familiar em pessoal", () => {
+    const data = createSeed();
+    data.accounts = [
+      {
+        ...audit("Ambos"),
+        name: "Inter, cartão 1234",
+        institution: "Inter",
+        kind: "card",
+        holder: "Olcino",
+        operator: "Ambos",
+        active: true,
+      },
+      {
+        ...audit("Mari"),
+        name: "Inter, cartão 5678",
+        institution: "Inter",
+        kind: "card",
+        holder: "Mari",
+        operator: "Mari",
+        active: true,
+      },
+    ];
+
+    const identified = identifyAccount(
+      data,
+      "Inter",
+      "card",
+      "Fatura José Olcino Martins",
+    );
+
+    expect(identified?.account.name).toBe("Inter, cartão 1234");
+    expect(identified?.account.holder).toBe("Olcino");
+    expect(identified?.account.operator).toBe("Ambos");
   });
 });

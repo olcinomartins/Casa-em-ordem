@@ -44,6 +44,16 @@ import {
   uid,
 } from "./domain";
 import {
+  ACCOUNT_OWNERSHIP_OPTIONS,
+  accountHolder,
+  accountKindLabel,
+  accountOwnershipValue,
+  accountResponsibilityLabel,
+  inferInstitution,
+  inferLastDigits,
+  parseAccountOwnership,
+} from "./accounts";
+import {
   loadLocalIfPresent,
   loadLocalRecovery,
   saveLocalRecovery,
@@ -1249,7 +1259,7 @@ function QuickActions({
                     <option value="">Selecione</option>
                     {activeAccounts.map((account) => (
                       <option key={account.id} value={account.id}>
-                        {account.institution} · {account.name}
+                        {account.name}
                       </option>
                     ))}
                   </select>
@@ -2992,7 +3002,7 @@ function VoiceExpense({
         setProcessing(true);
         try {
           setDraft(
-            await readVoiceExpense(new Blob(chunks.current, { type: active.mimeType }),{categories:data.categories.map(category=>({name:category.name,subcategories:category.subcategories})),accounts:data.accounts.filter(account=>account.active).map(account=>({name:account.name,institution:account.institution,operator:account.operator}))}),
+            await readVoiceExpense(new Blob(chunks.current, { type: active.mimeType }),{categories:data.categories.map(category=>({name:category.name,subcategories:category.subcategories})),accounts:data.accounts.filter(account=>account.active).map(account=>({name:account.name,institution:account.institution,holder:accountHolder(account),operator:account.operator}))}),
           );
           setMessage("Áudio interpretado. Confira antes de registrar.");
         } catch (error) {
@@ -3137,7 +3147,7 @@ function VoiceExpense({
           </select>
           <select value={draft.categoriaSugerida||""} onChange={e=>setDraft({...draft,categoriaSugerida:e.target.value,subcategoriaSugerida:data.categories.find(c=>c.name===e.target.value)?.subcategories[0]})}><option value="">Selecione a categoria</option>{data.categories.map(category=><option key={category.id} value={category.name}>{category.name}</option>)}</select>
           <select value={draft.subcategoriaSugerida||""} onChange={e=>setDraft({...draft,subcategoriaSugerida:e.target.value})}><option value="">Selecione a subcategoria</option>{data.categories.find(category=>category.name===draft.categoriaSugerida)?.subcategories.map(subcategory=><option key={subcategory}>{subcategory}</option>)}</select>
-          <select value={draft.contaOuCartaoSugerido||""} onChange={e=>setDraft({...draft,contaOuCartaoSugerido:e.target.value})}><option value="">Selecione a conta ou cartão</option>{data.accounts.filter(account=>account.active).map(account=><option key={account.id} value={account.name}>{account.institution} · {account.name}</option>)}</select>
+          <select value={draft.contaOuCartaoSugerido||""} onChange={e=>setDraft({...draft,contaOuCartaoSugerido:e.target.value})}><option value="">Selecione a conta ou cartão</option>{data.accounts.filter(account=>account.active).map(account=><option key={account.id} value={account.name}>{account.name}</option>)}</select>
           <select value={draft.responsavelSugerido||currentMember} onChange={e=>setDraft({...draft,responsavelSugerido:e.target.value})}><option>Olcino</option><option>Mari</option><option>Ambos</option></select>
           <select value={draft.escopoSugerido||"Familiar"} onChange={e=>setDraft({...draft,escopoSugerido:e.target.value})}><option>Familiar</option><option>Pessoal — Olcino</option><option>Pessoal — Mari</option><option>Transferência interna</option><option>Fora do orçamento</option></select>
           <button className="primary" onClick={save}>
@@ -3244,7 +3254,7 @@ function ImportPage({
           <option value="">Identificar conta e titular automaticamente</option>
           {data.accounts.map((a) => (
             <option key={a.id} value={a.id}>
-              {a.institution} · {a.name}
+              {a.name}
             </option>
           ))}
         </select>
@@ -3485,7 +3495,7 @@ function Transactions({
               <div className="tx-core-fields"><input type="date" value={t.date} onChange={e=>update(t.id,{date:e.target.value,paymentDate:e.target.value,competence:monthOf(e.target.value)})}/>{hideValues ? <span className="hidden-input"><HiddenValue /></span> : <CurrencyInput value={Math.abs(t.amount)} onChange={value=>update(t.id,{amount:t.amount<0?-Math.abs(value):Math.abs(value)})}/>}</div>
               <small>{t.estimated?`Estimativa ${t.estimateOrigin==="manual"?"manual":"por voz"} · `:""}{t.classification==="confirmed"?"Confirmado":"Em revisão"}</small>
             </div>
-            <select value={t.accountId} onChange={e=>update(t.id,{accountId:e.target.value})}>{data.accounts.filter(account=>account.active).map(account=><option key={account.id} value={account.id}>{account.institution} · {account.name}</option>)}</select>
+            <select value={t.accountId} onChange={e=>update(t.id,{accountId:e.target.value})}>{data.accounts.filter(account=>account.active).map(account=><option key={account.id} value={account.id}>{account.name}</option>)}</select>
             <select value={t.operator} onChange={e=>update(t.id,{operator:e.target.value as Member})}><option>Olcino</option><option>Mari</option><option>Ambos</option></select>
             <select
               value={t.categoryId || ""}
@@ -3876,7 +3886,7 @@ function Payments({
                 <option value="monthly">Mensal</option>
                 <option value="yearly">Anual</option>
               </select>
-              <select name="accountId"><option value="">Conta do pagamento</option>{data.accounts.filter(account=>account.active).map(account=><option key={account.id} value={account.id}>{account.institution} · {account.name}</option>)}</select>
+              <select name="accountId"><option value="">Conta do pagamento</option>{data.accounts.filter(account=>account.active).map(account=><option key={account.id} value={account.id}>{account.name}</option>)}</select>
               <select name="categoryId"><option value="">Categoria da despesa</option>{data.categories.filter(category=>category.nature==="expense").map(category=><option key={category.id} value={category.id}>{category.name}</option>)}</select>
             </>
           }
@@ -4401,6 +4411,62 @@ function Tasks({
   );
 }
 
+function AccountFields({ account }: { account?: Account }) {
+  const supportedKind =
+    account && ["checking", "card", "investment"].includes(account.kind)
+      ? account.kind
+      : "";
+  return (
+    <>
+      <label className="field account-name-field">
+        <span>Nome</span>
+        <input
+          name="name"
+          required
+          defaultValue={account?.name || ""}
+          placeholder="Ex.: Inter, conta 1234 ou cartão 5678"
+          autoComplete="off"
+        />
+        <small>Use: instituição, número ou identificação da conta/cartão.</small>
+      </label>
+      <label className="field">
+        <span>Tipo de conta</span>
+        <select name="kind" required defaultValue={supportedKind}>
+          <option value="" disabled>
+            {account?.kind === "cash"
+              ? "Dinheiro é um tipo antigo — escolha o novo tipo"
+              : "Selecione o tipo"}
+          </option>
+          <option value="investment">Investimento</option>
+          <option value="checking">Conta corrente</option>
+          <option value="card">Cartão</option>
+        </select>
+      </label>
+      <label className="field account-ownership-field">
+        <span>Responsabilidade / Titularidade</span>
+        <select
+          name="ownership"
+          required
+          defaultValue={account ? accountOwnershipValue(account) : ""}
+        >
+          <option value="" disabled>
+            Selecione quem é o titular e quem usa
+          </option>
+          {ACCOUNT_OWNERSHIP_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+        <small>
+          O titular identifica a fatura; o uso define o orçamento familiar ou
+          pessoal.
+        </small>
+      </label>
+    </>
+  );
+}
+
 function Config({
   data,
   setData,
@@ -4416,6 +4482,7 @@ function Config({
   setMessage: (s: string) => void;
   mode?: "all" | "accounts" | "categories";
 }) {
+  const [editingAccountId, setEditingAccountId] = useState<string>();
   const restore = async (file?: File) => {
     if (!file) return;
     try {
@@ -4426,62 +4493,85 @@ function Config({
       setMessage((e as Error).message);
     }
   };
-  const addAccount = (fd: FormData) =>
-    mutate((d) =>
-      d.accounts.push({
-        ...audit(),
-        name: String(fd.get("name")),
-        institution: String(fd.get("institution")),
-        kind: String(fd.get("kind")) as Account["kind"],
-        operator: String(fd.get("operator")) as Member,
-        active: true,
-        importAliases: String(fd.get("importAliases") || "").split(",").map(value=>value.trim()).filter(Boolean),
-        lastDigits: String(fd.get("lastDigits") || "").replace(/\D/g, "").slice(-4) || undefined,
-      }),
+  const readAccountForm = (fd: FormData, editingId?: string) => {
+    const name = String(fd.get("name") || "").trim();
+    if (!name) throw new Error("Informe o nome da conta ou cartão.");
+    if (
+      data.accounts.some(
+        (account) =>
+          account.id !== editingId && normalize(account.name) === normalize(name),
+      )
+    )
+      throw new Error("Já existe uma conta ou cartão com esse nome.");
+    const kind = String(fd.get("kind")) as Account["kind"];
+    if (!["checking", "card", "investment"].includes(kind))
+      throw new Error("Selecione o tipo de conta.");
+    const ownership = parseAccountOwnership(String(fd.get("ownership") || ""));
+    const existing = editingId
+      ? data.accounts.find((account) => account.id === editingId)
+      : undefined;
+    const nameWasKept = Boolean(
+      existing && normalize(existing.name) === normalize(name),
     );
-  const editAccount = (id: string) => {
-    const a = data.accounts.find((x) => x.id === id)!;
-    const name = prompt("Nome da conta/cartão:", a.name);
-    if (!name) return;
-    const institution = prompt("Instituição:", a.institution);
-    if (!institution) return;
-    const kind = prompt("Tipo: checking, card, investment ou cash", a.kind) as
-      | Account["kind"]
-      | null;
-    if (!kind || !["checking", "card", "investment", "cash"].includes(kind))
-      return alert("Tipo inválido.");
-    const operator = prompt(
-      "Responsável: Olcino, Mari ou Ambos",
-      a.operator,
-    ) as Member | null;
-    if (!operator || !["Olcino", "Mari", "Ambos"].includes(operator))
-      return alert("Responsável inválido.");
-    const aliases = prompt(
-      "Identificadores para importação, separados por vírgula (nome completo do titular, apelido no arquivo etc.):",
-      (a.importAliases || []).join(", "),
-    );
-    if (aliases === null) return;
-    const lastDigits = prompt("Últimos 4 dígitos da conta/cartão (opcional):", a.lastDigits || "");
-    if (lastDigits === null) return;
-    mutate((d) => {
-      const item = d.accounts.find((x) => x.id === id)!;
-      item.name = name;
-      item.institution = institution;
-      item.kind = kind;
-      item.operator = operator;
-      item.importAliases = aliases.split(",").map(value=>value.trim()).filter(Boolean);
-      item.lastDigits = lastDigits.replace(/\D/g, "").slice(-4) || undefined;
-      item.updatedAt = now();
-      item.version++;
-    });
+    return {
+      name,
+      kind,
+      ...ownership,
+      institution:
+        nameWasKept && existing?.institution
+          ? existing.institution
+          : inferInstitution(name),
+      lastDigits:
+        (nameWasKept ? existing?.lastDigits : undefined) ||
+        inferLastDigits(name) ||
+        existing?.lastDigits,
+    };
+  };
+  const addAccount = (fd: FormData) => {
+    try {
+      const values = readAccountForm(fd);
+      mutate((d) =>
+        d.accounts.push({
+          ...audit(),
+          ...values,
+          active: true,
+          importAliases: [values.name],
+        }),
+      );
+      setMessage("Conta ou cartão adicionado.");
+      return true;
+    } catch (error) {
+      setMessage((error as Error).message);
+      return false;
+    }
+  };
+  const editAccount = (id: string, fd: FormData) => {
+    try {
+      const values = readAccountForm(fd, id);
+      mutate((d) => {
+        const item = d.accounts.find((account) => account.id === id)!;
+        Object.assign(item, values);
+        item.importAliases = Array.from(
+          new Set([...(item.importAliases || []), values.name]),
+        );
+        item.updatedAt = now();
+        item.version++;
+      });
+      setEditingAccountId(undefined);
+      setMessage("Conta ou cartão atualizado.");
+    } catch (error) {
+      setMessage((error as Error).message);
+    }
   };
   const removeAccount = (id: string) => {
     const used =
       data.transactions.some((t) => t.accountId === id) ||
-      data.budgets.some((b) => b.accountId === id);
+      data.budgets.some((b) => b.accountId === id) ||
+      data.obligations.some((obligation) => obligation.accountId === id) ||
+      data.rules.some((rule) => rule.accountId === id);
     if (used)
       return alert(
-        "Esta conta possui lançamentos ou orçamentos. Desative-a ou remova os vínculos antes de excluir.",
+        "Esta conta possui lançamentos, orçamentos, pagamentos ou regras vinculados. Remova os vínculos antes de excluir.",
       );
     if (confirm("Excluir esta conta/cartão?"))
       mutate((d) => {
@@ -4489,54 +4579,79 @@ function Config({
       });
   };
   return (
-    <div className="grid two">
+    <div className={mode === "all" ? "grid two" : "grid"}>
       {mode !== "categories" && (
         <section className="panel">
           <h2>Contas e cartões</h2>
-          <p className="muted">Defina uma vez banco, tipo e titular. Nas próximas importações o aplicativo fará a associação automaticamente.</p>
-          <QuickForm
-            onSubmit={addAccount}
-            fields={[
-              ["name", "Nome da conta/cartão", "text"],
-              ["institution", "Instituição", "text"],
-              ["importAliases", "Nome do titular ou texto presente no arquivo", "text"],
-              ["lastDigits", "Final da conta/cartão (4 dígitos)", "text"],
-            ]}
-            extras={
-              <>
-                <select name="kind">
-                  <option value="checking">Conta corrente</option>
-                  <option value="card">Cartão</option>
-                  <option value="investment">Investimento</option>
-                  <option value="cash">Dinheiro</option>
-                </select>
-                <select name="operator">
-                  <option value="Olcino">Titular/uso: Olcino</option>
-                  <option value="Mari">Titular/uso: Mari</option>
-                  <option value="Ambos">Titular/uso: Ambos</option>
-                </select>
-              </>
-            }
-          />
-          <div className="list">
-            {data.accounts.map((a) => (
-              <div className="row editable-row" key={a.id}>
-                <div>
-                  <b>{a.name}</b>
-                  <small>
-                    {a.institution} · {a.operator} · {a.kind}
-                    {(a.lastDigits || a.importAliases?.length) && <> · reconhecimento: {[a.lastDigits&&`final ${a.lastDigits}`,...(a.importAliases||[])].filter(Boolean).join(", ")}</>}
-                  </small>
+          <p className="muted">
+            Informe somente o nome, o tipo e a combinação entre titular e uso.
+            O reconhecimento das importações será preparado automaticamente.
+          </p>
+          <form
+            className="account-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (addAccount(new FormData(event.currentTarget)))
+                event.currentTarget.reset();
+            }}
+          >
+            <AccountFields />
+            <button type="submit">Adicionar conta ou cartão</button>
+          </form>
+          <div className="list account-list">
+            {!data.accounts.length && (
+              <p className="empty">Nenhuma conta ou cartão cadastrado.</p>
+            )}
+            {data.accounts.map((account) => (
+              <div className="account-entry" key={account.id}>
+                <div className="row editable-row account-row">
+                  <div>
+                    <b>{account.name}</b>
+                    <small>{accountKindLabel(account.kind)}</small>
+                    <small>{accountResponsibilityLabel(account)}</small>
+                  </div>
+                  <div className="actions">
+                    <button
+                      type="button"
+                      aria-expanded={editingAccountId === account.id}
+                      onClick={() =>
+                        setEditingAccountId((current) =>
+                          current === account.id ? undefined : account.id,
+                        )
+                      }
+                    >
+                      {editingAccountId === account.id ? "Fechar" : "Editar"}
+                    </button>
+                    <button
+                      type="button"
+                      className="danger-button"
+                      aria-label={`Excluir ${account.name}`}
+                      onClick={() => removeAccount(account.id)}
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  </div>
                 </div>
-                <div className="actions">
-                  <button onClick={() => editAccount(a.id)}>Editar</button>
-                  <button
-                    className="danger-button"
-                    onClick={() => removeAccount(a.id)}
+                {editingAccountId === account.id && (
+                  <form
+                    className="account-form account-edit-form"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      editAccount(account.id, new FormData(event.currentTarget));
+                    }}
                   >
-                    <Trash2 size={15} />
-                  </button>
-                </div>
+                    <AccountFields account={account} />
+                    <div className="actions account-form-actions">
+                      <button type="submit">Salvar alterações</button>
+                      <button
+                        type="button"
+                        onClick={() => setEditingAccountId(undefined)}
+                      >
+                        Cancelar
+                      </button>
+                    </div>
+                  </form>
+                )}
               </div>
             ))}
           </div>
@@ -5019,9 +5134,7 @@ function Analytics({
               <label>
                 <span>
                   {row.account.name}
-                  <small>
-                    {row.account.institution} · {row.account.operator}
-                  </small>
+                  <small>{accountResponsibilityLabel(row.account)}</small>
                 </span>
                 <b>{money(row.actual)}</b>
               </label>

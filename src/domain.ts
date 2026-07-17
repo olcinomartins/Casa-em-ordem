@@ -23,6 +23,9 @@ export interface Account extends Audit {
   name: string;
   institution: string;
   kind: "checking" | "card" | "investment" | "cash";
+  /** Titular legal. Opcional apenas para bases criadas antes deste campo. */
+  holder?: "Olcino" | "Mari";
+  /** Quem usa a conta no planejamento; Ambos significa uso familiar. */
   operator: Member;
   active: boolean;
   importAliases?: string[];

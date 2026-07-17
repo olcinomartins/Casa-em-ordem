@@ -7,6 +7,7 @@ import {
   normalize,
   monthOf,
 } from "./domain";
+import { accountHolder } from "./accounts";
 import { dedupeKey, hashBytes, suggest } from "./finance";
 import { readInterPdf } from "./interPdf";
 import { readBlobArrayBuffer } from "./fileCompat";
@@ -22,7 +23,7 @@ export interface Preview {
   detectedBy: string;
 }
 
-const identifyAccount = (data: FamilyData, institution: string, kind: "card" | "checking", evidence: string, fallbackAccountId?: string) => {
+export const identifyAccount = (data: FamilyData, institution: string, kind: "card" | "checking", evidence: string, fallbackAccountId?: string) => {
   if (fallbackAccountId) {
     const account = data.accounts.find(item => item.id === fallbackAccountId);
     if (account) return { account, detectedBy: "seleção manual" };
@@ -31,13 +32,14 @@ const identifyAccount = (data: FamilyData, institution: string, kind: "card" | "
   const ranked = data.accounts.filter(account => account.active).map(account => {
     let score = 0;
     const reasons: string[] = [];
+    const holder = accountHolder(account);
     if (normalize(account.institution) === normalize(institution)) { score += 30; reasons.push(account.institution); }
     if (account.kind === kind) { score += 20; reasons.push(kind === "card" ? "cartão" : "conta"); }
     for (const alias of account.importAliases || []) if (alias && text.includes(normalize(alias))) { score += 100; reasons.push(alias); }
-    if (account.lastDigits && text.includes(account.lastDigits.replace(/\D/g, ""))) { score += 100; reasons.push(`final ${account.lastDigits}`); }
-    if (account.operator === "Olcino" && /\bOLCINO\b/.test(text)) { score += 25; reasons.push("Olcino"); }
-    if (account.operator === "Mari" && /\b(MARI|MARIANA|CAMILLE|CAMILLIE)\b/.test(text)) { score += 25; reasons.push("Mari"); }
-    if (account.operator === "Ambos" && /\b(AMBOS|CONJUNTA|NOSSA|NOS)\b/.test(text)) { score += 25; reasons.push("Ambos"); }
+    const accountDigits = account.lastDigits?.replace(/\D/g, "") || "";
+    if (accountDigits.length >= 4 && text.includes(accountDigits)) { score += 100; reasons.push(`final ${account.lastDigits}`); }
+    if (holder === "Olcino" && /\bOLCINO\b/.test(text)) { score += 25; reasons.push("Olcino"); }
+    if (holder === "Mari" && /\b(MARI|MARIANA|CAMILLE|CAMILLIE)\b/.test(text)) { score += 25; reasons.push("Mari"); }
     return { account, score, reasons };
   }).sort((a, b) => b.score - a.score);
   if (!ranked[0] || ranked[0].score < 50 || ranked[0].score === ranked[1]?.score) return undefined;
