@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { CheckCircle2, Mic, Plus, Square, Trash2 } from "lucide-react";
+import { CheckCircle2, Mic, Pencil, Plus, Square, Trash2 } from "lucide-react";
 import {
   FamilyData,
   Member,
@@ -213,12 +213,16 @@ export function ShoppingListManager({
   currentMember,
   mutate,
   setMessage,
+  showCreate,
+  onCreateDone,
 }: {
   data: FamilyData;
   suggestions: ShoppingSuggestion[];
   currentMember: Member;
   mutate: (f: (data: FamilyData) => void) => void;
   setMessage: (message: string) => void;
+  showCreate: boolean;
+  onCreateDone: () => void;
 }) {
   const [draft, setDraft] = useState(emptyDraft);
   const [source, setSource] = useState<"manual" | "voice">("manual");
@@ -334,6 +338,7 @@ export function ShoppingListManager({
     setDraft(emptyDraft());
     setTranscript("");
     setSource("manual");
+    onCreateDone();
     setMessage("Produto adicionado à lista e sincronização automática iniciada.");
   };
 
@@ -469,7 +474,9 @@ export function ShoppingListManager({
           </div>
           <div className="actions shopping-item-actions">
             <button
-              className={isCompleted ? undefined : "success-button"}
+              className={`icon-button ${isCompleted ? "" : "success-button"}`}
+              title={isCompleted ? "Desmarcar produto" : "Marcar como comprado"}
+              aria-label={isCompleted ? `Desmarcar ${item.name}` : `Marcar ${item.name} como comprado`}
               onClick={() => {
                 changeStatus(item.id, isCompleted ? "pending" : "completed");
                 setMessage(
@@ -479,13 +486,11 @@ export function ShoppingListManager({
                 );
               }}
             >
-              <CheckCircle2 size={16} />
-              {isCompleted ? "Desmarcar" : "Comprado"}
+              <CheckCircle2 size={19} />
             </button>
-            <button onClick={() => setEditingId(item.id)}>Editar</button>
-            <button className="danger-button" onClick={() => remove(item)}>
-              <Trash2 size={15} />
-              <span>Excluir</span>
+            <button className="icon-button" title="Editar produto" aria-label={`Editar ${item.name}`} onClick={() => setEditingId(item.id)}><Pencil size={18} /></button>
+            <button className="danger-button icon-button" title="Excluir produto" aria-label={`Excluir ${item.name}`} onClick={() => remove(item)}>
+              <Trash2 size={18} />
             </button>
           </div>
         </>
@@ -495,7 +500,7 @@ export function ShoppingListManager({
 
   return (
     <section className="panel supermarket-panel shopping-list-panel">
-      <div className="shopping-section shopping-entry-section">
+      {showCreate && <div className="shopping-section shopping-entry-section">
         <h2>Adicionar produto</h2>
         <p className="muted">
           Digite ou fale um produto por vez. Revise os campos antes de adicionar.
@@ -548,7 +553,7 @@ export function ShoppingListManager({
             Limpar
           </button>
         </div>
-      </div>
+      </div>}
 
       <div className="shopping-section">
         <h2>A comprar ({pending.length})</h2>

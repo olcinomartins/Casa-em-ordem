@@ -19,6 +19,56 @@
 .collapsible[open] > summary span { transform: rotate(180deg); }
 .collapsible-content { padding: 0 .8rem .8rem; min-width: 0; overflow: hidden; }
 .collapsible-content > *, .grid > *, .panel { min-width: 0; max-width: 100%; }
+.page-blocks { display: flex; flex-direction: column; min-width: 0; }
+.page-organization-toolbar { display: flex; justify-content: flex-end; margin: 0 0 1rem; }
+.page-organizer { margin-bottom: 1rem; }
+.notification-center { position: relative; }
+.notification-button { position: relative; min-width: 46px; justify-content: center; }
+.notification-button > span {
+  position: absolute;
+  top: -7px;
+  right: -7px;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  background: var(--red);
+  color: #fff;
+  font-size: .68rem;
+  font-weight: 800;
+}
+.notification-popover {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + .55rem);
+  right: 0;
+  width: min(360px, calc(100vw - 2rem));
+  padding: .75rem;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 14px 40px #1b2d2530;
+  display: grid;
+  gap: .5rem;
+}
+.notification-head { display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
+.notification-head button { padding: .45rem; }
+.notification-popover > button { width: 100%; text-align: left; justify-content: flex-start; }
+.notification-warning { padding: .7rem; border-radius: 10px; background: #fff0ed; color: var(--red); }
+.icon-button {
+  width: 42px;
+  min-width: 42px;
+  height: 42px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.icon-button.success-button { color: #137a4c; border-color: #9dcdb7; background: #e9f7ef; }
+.payment-edit-form { grid-column: 1 / -1; width: 100%; margin-top: .75rem; }
+.task-edit-form { grid-column: 1 / -1; width: 100%; margin-top: .75rem; }
 .weekday-picker { display: flex; flex-wrap: wrap; gap: .5rem; border: 1px solid var(--line); border-radius: 10px; padding: .55rem; }
 .weekday-picker legend { padding: 0 .3rem; color: #718078; font-size: .78rem; }
 .weekday-picker label { display: flex; align-items: center; gap: .2rem; font-size: .78rem; }
@@ -1630,10 +1680,11 @@ button.attention-item { justify-content: initial; }
   .shopping-suggestion { grid-template-columns: minmax(0, 1fr); }
   .shopping-item-actions {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 44px;
+    grid-template-columns: repeat(3, 44px);
+    justify-content: end;
     width: 100%;
   }
-  .shopping-item-actions button { width: 100%; min-width: 0; white-space: normal; }
+  .shopping-item-actions button { width: 44px; min-width: 44px; white-space: normal; }
   .shopping-item-actions .danger-button { width: 44px; padding: .65rem; }
   .shopping-item-actions .danger-button span { display: none; }
   .shopping-suggestion-actions,
@@ -1713,6 +1764,6 @@ button.attention-item { justify-content: initial; }
   .shopping-fields { grid-template-columns: minmax(0, 1fr); }
   .shopping-product-name,
   .shopping-notes { grid-column: 1; }
-  .shopping-item-actions { grid-template-columns: minmax(0, 1fr) 44px; }
-  .shopping-item-actions > button:first-child { grid-column: 1 / -1; }
+  .shopping-item-actions { grid-template-columns: repeat(3, 44px); }
+  .shopping-item-actions > button:first-child { grid-column: auto; }
 }

@@ -1,4 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   BarChart3,
   Upload,
@@ -23,6 +30,11 @@ import {
   X,
   CircleDollarSign,
   Camera,
+  Bell,
+  Pencil,
+  PiggyBank,
+  TrendingDown,
+  ChevronLeft,
 } from "lucide-react";
 import {
   Account,
@@ -67,12 +79,10 @@ import {
   download,
 } from "./storage";
 import {
-  getCloudLocation,
   hasCloudVersion,
   isConfigured,
   loadCloud,
   saveCloud,
-  setCloudLocation,
   signIn,
   signOut,
   resumeSignIn,
@@ -125,6 +135,18 @@ import {
 } from "./shoppingList";
 
 type Page = "visao" | "rotinas" | "planejamento" | "importar" | "supermercado";
+type CreateIntent =
+  | "task"
+  | "payment"
+  | "goal"
+  | "budget"
+  | "account"
+  | "goal-movement"
+  | "transaction"
+  | "voice-transaction"
+  | "import"
+  | "receipt"
+  | "shopping";
 type QuickExpenseNotice = {
   transactionId: string;
   date: string;
@@ -137,6 +159,52 @@ const nav: [Page, string, typeof BarChart3][] = [
   ["importar", "Importar extratos e faturas", Upload],
   ["supermercado", "Supermercado", ShoppingCart],
 ];
+const pageBlocks: Record<Page, ReadonlyArray<[string, string]>> = {
+  visao: [
+    ["attention-section", "Resumo que pede atenção"],
+    ["dashboard-panel", "Painel"],
+    ["analytics-section", "Análises históricas"],
+  ],
+  rotinas: [
+    ["quick-tasks", "Agenda e rotinas"],
+    ["quick-payments", "Central de pagamentos"],
+  ],
+  planejamento: [
+    ["accounts-section", "Contas e cartões"],
+    ["categories-section", "Categorias"],
+    ["budgets-section", "Orçamentos"],
+    ["goals-section", "Metas e reservas"],
+  ],
+  importar: [
+    ["quick-voice", "Registrar por voz"],
+    ["quick-import", "Importar extratos e faturas"],
+    ["quick-transactions", "Transações e revisão"],
+  ],
+  supermercado: [
+    ["quick-receipts", "Notas de supermercado"],
+    ["quick-shopping", "Lista de compras"],
+    ["confirmed-receipts", "Compras confirmadas"],
+    ["product-catalog", "Catálogo de produtos"],
+  ],
+};
+const PageOrderContext = createContext<Record<string, number>>({});
+const normalizePageOrder = (page: Page, value: unknown) => {
+  const defaults = pageBlocks[page].map(([id]) => id);
+  let parsed: unknown = value;
+  if (typeof value === "string") {
+    try {
+      parsed = JSON.parse(value);
+    } catch {
+      parsed = [];
+    }
+  }
+  const supplied = Array.isArray(parsed)
+    ? parsed.filter((id): id is string => typeof id === "string")
+    : [];
+  return [...new Set([...supplied.filter((id) => defaults.includes(id)), ...defaults])];
+};
+const pageOrderKey = (page: Page, member: string) =>
+  `casa-em-ordem-page-order:v1:${member}:${page}`;
 const dateOnly = (date: Date) => {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -173,6 +241,17 @@ export default function App() {
     () => localStorage.getItem("casa-em-ordem-hide-values") === "true",
   );
   const [page, setPage] = useState<Page>("visao");
+  const [createIntent, setCreateIntent] = useState<CreateIntent>();
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [organizingPage, setOrganizingPage] = useState(false);
+  const [pageOrders, setPageOrders] = useState<Record<Page, string[]>>(() =>
+    Object.fromEntries(
+      (Object.keys(pageBlocks) as Page[]).map((pageId) => [
+        pageId,
+        pageBlocks[pageId].map(([id]) => id),
+      ]),
+    ) as Record<Page, string[]>,
+  );
   const [pendingQuickTarget, setPendingQuickTarget] = useState<{
     page: Page;
     sectionId: string;
@@ -186,6 +265,19 @@ export default function App() {
   const [cloud, setCloud] = useState<"local" | "syncing" | "connected">(
     "local",
   );
+  useEffect(() => {
+    setPageOrders(
+      Object.fromEntries(
+        (Object.keys(pageBlocks) as Page[]).map((pageId) => [
+          pageId,
+          normalizePageOrder(
+            pageId,
+            localStorage.getItem(pageOrderKey(pageId, currentMember)),
+          ),
+        ]),
+      ) as Record<Page, string[]>,
+    );
+  }, [currentMember]);
   useEffect(() => {
     if (!quickExpenseNotice) return;
     const timer = window.setTimeout(
@@ -384,37 +476,6 @@ export default function App() {
     setQuickExpenseNotice(undefined);
     goToQuickAction("importar", "quick-transactions");
   };
-  const configureShared = async () => {
-    const current = getCloudLocation();
-    const driveId = prompt(
-      "ID do drive compartilhado:",
-      current?.driveId || "",
-    );
-    if (!driveId) return;
-    const itemId = prompt(
-      "ID do arquivo compartilhado:",
-      current?.itemId || "",
-    );
-    if (!itemId) return;
-    const currentData = dataRef.current;
-    const localWasPending = Boolean(currentData && hasLocalPending());
-    if (currentData && localWasPending) {
-      await saveLocalRecovery(currentData);
-      setLocalRecovery(currentData);
-    }
-    // Uma gravação já iniciada pertence à localização anterior e não pode
-    // concluir visualmente a conexão da nova base.
-    autosaveGeneration.current += 1;
-    refreshGeneration.current += 1;
-    connectionGeneration.current += 1;
-    setCloudLocation({ driveId, itemId });
-    setCloud("local");
-    setMessage(
-      localWasPending
-        ? "Base compartilhada configurada. A cópia local pendente foi preservada; conecte novamente."
-        : "Base compartilhada configurada. Conecte novamente.",
-    );
-  };
   const toggleValues = () =>
     setHideValues((current) => {
       localStorage.setItem("casa-em-ordem-hide-values", String(!current));
@@ -472,6 +533,28 @@ export default function App() {
   const goToQuickAction = (targetPage: Page, sectionId: string) => {
     setPendingQuickTarget({ page: targetPage, sectionId });
     setPage(targetPage);
+  };
+  const startCreation = (
+    intent: CreateIntent,
+    targetPage: Page,
+    sectionId: string,
+  ) => {
+    setCreateIntent(intent);
+    goToQuickAction(targetPage, sectionId);
+  };
+  const movePageSection = (id: string, direction: "up" | "down") => {
+    setPageOrders((current) => {
+      const order = [...current[page]];
+      const index = order.indexOf(id);
+      const target = direction === "up" ? index - 1 : index + 1;
+      if (index < 0 || target < 0 || target >= order.length) return current;
+      [order[index], order[target]] = [order[target], order[index]];
+      localStorage.setItem(
+        pageOrderKey(page, currentMember),
+        JSON.stringify(order),
+      );
+      return { ...current, [page]: order };
+    });
   };
   useEffect(() => {
     if (!pendingQuickTarget || pendingQuickTarget.page !== page) return;
@@ -539,6 +622,16 @@ export default function App() {
       </div>
     );
   if (!data) return <div className="splash">Preparando a casa…</div>;
+  const appActionSummary = selectActionSummary(data, { month, view });
+  const notificationCount =
+    appActionSummary.overduePayments.length +
+    appActionSummary.budgetOverruns.length +
+    appActionSummary.pendingTransactions.length +
+    appActionSummary.upcomingPayments.length +
+    (cloud === "local" ? 1 : 0);
+  const pageOrderMap = Object.fromEntries(
+    pageOrders[page].map((id, index) => [id, index]),
+  );
   return (
     <div className={`app ${hideValues ? "values-hidden" : ""}`}>
       <aside>
@@ -613,9 +706,17 @@ export default function App() {
               {hideValues ? <EyeOff size={18} /> : <Eye size={18} />}
               <span>{hideValues ? "Mostrar" : "Esconder"}</span>
             </button>
-            {page === "planejamento" && (
-              <button onClick={configureShared}>Base compartilhada</button>
-            )}
+            <NotificationBell
+              summary={appActionSummary}
+              cloud={cloud}
+              count={notificationCount}
+              open={notificationsOpen}
+              setOpen={setNotificationsOpen}
+              onNavigate={(targetPage, sectionId) => {
+                setNotificationsOpen(false);
+                goToQuickAction(targetPage, sectionId);
+              }}
+            />
           </div>
         </header>
         {message && (
@@ -685,8 +786,77 @@ export default function App() {
             </div>
           </div>
         )}
+        <div className="page-organization-toolbar">
+          <button
+            aria-expanded={organizingPage}
+            onClick={() => setOrganizingPage((current) => !current)}
+          >
+            <Settings size={17} />
+            {organizingPage ? "Concluir organização" : "Organizar página"}
+          </button>
+        </div>
+        {organizingPage && (
+          <section className="panel page-organizer">
+            <div className="panel-head">
+              <div>
+                <h2>Organizar esta página</h2>
+                <p className="muted">
+                  A ordem fica salva neste aparelho para {currentMember}.
+                </p>
+              </div>
+              <button
+                onClick={() => {
+                  const order = pageBlocks[page].map(([id]) => id);
+                  localStorage.setItem(
+                    pageOrderKey(page, currentMember),
+                    JSON.stringify(order),
+                  );
+                  setPageOrders((current) => ({ ...current, [page]: order }));
+                }}
+              >
+                Restaurar padrão
+              </button>
+            </div>
+            <div className="dashboard-order-list">
+              {pageOrders[page].map((id, index) => (
+                <div key={id}>
+                  <span>
+                    <b>{pageBlocks[page].find(([blockId]) => blockId === id)?.[1]}</b>
+                    <small>Posição {index + 1} de {pageOrders[page].length}</small>
+                  </span>
+                  <div className="actions">
+                    <button
+                      disabled={index === 0}
+                      aria-label="Mover bloco para cima"
+                      onClick={() => movePageSection(id, "up")}
+                    >
+                      ↑
+                    </button>
+                    <button
+                      disabled={index === pageOrders[page].length - 1}
+                      aria-label="Mover bloco para baixo"
+                      onClick={() => movePageSection(id, "down")}
+                    >
+                      ↓
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+        <PageOrderContext.Provider value={pageOrderMap}>
+        <div className="page-blocks">
         {page === "visao" && (
           <>
+            <Collapsible id="attention-section" title="Resumo que pede atenção">
+              <DashboardActionSummary
+                summary={appActionSummary}
+                cloud={cloud}
+                hideValues={hideValues}
+                onNavigate={goToQuickAction}
+              />
+            </Collapsible>
             <Collapsible id="dashboard-panel" title="Painel">
               <Dashboard
                 data={data}
@@ -695,11 +865,9 @@ export default function App() {
                 setView={setView}
                 hideValues={hideValues}
                 currentMember={currentMember}
-                cloud={cloud}
-                onNavigate={goToQuickAction}
               />
             </Collapsible>
-            <Collapsible title="Análises históricas">
+            <Collapsible id="analytics-section" title="Análises históricas">
               <Analytics
                 data={data}
                 hadStoredPreferences={hadStoredUiPreferences}
@@ -714,16 +882,25 @@ export default function App() {
                 data={data}
                 mutate={mutate}
                 currentMember={currentMember}
+                creating={createIntent === "task"}
+                onCreateDone={() => setCreateIntent(undefined)}
               />
             </Collapsible>
             <Collapsible id="quick-payments" title="Central de pagamentos">
-              <Payments data={data} mutate={mutate} hideValues={hideValues} />
+              <Payments
+                data={data}
+                mutate={mutate}
+                hideValues={hideValues}
+                month={month}
+                creating={createIntent === "payment"}
+                onCreateDone={() => setCreateIntent(undefined)}
+              />
             </Collapsible>
           </>
         )}
         {page === "planejamento" && (
           <>
-            <Collapsible title="Contas e cartões">
+            <Collapsible id="accounts-section" title="Contas e cartões">
               <Config
                 mode="accounts"
                 data={data}
@@ -731,9 +908,11 @@ export default function App() {
                 mutate={mutate}
                 connect={connect}
                 setMessage={setMessage}
+                creatingAccount={createIntent === "account"}
+                onAccountCreateDone={() => setCreateIntent(undefined)}
               />
             </Collapsible>
-            <Collapsible title="Categorias de despesas e receitas">
+            <Collapsible id="categories-section" title="Categorias de despesas e receitas">
               <Config
                 mode="categories"
                 data={data}
@@ -751,10 +930,17 @@ export default function App() {
                 setView={setView}
                 mutate={mutate}
                 hideValues={hideValues}
+                creating={createIntent === "budget"}
+                onCreateDone={() => setCreateIntent(undefined)}
               />
             </Collapsible>
-            <Collapsible title="Metas e reservas">
-              <Goals data={data} mutate={mutate} />
+            <Collapsible id="goals-section" title="Metas e reservas">
+              <Goals
+                data={data}
+                mutate={mutate}
+                creating={createIntent === "goal"}
+                onCreateDone={() => setCreateIntent(undefined)}
+              />
             </Collapsible>
           </>
         )}
@@ -769,7 +955,7 @@ export default function App() {
               />
             </Collapsible>
             <Collapsible id="quick-import" title="Importar extratos e faturas">
-              <ImportPage data={data} mutate={mutate} setMessage={setMessage} hideValues={hideValues} />
+              <ImportPage data={data} mutate={mutate} setMessage={setMessage} hideValues={hideValues} creating={createIntent === "import"} onCreateDone={() => setCreateIntent(undefined)} />
             </Collapsible>
             <Collapsible id="quick-transactions" title="Transações e revisão">
               <Transactions
@@ -790,14 +976,19 @@ export default function App() {
             setMessage={setMessage}
             currentMember={currentMember}
             hideValues={hideValues}
+            creatingReceipt={createIntent === "receipt"}
+            creatingShopping={createIntent === "shopping"}
+            onCreateDone={() => setCreateIntent(undefined)}
           />
         )}
+        </div>
+        </PageOrderContext.Provider>
       </main>
       <QuickActions
         data={data}
         mutate={mutate}
         currentMember={currentMember}
-        onNavigate={goToQuickAction}
+        onCreate={startCreation}
         onExpenseCreated={(transaction) =>
           setQuickExpenseNotice({
             transactionId: transaction.id,
@@ -821,10 +1012,12 @@ function Collapsible({
   open?: boolean;
   children: React.ReactNode;
 }) {
+  const pageOrder = useContext(PageOrderContext);
   return (
     <details
       id={id}
       className="collapsible"
+      style={{ order: id ? pageOrder[id] : undefined }}
       {...(open ? { open: true } : {})}
     >
       <summary>
@@ -836,21 +1029,96 @@ function Collapsible({
   );
 }
 
+function NotificationBell({
+  summary,
+  cloud,
+  count,
+  open,
+  setOpen,
+  onNavigate,
+}: {
+  summary: ReturnType<typeof selectActionSummary>;
+  cloud: "local" | "syncing" | "connected";
+  count: number;
+  open: boolean;
+  setOpen: (open: boolean) => void;
+  onNavigate: (page: Page, sectionId: string) => void;
+}) {
+  return (
+    <div className="notification-center">
+      <button
+        className="notification-button"
+        aria-label={`Notificações${count ? `: ${count}` : ""}`}
+        aria-expanded={open}
+        onClick={() => setOpen(!open)}
+      >
+        <Bell size={19} />
+        {count > 0 && <span>{count > 99 ? "99+" : count}</span>}
+      </button>
+      {open && (
+        <div className="notification-popover" role="dialog" aria-label="Notificações">
+          <div className="notification-head">
+            <b>Notificações</b>
+            <button aria-label="Fechar notificações" onClick={() => setOpen(false)}>
+              <X size={17} />
+            </button>
+          </div>
+          {cloud === "local" && (
+            <div className="notification-warning">OneDrive sem confirmação.</div>
+          )}
+          {summary.overduePayments.length > 0 && (
+            <button onClick={() => onNavigate("rotinas", "quick-payments")}>
+              {summary.overduePayments.length} pagamento(s) vencido(s)
+            </button>
+          )}
+          {summary.upcomingPayments.length > 0 && (
+            <button onClick={() => onNavigate("rotinas", "quick-payments")}>
+              {summary.upcomingPayments.length} pagamento(s) próximo(s)
+            </button>
+          )}
+          {summary.budgetOverruns.length > 0 && (
+            <button onClick={() => onNavigate("planejamento", "budgets-section")}>
+              {summary.budgetOverruns.length} orçamento(s) excedido(s)
+            </button>
+          )}
+          {summary.pendingTransactions.length > 0 && (
+            <button onClick={() => onNavigate("importar", "quick-transactions")}>
+              {summary.pendingTransactions.length} lançamento(s) para revisar
+            </button>
+          )}
+          {!count && <p className="empty">Nenhuma notificação.</p>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function QuickActions({
   data,
   mutate,
   currentMember,
-  onNavigate,
+  onCreate,
   onExpenseCreated,
 }: {
   data: FamilyData;
   mutate: (f: (data: FamilyData) => void) => void;
   currentMember: Exclude<Member, "Ambos">;
-  onNavigate: (page: Page, sectionId: string) => void;
+  onCreate: (intent: CreateIntent, page: Page, sectionId: string) => void;
   onExpenseCreated: (transaction: Transaction) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const [mode, setMode] = useState<"menu" | "expense">("menu");
+  const [mode, setMode] = useState<
+    | "menu"
+    | "responsibility"
+    | "registration"
+    | "transaction-menu"
+    | "market"
+    | "expense"
+    | "goal-movement"
+  >("menu");
+  const [transactionKind, setTransactionKind] = useState<"expense" | "income">(
+    "expense",
+  );
   const [categoryId, setCategoryId] = useState("");
   const [subcategory, setSubcategory] = useState("");
   const [categoryTouched, setCategoryTouched] = useState(false);
@@ -868,8 +1136,9 @@ function QuickActions({
   const fabRef = useRef<HTMLButtonElement>(null);
   const sheetRef = useRef<HTMLDivElement>(null);
   const errorRef = useRef<HTMLDivElement>(null);
-  const expenseCategories = data.categories.filter(
-    (category) => category.nature === "expense",
+  const transactionCategories = data.categories.filter(
+    (category) =>
+      category.nature === (transactionKind === "expense" ? "expense" : "income"),
   );
   const activeAccounts = data.accounts.filter((account) => account.active);
 
@@ -887,7 +1156,7 @@ function QuickActions({
     );
     if (
       !rule ||
-      !expenseCategories.some((category) => category.id === rule.categoryId)
+      !transactionCategories.some((category) => category.id === rule.categoryId)
     ) return;
     setCategoryId(rule.categoryId);
     setSubcategory(rule.subcategory || "");
@@ -904,6 +1173,12 @@ function QuickActions({
   const showDialogError = (error: string) => {
     setDialogError(error);
     window.setTimeout(() => errorRef.current?.focus(), 0);
+  };
+  const back = () => {
+    setDialogError("");
+    if (mode === "expense" || mode === "goal-movement")
+      setMode("transaction-menu");
+    else setMode("menu");
   };
 
   useEffect(() => {
@@ -956,9 +1231,35 @@ function QuickActions({
     };
   }, [open]);
 
-  const navigate = (page: Page, sectionId: string) => {
+  const create = (intent: CreateIntent, page: Page, sectionId: string) => {
     close(false);
-    onNavigate(page, sectionId);
+    onCreate(intent, page, sectionId);
+  };
+
+  const saveGoalMovement = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const goalId = String(form.get("goalId") || "");
+    const kind = String(form.get("kind") || "aporte") as "aporte" | "retirada";
+    const amount = Math.abs(parseCurrency(form.get("amount")));
+    const date = String(form.get("date") || dateOnly(new Date()));
+    const reason = String(form.get("reason") || "").trim();
+    if (!goalId || !amount || !date)
+      return showDialogError("Selecione a meta, informe o valor e a data.");
+    mutate((family) => {
+      const goal = family.goals.find((item) => item.id === goalId);
+      if (!goal) return;
+      goal.movements.push({
+        id: uid(),
+        date,
+        kind,
+        amount: kind === "retirada" ? -amount : amount,
+        reason: reason || undefined,
+      });
+      goal.updatedAt = now();
+      goal.version++;
+    });
+    close();
   };
 
   const saveExpense = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -993,7 +1294,7 @@ function QuickActions({
         paymentDate: date,
         description: cleanDescription,
         normalized: normalize(cleanDescription),
-        amount,
+        amount: transactionKind === "income" ? -amount : amount,
         accountId: selectedAccountId,
         operator: selectedOperator,
         scope,
@@ -1047,22 +1348,30 @@ function QuickActions({
               <div>
                 <p className="eyebrow">AÇÃO RÁPIDA</p>
                 <h2 id="quick-action-title">
-                  {mode === "expense" ? "Nova despesa" : "O que deseja fazer?"}
+                  {mode === "menu"
+                    ? "O que deseja adicionar?"
+                    : mode === "responsibility"
+                      ? "Responsabilidade"
+                      : mode === "registration"
+                        ? "Cadastro"
+                        : mode === "transaction-menu"
+                          ? "Lançamento"
+                          : mode === "market"
+                            ? "Mercado"
+                            : mode === "goal-movement"
+                              ? "Aporte ou retirada"
+                              : "Saída ou entrada"}
                 </h2>
               </div>
               <button
                 className="quick-action-close"
                 onClick={() => {
-                  if (mode === "expense") {
-                    setDialogError("");
-                    setMode("menu");
-                  } else {
-                    close();
-                  }
+                  if (mode === "menu") close();
+                  else back();
                 }}
-                aria-label={mode === "expense" ? "Voltar" : "Fechar"}
+                aria-label={mode === "menu" ? "Fechar" : "Voltar"}
               >
-                {mode === "expense" ? "Voltar" : <X size={21} />}
+                {mode === "menu" ? <X size={21} /> : <ChevronLeft size={21} />}
               </button>
             </div>
 
@@ -1080,64 +1389,75 @@ function QuickActions({
             )}
 
             {mode === "menu" ? (
-              <>
-                <div className="quick-action-grid">
-                  <button
-                    className="quick-action-primary"
-                    onClick={() => {
-                      setDialogError("");
-                      setMode("expense");
-                    }}
-                  >
-                    <CircleDollarSign size={22} />
-                    <span>
-                      <b>Nova despesa</b>
-                      <small>Digitar agora</small>
-                    </span>
-                  </button>
-                  <button onClick={() => navigate("importar", "quick-voice")}>
-                    <Mic size={22} />
-                    <span>
-                      <b>Por voz</b>
-                      <small>Falar o gasto</small>
-                    </span>
-                  </button>
-                  <button onClick={() => navigate("rotinas", "quick-payments")}>
-                    <WalletCards size={22} />
-                    <span>
-                      <b>Conta ou pagamento</b>
-                      <small>Registrar ou confirmar</small>
-                    </span>
-                  </button>
-                  <button onClick={() => navigate("supermercado", "quick-receipts")}>
-                    <Camera size={22} />
-                    <span>
-                      <b>Fotografar nota</b>
-                      <small>Compra de mercado</small>
-                    </span>
-                  </button>
-                  <button onClick={() => navigate("supermercado", "quick-shopping")}>
-                    <ShoppingCart size={22} />
-                    <span>
-                      <b>Item de compras</b>
-                      <small>Adicionar à lista</small>
-                    </span>
-                  </button>
-                  <button onClick={() => navigate("rotinas", "quick-tasks")}>
-                    <CheckSquare size={22} />
-                    <span>
-                      <b>Nova tarefa</b>
-                      <small>Casa ou agenda</small>
-                    </span>
-                  </button>
-                </div>
-                <button
-                  className="quick-import-link"
-                  onClick={() => navigate("importar", "quick-import")}
-                >
-                  <Upload size={18} /> Importar extrato ou fatura
+              <div className="quick-action-grid quick-action-groups">
+                <button onClick={() => setMode("responsibility")}>
+                  <CheckSquare size={22} />
+                  <span><b>Responsabilidade</b><small>Atribuições e pagamentos</small></span>
                 </button>
-              </>
+                <button onClick={() => setMode("registration")}>
+                  <Tags size={22} />
+                  <span><b>Cadastro</b><small>Metas, orçamentos e contas</small></span>
+                </button>
+                <button className="quick-action-primary" onClick={() => setMode("transaction-menu")}>
+                  <CircleDollarSign size={22} />
+                  <span><b>Lançamento</b><small>Movimentações e arquivos</small></span>
+                </button>
+                <button onClick={() => setMode("market")}>
+                  <ShoppingCart size={22} />
+                  <span><b>Mercado</b><small>Notas e lista de compras</small></span>
+                </button>
+              </div>
+            ) : mode === "responsibility" ? (
+              <div className="quick-action-grid">
+                <button onClick={() => create("task", "rotinas", "quick-tasks")}>
+                  <CheckSquare size={22} /><span><b>Atribuição</b><small>Responsabilidade ou rotina</small></span>
+                </button>
+                <button onClick={() => create("payment", "rotinas", "quick-payments")}>
+                  <ReceiptText size={22} /><span><b>Pagamento</b><small>Conta ou compromisso</small></span>
+                </button>
+              </div>
+            ) : mode === "registration" ? (
+              <div className="quick-action-grid">
+                <button onClick={() => create("goal", "planejamento", "goals-section")}>
+                  <Target size={22} /><span><b>Meta</b><small>Provisão ou desejo</small></span>
+                </button>
+                <button onClick={() => create("budget", "planejamento", "budgets-section")}>
+                  <BarChart3 size={22} /><span><b>Orçamento</b><small>Valor e vigência</small></span>
+                </button>
+                <button onClick={() => create("account", "planejamento", "accounts-section")}>
+                  <WalletCards size={22} /><span><b>Conta</b><small>Conta, cartão ou investimento</small></span>
+                </button>
+              </div>
+            ) : mode === "transaction-menu" ? (
+              <div className="quick-action-grid">
+                <button onClick={() => setMode("goal-movement")}>
+                  <PiggyBank size={22} /><span><b>Aporte/Retirada em meta</b><small>Movimentar uma meta</small></span>
+                </button>
+                <button className="quick-action-primary" onClick={() => setMode("expense")}>
+                  <TrendingDown size={22} /><span><b>Saída/Entrada</b><small>Registrar valor</small></span>
+                </button>
+                <button onClick={() => create("import", "importar", "quick-import")}>
+                  <Upload size={22} /><span><b>Extrato/Fatura</b><small>Importar arquivo</small></span>
+                </button>
+              </div>
+            ) : mode === "market" ? (
+              <div className="quick-action-grid">
+                <button onClick={() => create("receipt", "supermercado", "quick-receipts")}>
+                  <Camera size={22} /><span><b>Nota</b><small>Fotografar ou escolher foto</small></span>
+                </button>
+                <button onClick={() => create("shopping", "supermercado", "quick-shopping")}>
+                  <Mic size={22} /><span><b>Comprar</b><small>Adicionar por voz ou texto</small></span>
+                </button>
+              </div>
+            ) : mode === "goal-movement" ? (
+              <form className="quick-expense-form" onSubmit={saveGoalMovement}>
+                <label>Meta<select name="goalId" required autoFocus><option value="">Selecione</option>{data.goals.filter(goal=>goal.active).map(goal=><option key={goal.id} value={goal.id}>{goal.name}</option>)}</select></label>
+                <label>Movimento<select name="kind"><option value="aporte">Aporte</option><option value="retirada">Retirada</option></select></label>
+                <label>Valor<MoneyInput name="amount" required placeholder="R$ 0,00" /></label>
+                <label>Data<input name="date" type="date" required defaultValue={dateOnly(new Date())}/></label>
+                <label>Motivo<input name="reason" placeholder="Opcional" /></label>
+                <button className="primary">Confirmar movimento</button>
+              </form>
             ) : (
               <form
                 className="quick-expense-form"
@@ -1150,6 +1470,21 @@ function QuickActions({
                   Entra como prévia do mês e será conciliada quando a fatura ou
                   o extrato forem importados.
                 </p>
+                <label>
+                  Tipo
+                  <select
+                    value={transactionKind}
+                    onChange={(event) => {
+                      setTransactionKind(event.target.value as "expense" | "income");
+                      setCategoryId("");
+                      setSubcategory("");
+                      setCategoryTouched(false);
+                    }}
+                  >
+                    <option value="expense">Saída</option>
+                    <option value="income">Entrada</option>
+                  </select>
+                </label>
                 <label className="quick-expense-value">
                   Valor
                   <MoneyInput
@@ -1183,7 +1518,7 @@ function QuickActions({
                     />
                   </label>
                   <label>
-                    Quem gastou
+                    Responsável
                     <select
                       name="operator"
                       value={operator}
@@ -1219,7 +1554,7 @@ function QuickActions({
                     }}
                   >
                     <option value="">Selecione</option>
-                    {expenseCategories.map((category) => (
+                    {transactionCategories.map((category) => (
                       <option key={category.id} value={category.id}>
                         {category.name}
                       </option>
@@ -1275,6 +1610,12 @@ function QuickActions({
                 </label>
                 <button className="primary quick-expense-save" disabled={saving}>
                   {saving ? "Salvando…" : "Adicionar à prévia"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => create("voice-transaction", "importar", "quick-voice")}
+                >
+                  <Mic size={17} /> Registrar falando
                 </button>
               </form>
             )}
@@ -1366,8 +1707,6 @@ function Dashboard({
   setView,
   hideValues,
   currentMember,
-  cloud,
-  onNavigate,
 }: {
   data: FamilyData;
   month: string;
@@ -1375,8 +1714,6 @@ function Dashboard({
   setView: (v: CashView) => void;
   hideValues: boolean;
   currentMember: Exclude<Member, "Ambos">;
-  cloud: "local" | "syncing" | "connected";
-  onNavigate: (page: Page, sectionId: string) => void;
 }) {
   const orderKey = dashboardOrderStorageKey(currentMember);
   const [blockOrder, setBlockOrder] = useState<DashboardBlockId[]>(() => {
@@ -1435,7 +1772,6 @@ function Dashboard({
         0,
       )
     : undefined;
-  const actionSummary = selectActionSummary(data, { month, view });
   const commitments = data.obligations
     .filter(
       (obligation) =>
@@ -1517,12 +1853,6 @@ function Dashboard({
           </div>
         </section>
       )}
-      <DashboardActionSummary
-        summary={actionSummary}
-        cloud={cloud}
-        hideValues={hideValues}
-        onNavigate={onNavigate}
-      />
       <div className="dashboard-blocks" role="list" aria-label="Blocos do painel">
       {blockOrder.map((blockId, index) =>
         blockId === "summary" ? (
@@ -2303,7 +2633,7 @@ function Chores({
               >
                 <CheckCircle2 size={16} />
               </button>
-              <button onClick={() => setEditing(item)}>Editar</button>
+              <button className="icon-button" title="Editar responsabilidade" aria-label={`Editar ${item.title}`} onClick={() => setEditing(item)}><Pencil size={18} /></button>
               <button
                 onClick={() =>
                   mutate((d) => {
@@ -2365,12 +2695,18 @@ function Receipts({
   setMessage,
   currentMember,
   hideValues,
+  creatingReceipt,
+  creatingShopping,
+  onCreateDone,
 }: {
   data: FamilyData;
   mutate: (f: (d: FamilyData) => void) => void;
   setMessage: (s: string) => void;
   currentMember: Member;
   hideValues: boolean;
+  creatingReceipt: boolean;
+  creatingShopping: boolean;
+  onCreateDone: () => void;
 }) {
   const [draft, setDraft] = useState<ReadReceipt>();
   const [editingReceiptId, setEditingReceiptId] = useState<string>();
@@ -2489,6 +2825,7 @@ function Receipts({
         ? "Compra atualizada e sincronização automática iniciada."
         : "Compra registrada e sincronização automática iniciada.",
     );
+    onCreateDone();
   };
   const editSavedReceipt = (receipt: Receipt) => {
     setEditingReceiptId(receipt.id);
@@ -2622,7 +2959,7 @@ function Receipts({
         multiple
         onChange={(e) => analyze(Array.from(e.target.files || []))}
       />
-      <Collapsible id="quick-receipts" title="Adicionar notas e compras">
+      {(creatingReceipt || draft || busy) && <Collapsible id="quick-receipts" title="Adicionar notas e compras" open>
       <section className="panel supermarket-panel">
         <div className="panel-head">
           <div>
@@ -2800,7 +3137,7 @@ function Receipts({
                     })
                   }
                 >
-                  <Trash2 size={15} /> Excluir
+                  <Trash2 size={18} />
                 </button>
               </div>
             ))}
@@ -2824,7 +3161,7 @@ function Receipts({
           </div>
         )}
       </section>
-      </Collapsible>
+      </Collapsible>}
       <Collapsible
         id="quick-shopping"
         title={`Lista de compras e sugestões (${(data.shoppingList || []).filter((item) => item.status === "pending").length})`}
@@ -2834,6 +3171,8 @@ function Receipts({
           currentMember={currentMember}
           mutate={mutate}
           setMessage={setMessage}
+          showCreate={creatingShopping}
+          onCreateDone={onCreateDone}
           suggestions={products
             .filter((product) => product.next)
             .map((product) => ({
@@ -2847,7 +3186,7 @@ function Receipts({
             }))}
         />
       </Collapsible>
-      <Collapsible title={`Compras confirmadas (${history.length})`}>
+      <Collapsible id="confirmed-receipts" title={`Compras confirmadas (${history.length})`}>
       <section className="supermarket-panel confirmed-purchases-section">
           <p className="muted">
             Corrija produtos, categorias, quantidades e valores já salvos.
@@ -2866,9 +3205,7 @@ function Receipts({
                     </small>
                   </div>
                   <div className="actions">
-                    <button onClick={() => editSavedReceipt(receipt)}>
-                      Editar produtos
-                    </button>
+                    <button className="icon-button" title="Editar produtos" aria-label={`Editar produtos de ${receipt.store}`} onClick={() => editSavedReceipt(receipt)}><Pencil size={18} /></button>
                     <button
                       className="danger-button"
                       aria-label={`Excluir compra de ${receipt.store}`}
@@ -3164,11 +3501,15 @@ function ImportPage({
   mutate,
   setMessage,
   hideValues,
+  creating,
+  onCreateDone,
 }: {
   data: FamilyData;
   mutate: (f: (d: FamilyData) => void) => void;
   setMessage: (s: string) => void;
   hideValues: boolean;
+  creating: boolean;
+  onCreateDone: () => void;
 }) {
   const [account, setAccount] = useState("");
   const [previews, setPreviews] = useState<Preview[]>([]);
@@ -3244,12 +3585,13 @@ function ImportPage({
     });
     setMessage(`${previews.reduce((sum,item)=>sum+item.rows.length,0)} lançamentos de ${previews.length} arquivo(s) importados.${reconciled ? ` ${reconciled} registro(s) preliminar(es) conciliado(s).` : ""}`);
     setPreviews([]);
+    onCreateDone();
   };
   return (
     <section className="panel">
       <h2>Importar extrato ou fatura</h2>
       <p className="muted">PDF, CSV, XLS ou XLSX · o banco, a conta e o titular serão identificados automaticamente.</p>
-      <div className="form-row">
+      {creating && <div className="form-row">
         <select value={account} onChange={(e) => setAccount(e.target.value)}>
           <option value="">Identificar conta e titular automaticamente</option>
           {data.accounts.map((a) => (
@@ -3284,7 +3626,7 @@ function ImportPage({
         <button data-quick-focus className="primary" onClick={() => input.current?.click()}>
           <Upload size={17} /> Escolher arquivo
         </button>
-      </div>
+      </div>}
       {previews.length>0 && (
         <>
           {previews.map(preview=><div key={preview.hash}><div className="summary"><b>{preview.filename}</b><span className="status confirmed">{preview.institution} · {data.accounts.find(a=>a.id===preview.accountId)?.name} · {preview.operator}</span><span>{preview.rows.length} novos</span><span>{preview.duplicates} duplicados ignorados</span><span>{preview.rows.filter(r=>r.classification==="suggested").length} sugestões</span><small>Identificado por: {preview.detectedBy}</small></div><TransactionTable rows={preview.rows.slice(0,20)} data={data} hideValues={hideValues}/></div>)}
@@ -3550,7 +3892,6 @@ function Transactions({
               onClick={() => remove(t.id)}
             >
               <Trash2 size={19} />
-              <span>Excluir</span>
             </button>
           </div>
         ))}
@@ -3567,6 +3908,8 @@ function Budgets({
   setView,
   mutate,
   hideValues,
+  creating,
+  onCreateDone,
 }: {
   data: FamilyData;
   month: string;
@@ -3574,6 +3917,8 @@ function Budgets({
   setView: (v: CashView) => void;
   mutate: (f: (d: FamilyData) => void) => void;
   hideValues: boolean;
+  creating: boolean;
+  onCreateDone: () => void;
 }) {
   const [editing, setEditing] = useState<Budget>();
   const saveBudget = (form: FormData) => {
@@ -3611,6 +3956,7 @@ function Budgets({
       item.version++;
       if (!existing) draft.budgets.push(item);
     });
+    if (!editing) onCreateDone();
     setEditing(undefined);
   };
   const remove = (id: string) => {
@@ -3632,7 +3978,7 @@ function Budgets({
         <ViewSwitch view={view} setView={setView} />
       </div>
       <section className="grid two">
-        <div className="panel">
+        {(creating || editing) && <div className="panel">
           <h2>
             {editing ? "Editar orçamento" : "Novo orçamento com vigência"}
           </h2>
@@ -3722,7 +4068,7 @@ function Budgets({
           <p className="muted">
             Sem mês final, o valor se repete indefinidamente.
           </p>
-        </div>
+        </div>}
         <div>
           <section className="panel">
             <h2>Orçamentos cadastrados</h2>
@@ -3736,8 +4082,8 @@ function Budgets({
                   </small>
                 </div>
                 <div className="actions">
-                  <button onClick={() => setEditing(item)}>Editar</button>
-                  <button onClick={() => remove(item.id)}>
+                  <button className="icon-button" title="Editar orçamento" aria-label={`Editar ${label(item)}`} onClick={() => setEditing(item)}><Pencil size={18} /></button>
+                  <button className="icon-button danger-button" title="Excluir orçamento" aria-label={`Excluir ${label(item)}`} onClick={() => remove(item.id)}>
                     <Trash2 size={15} />
                   </button>
                 </div>
@@ -3767,12 +4113,23 @@ function Payments({
   data,
   mutate,
   hideValues,
+  month,
+  creating,
+  onCreateDone,
 }: {
   data: FamilyData;
   mutate: (f: (d: FamilyData) => void) => void;
   hideValues: boolean;
+  month: string;
+  creating: boolean;
+  onCreateDone: () => void;
 }) {
-  const [show, setShow] = useState(false);
+  const [editingId, setEditingId] = useState<string>();
+  const dueDateForDay = (baseMonth: string, rawDay: FormDataEntryValue | null) => {
+    const day = Math.max(1, Math.min(31, Number(rawDay) || 10));
+    const [year, monthNumber] = baseMonth.split("-").map(Number);
+    return `${baseMonth}-${String(Math.min(day, new Date(year, monthNumber, 0).getDate())).padStart(2, "0")}`;
+  };
   const add = (fd: FormData) =>
     mutate((d) =>
       d.obligations.push({
@@ -3780,11 +4137,13 @@ function Payments({
         name: String(fd.get("name")),
         kind: String(fd.get("kind")) as Obligation["kind"],
         planned: parseCurrency(fd.get("planned")),
-        dueDate: String(fd.get("due")),
+        dueDate: dueDateForDay(month, fd.get("dueDay")),
         recurrence: String(fd.get("repeat")) as Obligation["recurrence"],
         tolerance: parseCurrency(fd.get("tolerance")),
         accountId: String(fd.get("accountId") || "") || undefined,
         categoryId: String(fd.get("categoryId") || "") || undefined,
+        pattern: String(fd.get("pattern") || "") || undefined,
+        subcategory: String(fd.get("subcategory") || "") || undefined,
         status: "A pagar",
       }),
     );
@@ -3798,40 +4157,28 @@ function Payments({
     const account=current.accountId||data.accounts[0]?.id; if(!account)return alert("Cadastre uma conta para o pagamento.");
     mutate(d=>{const o=d.obligations.find(x=>x.id===id)!;o.status="Paga";o.paidAt=paidAt;o.paidAmount=paidAmount;o.reconciledTransactionId=undefined;const accountOwner=d.accounts.find(item=>item.id===account)?.operator||"Ambos";const rule=suggest(o.name,account,accountOwner,d.rules);const fallback=d.categories.find(category=>normalize(category.name)==="OUTROS")?.id;d.transactions=d.transactions.filter(t=>t.obligationId!==id);d.transactions.push({...audit(accountOwner),date:paidAt,competence:monthOf(paidAt),purchaseDate:o.dueDate,paymentDate:paidAt,description:o.name,normalized:normalize(o.name),amount:paidAmount,accountId:account,operator:accountOwner,scope:"Familiar",categoryId:o.categoryId||rule?.categoryId||fallback,subcategory:o.subcategory||rule?.subcategory,classification:o.categoryId?"confirmed":rule?"suggested":"pending",dedupeKey:`payment:${id}:${paidAt}`,transfer:false,movement:"expense_income",sourceKind:"statement",obligationId:id,provisional:true,notes:`Pagamento realizado. Previsto: ${money(o.planned)}`})});
   };
-  const edit = (id: string) => {
-    if (hideValues)
-      return alert("Mostre os valores pelo botão do olho para editar este pagamento.");
+  const saveEdit = (id: string, form: FormData) => {
     const current = data.obligations.find((o) => o.id === id)!;
-    const name = prompt("Nome do compromisso:", current.name);
-    if (!name) return;
-    const planned = prompt("Valor planejado:", hideValues ? "" : money(current.planned));
-    if (planned === null) return;
-    const due = prompt("Vencimento (AAAA-MM-DD):", current.dueDate);
-    if (!due || !/^\d{4}-\d{2}-\d{2}$/.test(due))
-      return alert("Use a data no formato AAAA-MM-DD.");
-    const kind = prompt("Tipo do compromisso:", current.kind) as
-      | Obligation["kind"]
-      | null;
-    if (!kind) return;
-    const recurrence = prompt(
-      "Repetição: none, monthly ou yearly",
-      current.recurrence,
-    ) as Obligation["recurrence"] | null;
-    if (!recurrence || !["none", "monthly", "yearly"].includes(recurrence))
-      return alert("Repetição inválida.");
-    const tolerance = prompt("Tolerância de valor:", hideValues ? "" : money(current.tolerance));
-    if (tolerance === null) return;
+    const day = Math.max(1, Math.min(31, Number(form.get("dueDay")) || 10));
+    const baseMonth = current.dueDate.slice(0, 7);
+    const [year, monthNumber] = baseMonth.split("-").map(Number);
+    const lastDay = new Date(year, monthNumber, 0).getDate();
     mutate((d) => {
       const o = d.obligations.find((x) => x.id === id)!;
-      o.name = name;
-      o.planned = parseCurrency(planned);
-      o.dueDate = due;
-      o.kind = kind;
-      o.recurrence = recurrence;
-      o.tolerance = parseCurrency(tolerance);
+      o.name = String(form.get("name") || o.name).trim();
+      o.planned = parseCurrency(form.get("planned"));
+      o.dueDate = `${baseMonth}-${String(Math.min(day, lastDay)).padStart(2, "0")}`;
+      o.kind = String(form.get("kind")) as Obligation["kind"];
+      o.recurrence = String(form.get("repeat")) as Obligation["recurrence"];
+      o.tolerance = parseCurrency(form.get("tolerance"));
+      o.accountId = String(form.get("accountId") || "") || undefined;
+      o.categoryId = String(form.get("categoryId") || "") || undefined;
+      o.subcategory = String(form.get("subcategory") || "") || undefined;
+      o.pattern = String(form.get("pattern") || "") || undefined;
       o.updatedAt = now();
       o.version++;
     });
+    setEditingId(undefined);
   };
   const remove = (id: string) => {
     if (confirm("Excluir este compromisso?"))
@@ -3848,27 +4195,20 @@ function Payments({
             Ações manuais e conferência de cobranças automáticas.
           </p>
         </div>
-        <button
-          data-quick-focus
-          data-quick-expand="true"
-          className="primary"
-          aria-expanded={show}
-          onClick={() => setShow(!show)}
-        >
-          <Plus size={17} /> Compromisso
-        </button>
       </div>
-      {show && (
+      {creating && (
         <QuickForm
           onSubmit={(fd) => {
             add(fd);
-            setShow(false);
+            onCreateDone();
           }}
           fields={[
             ["name", "Nome", "text"],
             ["planned", "Valor planejado", "number"],
-            ["due", "Vencimento", "date"],
+            ["dueDay", "Dia do pagamento (ex.: 10)", "number"],
             ["tolerance", "Tolerância", "number"],
+            ["pattern", "Padrão para conciliação", "text"],
+            ["subcategory", "Subcategoria", "text"],
           ]}
           extras={
             <>
@@ -3919,17 +4259,34 @@ function Payments({
                 <strong><SensitiveMoney value={o.planned} hidden={hideValues} /></strong>
                 {check && <Badge text={check} />}{" "}
                 {!["Paga", "Confirmada"].includes(o.status) && (
-                  <button onClick={() => mark(o.id)}>Marcar como paga</button>
+                  <button className="icon-button success-button" title="Marcar como paga" aria-label={`Marcar ${o.name} como paga`} onClick={() => mark(o.id)}><CheckCircle2 size={20} /></button>
                 )}
                 <div className="actions payment-actions">
-                  <button onClick={() => edit(o.id)}>Editar</button>
+                  <button className="icon-button" title="Editar pagamento" aria-label={`Editar ${o.name}`} onClick={() => hideValues ? alert("Mostre os valores para editar este pagamento.") : setEditingId(editingId === o.id ? undefined : o.id)}><Pencil size={18} /></button>
                   <button
-                    className="danger-button"
+                    className="danger-button icon-button"
+                    title="Excluir pagamento"
+                    aria-label={`Excluir ${o.name}`}
                     onClick={() => remove(o.id)}
                   >
-                    <Trash2 size={15} /> Excluir
+                    <Trash2 size={18} />
                   </button>
                 </div>
+                {editingId === o.id && (
+                  <form className="quick-form payment-edit-form" onSubmit={(event)=>{event.preventDefault();saveEdit(o.id,new FormData(event.currentTarget));}}>
+                    <input name="name" required defaultValue={o.name} placeholder="Nome do pagamento" />
+                    <MoneyInput name="planned" required defaultValue={o.planned} placeholder="Valor planejado" />
+                    <MoneyInput name="tolerance" defaultValue={o.tolerance} placeholder="Tolerância" />
+                    <label>Dia do pagamento<input name="dueDay" type="number" inputMode="numeric" min="1" max="31" required defaultValue={Number(o.dueDate.slice(8,10)) || 10} /></label>
+                    <select name="kind" defaultValue={o.kind}><option>Manual</option><option>Débito automático</option><option>Recorrência no cartão</option><option>Assinatura</option><option>Parcela</option><option>Variável</option><option>Eventual</option></select>
+                    <select name="repeat" defaultValue={o.recurrence}><option value="none">Sem repetição</option><option value="monthly">Mensal</option><option value="yearly">Anual</option></select>
+                    <select name="accountId" defaultValue={o.accountId || ""}><option value="">Conta do pagamento</option>{data.accounts.filter(account=>account.active).map(account=><option key={account.id} value={account.id}>{account.name}</option>)}</select>
+                    <select name="categoryId" defaultValue={o.categoryId || ""}><option value="">Categoria da despesa</option>{data.categories.filter(category=>category.nature==="expense").map(category=><option key={category.id} value={category.id}>{category.name}</option>)}</select>
+                    <input name="subcategory" defaultValue={o.subcategory || ""} placeholder="Subcategoria" />
+                    <input name="pattern" defaultValue={o.pattern || ""} placeholder="Padrão para conciliação" />
+                    <div className="actions"><button className="primary" type="submit">Salvar alterações</button><button type="button" onClick={()=>setEditingId(undefined)}>Cancelar</button></div>
+                  </form>
+                )}
               </article>
             );
           })}
@@ -3943,11 +4300,14 @@ function Payments({
 function Goals({
   data,
   mutate,
+  creating,
+  onCreateDone,
 }: {
   data: FamilyData;
   mutate: (f: (d: FamilyData) => void) => void;
+  creating: boolean;
+  onCreateDone: () => void;
 }) {
-  const [show, setShow] = useState(false);
   const add = (fd: FormData) => {
     const target = parseCurrency(fd.get("target")),
       minimum = parseCurrency(fd.get("minimum"));
@@ -3971,20 +4331,6 @@ function Goals({
         active: true,
         movements: [],
       }),
-    );
-  };
-  const move = (id: string) => {
-    const raw = prompt("Valor do aporte:");
-    if (!raw) return;
-    mutate((d) =>
-      d.goals
-        .find((g) => g.id === id)!
-        .movements.push({
-          id: uid(),
-          date: dateOnly(new Date()),
-          kind: "aporte",
-          amount: parseCurrency(raw),
-        }),
     );
   };
   const edit = (id: string) => {
@@ -4038,15 +4384,12 @@ function Goals({
             Aportes mínimos primeiro; excedente em cascata.
           </p>
         </div>
-        <button className="primary" onClick={() => setShow(!show)}>
-          <Plus size={17} /> Meta
-        </button>
       </div>
-      {show && (
+      {creating && (
         <QuickForm
           onSubmit={(fd) => {
             add(fd);
-            setShow(false);
+            onCreateDone();
           }}
           fields={[
             ["name", "Nome da meta", "text"],
@@ -4103,12 +4446,9 @@ function Goals({
                       <span>
                         {money(total)} de {money(g.target)}
                       </span>
-                      <button onClick={() => move(g.id)}>
-                        Registrar aporte
-                      </button>
                     </div>
                     <div className="actions goal-actions">
-                      <button onClick={() => edit(g.id)}>Editar</button>
+                      <button className="icon-button" title="Editar meta" aria-label={`Editar ${g.name}`} onClick={() => edit(g.id)}><Pencil size={18} /></button>
                       <select
                         aria-label="Tipo da meta"
                         value={g.kind || "desire"}
@@ -4123,10 +4463,12 @@ function Goals({
                         <option value="desire">Desejo</option>
                       </select>
                       <button
-                        className="danger-button"
+                        className="danger-button icon-button"
+                        title="Excluir meta"
+                        aria-label={`Excluir ${g.name}`}
                         onClick={() => remove(g.id)}
                       >
-                        <Trash2 size={15} /> Excluir
+                        <Trash2 size={18} />
                       </button>
                     </div>
                   </article>
@@ -4143,12 +4485,16 @@ function Tasks({
   data,
   mutate,
   currentMember,
+  creating,
+  onCreateDone,
 }: {
   data: FamilyData;
   mutate: (f: (d: FamilyData) => void) => void;
   currentMember: "Olcino" | "Mari";
+  creating: boolean;
+  onCreateDone: () => void;
 }) {
-  const [show, setShow] = useState(false);
+  const [editingTaskId, setEditingTaskId] = useState<string>();
   const migratedResponsibilities = useRef(false);
   useEffect(() => {
     if (migratedResponsibilities.current) return;
@@ -4221,54 +4567,20 @@ function Tasks({
         t.due = dt.toISOString();
       }
     });
-  const edit = (id: string) => {
-    const task = data.tasks.find((t) => t.id === id)!;
-    const title = prompt("Título da tarefa:", task.title);
-    if (!title) return;
-    const due = prompt(
-      "Data e hora (AAAA-MM-DDTHH:MM):",
-      task.due.slice(0, 16),
-    );
-    if (!due || Number.isNaN(new Date(due).getTime()))
-      return alert("Data e hora inválidas.");
-    const assignee = prompt(
-      "Responsável: Olcino, Mari ou Ambos",
-      task.assignee,
-    ) as Member | null;
-    if (!assignee || !["Olcino", "Mari", "Ambos"].includes(assignee))
-      return alert("Responsável inválido.");
-    const repeat = prompt(
-      "Repetição: none, daily, weekly, monthly ou yearly",
-      task.repeat,
-    ) as Task["repeat"] | null;
-    if (
-      !repeat ||
-      !["none", "daily", "weekly", "monthly", "yearly"].includes(repeat)
-    )
-      return alert("Repetição inválida.");
+  const saveEdit = (id: string, form: FormData) => {
     mutate((d) => {
       const item = d.tasks.find((t) => t.id === id)!;
-      item.title = title;
-      item.due = new Date(due).toISOString();
-      item.assignee = assignee;
-      item.repeat = repeat;
-      const shift = prompt(
-        "Turno: Manhã, Tarde, Noite ou Livre",
-        item.shift || "Livre",
-      ) as Task["shift"] | null;
-      if (shift) item.shift = shift;
-      const days = prompt(
-        "Dias da semana (0=dom, 1=seg ... 6=sáb), separados por vírgula",
-        (item.weekdays || []).join(","),
-      );
-      if (days !== null)
-        item.weekdays = days
-          .split(",")
-          .map(Number)
-          .filter((n) => n >= 0 && n <= 6);
+      item.title = String(form.get("title") || item.title).trim();
+      item.due = new Date(String(form.get("due"))).toISOString();
+      item.assignee = String(form.get("assignee")) as Member;
+      item.priority = String(form.get("priority")) as Task["priority"];
+      item.repeat = String(form.get("repeat")) as Task["repeat"];
+      item.shift = String(form.get("shift")) as Task["shift"];
+      item.weekdays = form.getAll("weekday").map(Number);
       item.updatedAt = now();
       item.version++;
     });
+    setEditingTaskId(undefined);
   };
   const remove = (id: string) => {
     if (confirm("Excluir esta tarefa e seu histórico?"))
@@ -4290,7 +4602,7 @@ function Tasks({
           key={t.id}
           className={new Date(t.due) < new Date() ? "overdue" : ""}
         >
-          <button className="check" onClick={() => done(t.id)}>
+          <button className="check success-button" title="Concluir atribuição" aria-label={`Concluir ${t.title}`} onClick={() => done(t.id)}>
             <CheckCircle2 />
           </button>
           <div>
@@ -4305,11 +4617,21 @@ function Tasks({
           </div>
           <Badge text={t.priority} />
           <div className="actions task-actions">
-            <button onClick={() => edit(t.id)}>Editar</button>
-            <button className="danger-button" onClick={() => remove(t.id)}>
-              <Trash2 size={15} /> Excluir
+            <button className="icon-button" title="Editar atribuição" aria-label={`Editar ${t.title}`} onClick={() => setEditingTaskId(editingTaskId===t.id?undefined:t.id)}><Pencil size={18} /></button>
+            <button className="danger-button icon-button" title="Excluir atribuição" aria-label={`Excluir ${t.title}`} onClick={() => remove(t.id)}>
+              <Trash2 size={18} />
             </button>
           </div>
+          {editingTaskId===t.id && <form className="quick-form task-edit-form" onSubmit={(event)=>{event.preventDefault();saveEdit(t.id,new FormData(event.currentTarget));}}>
+            <input name="title" required defaultValue={t.title}/>
+            <label>Próxima data e horário<input name="due" type="datetime-local" required defaultValue={t.due.slice(0,16)}/></label>
+            <select name="assignee" defaultValue={t.assignee}><option>Ambos</option><option>Olcino</option><option>Mari</option></select>
+            <select name="priority" defaultValue={t.priority}><option>Média</option><option>Alta</option><option>Baixa</option></select>
+            <select name="repeat" defaultValue={t.repeat}><option value="none">Uma vez</option><option value="daily">Diária</option><option value="weekly">Semanal</option><option value="monthly">Mensal</option><option value="yearly">Anual</option></select>
+            <select name="shift" defaultValue={t.shift || "Livre"}><option>Livre</option><option>Manhã</option><option>Tarde</option><option>Noite</option></select>
+            <fieldset className="weekday-picker"><legend>Dias da semana</legend>{dayNames.map((day,index)=><label key={day}><input type="checkbox" name="weekday" value={index} defaultChecked={t.weekdays?.includes(index)}/>{day}</label>)}</fieldset>
+            <div className="actions"><button className="primary" type="submit">Salvar alterações</button><button type="button" onClick={()=>setEditingTaskId(undefined)}>Cancelar</button></div>
+          </form>}
         </article>
       ))}
     </div>
@@ -4335,22 +4657,13 @@ function Tasks({
           >
             <Download size={16} /> Calendário
           </button>
-          <button
-            data-quick-focus
-            data-quick-expand="true"
-            className="primary"
-            aria-expanded={show}
-            onClick={() => setShow(!show)}
-          >
-            <Plus size={17} /> Tarefa
-          </button>
         </div>
       </div>
-      {show && (
+      {creating && (
         <QuickForm
           onSubmit={(fd) => {
             add(fd);
-            setShow(false);
+            onCreateDone();
           }}
           fields={[
             ["title", "Título", "text"],
@@ -4474,6 +4787,8 @@ function Config({
   connect,
   setMessage,
   mode = "all",
+  creatingAccount = false,
+  onAccountCreateDone,
 }: {
   data: FamilyData;
   setData: (d: FamilyData) => void;
@@ -4481,6 +4796,8 @@ function Config({
   connect: () => void;
   setMessage: (s: string) => void;
   mode?: "all" | "accounts" | "categories";
+  creatingAccount?: boolean;
+  onAccountCreateDone?: () => void;
 }) {
   const [editingAccountId, setEditingAccountId] = useState<string>();
   const restore = async (file?: File) => {
@@ -4587,17 +4904,19 @@ function Config({
             Informe somente o nome, o tipo e a combinação entre titular e uso.
             O reconhecimento das importações será preparado automaticamente.
           </p>
-          <form
+          {creatingAccount && <form
             className="account-form"
             onSubmit={(event) => {
               event.preventDefault();
-              if (addAccount(new FormData(event.currentTarget)))
+              if (addAccount(new FormData(event.currentTarget))) {
                 event.currentTarget.reset();
+                onAccountCreateDone?.();
+              }
             }}
           >
             <AccountFields />
             <button type="submit">Adicionar conta ou cartão</button>
-          </form>
+          </form>}
           <div className="list account-list">
             {!data.accounts.length && (
               <p className="empty">Nenhuma conta ou cartão cadastrado.</p>
@@ -4613,6 +4932,9 @@ function Config({
                   <div className="actions">
                     <button
                       type="button"
+                      className="icon-button"
+                      title={editingAccountId === account.id ? "Fechar edição" : "Editar conta"}
+                      aria-label={editingAccountId === account.id ? `Fechar edição de ${account.name}` : `Editar ${account.name}`}
                       aria-expanded={editingAccountId === account.id}
                       onClick={() =>
                         setEditingAccountId((current) =>
@@ -4620,7 +4942,7 @@ function Config({
                         )
                       }
                     >
-                      {editingAccountId === account.id ? "Fechar" : "Editar"}
+                      {editingAccountId === account.id ? <ChevronLeft size={18} /> : <Pencil size={18} />}
                     </button>
                     <button
                       type="button"
@@ -4769,13 +5091,15 @@ function CategoryEditor({
         <details key={c.id}>
           <summary>{c.name}</summary>
           <div className="actions">
-            <button onClick={() => rename(c.id, c.name)}>Renomear</button>
+            <button className="icon-button" title="Renomear categoria" aria-label={`Renomear ${c.name}`} onClick={() => rename(c.id, c.name)}><Pencil size={18}/></button>
             <button onClick={() => addSub(c.id)}>Adicionar subcategoria</button>
             <button
-              className="danger-button"
+              className="danger-button icon-button"
+              title="Excluir categoria"
+              aria-label={`Excluir ${c.name}`}
               onClick={() => removeCategory(c.id)}
             >
-              <Trash2 size={15} /> Excluir
+              <Trash2 size={18} />
             </button>
           </div>
           <div className="subcategories">
