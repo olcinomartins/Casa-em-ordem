@@ -37,6 +37,7 @@ import {
   ChevronLeft,
   ChevronUp,
   ChevronDown,
+  GripVertical,
 } from "lucide-react";
 import {
   Account,
@@ -4133,6 +4134,8 @@ function Budgets({
   onCreateDone: () => void;
 }) {
   const [editing, setEditing] = useState<Budget>();
+  const [draggingBudgetId, setDraggingBudgetId] = useState<string>();
+  const draggingBudgetIdRef = useRef<string>();
   const saveBudget = (form: FormData) => {
     const target = String(form.get("target"));
     const startMonth = String(form.get("startMonth"));
@@ -4179,22 +4182,35 @@ function Budgets({
       syncProvisionPool(draft);
     });
   };
-  const moveBudget = (id: string, direction: -1 | 1) =>
+  const moveBudget = (id: string, targetId: string) =>
     mutate((draft) => {
       const index = draft.budgets.findIndex((item) => item.id === id);
-      if (index < 0) return;
-      const indexes = draft.budgets
-        .map((item, itemIndex) => ({ item, itemIndex }))
-        .filter(({ item }) => item.kind === draft.budgets[index].kind)
-        .map(({ itemIndex }) => itemIndex);
-      const position = indexes.indexOf(index);
-      const nextIndex = indexes[position + direction];
-      if (nextIndex === undefined) return;
+      const nextIndex = draft.budgets.findIndex((item) => item.id === targetId);
+      if (index < 0 || nextIndex < 0 || index === nextIndex || draft.budgets[index].kind !== draft.budgets[nextIndex].kind) return;
       [draft.budgets[index], draft.budgets[nextIndex]] = [
         draft.budgets[nextIndex],
         draft.budgets[index],
       ];
     });
+  const startBudgetDrag = (event: React.PointerEvent<HTMLButtonElement>, id: string) => {
+    event.currentTarget.setPointerCapture(event.pointerId);
+    draggingBudgetIdRef.current = id;
+    setDraggingBudgetId(id);
+  };
+  const dragBudget = (event: React.PointerEvent<HTMLButtonElement>) => {
+    const sourceId = draggingBudgetIdRef.current;
+    if (!sourceId) return;
+    const target = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>("[data-budget-id]");
+    const targetId = target?.dataset.budgetId;
+    if (!targetId || targetId === sourceId) return;
+    moveBudget(sourceId, targetId);
+    draggingBudgetIdRef.current = targetId;
+    setDraggingBudgetId(targetId);
+  };
+  const endBudgetDrag = () => {
+    draggingBudgetIdRef.current = undefined;
+    setDraggingBudgetId(undefined);
+  };
   const label = (item: Budget) =>
     item.reason || (item.member
       ? `Pessoal — ${item.member}`
@@ -4210,115 +4226,41 @@ function Budgets({
     (sum, movement) => sum + movement.amount,
     0,
   ) || 0;
+  const budgetEditor = (item: Budget) => (
+    <form className="budget-form budget-inline-editor" onSubmit={(event) => { event.preventDefault(); saveBudget(new FormData(event.currentTarget)); }}>
+      <select name="target" required defaultValue={item.member ? `member:${item.member}` : item.categoryId ? `category:${item.categoryId}` : item.accountId ? `account:${item.accountId}` : ""}>
+        <option value="">Categoria, conta ou pessoa</option>
+        <optgroup label="Orçamentos pessoais"><option value="member:Olcino">Pessoal — Olcino</option><option value="member:Mari">Pessoal — Mari</option></optgroup>
+        <optgroup label="Categorias">{data.categories.filter((category) => category.nature === "expense").map((category) => <option key={category.id} value={`category:${category.id}`}>{category.name}</option>)}</optgroup>
+        <optgroup label="Contas e cartões">{data.accounts.map((account) => <option key={account.id} value={`account:${account.id}`}>{accountDisplayName(account)}</option>)}</optgroup>
+      </select>
+      <MoneyInput name="amount" required placeholder="Valor mensal" defaultValue={item.amount} />
+      <label>Início<input name="startMonth" required type="month" defaultValue={item.startMonth || item.month || month} /></label>
+      <label>Fim opcional<input name="endMonth" type="month" defaultValue={item.endMonth || ""} /></label>
+      <input name="reason" placeholder="Observação" defaultValue={item.reason} />
+      <div className="actions"><button className="primary" type="submit">Salvar</button><button type="button" onClick={() => setEditing(undefined)}>Cancelar</button></div>
+    </form>
+  );
   const renderBudget = (item: Budget) => (
-    <div className="budget-item" key={item.id}>
-      <div>
-        <b>{label(item)}</b>
-        <small>{data.categories.find((category) => category.id === item.categoryId)?.name || "Sem categoria"} · {money(item.amount)} · {item.startMonth || item.month || "mensal contínuo"}</small>
+    <div className={`budget-entry${draggingBudgetId === item.id ? " is-dragging" : ""}`} key={item.id} data-budget-id={item.id}>
+      <div className="budget-item">
+        <div>
+          <b>{label(item)}</b>
+          <small>{data.categories.find((category) => category.id === item.categoryId)?.name || "Sem categoria"} · {money(item.amount)} · {item.startMonth || item.month || "mensal contínuo"}</small>
+        </div>
+        <div className="actions">
+          <button className="icon-button drag-handle" title="Pressione e arraste para ordenar" aria-label={`Arrastar ${label(item)} para ordenar`} onPointerDown={(event) => startBudgetDrag(event, item.id)} onPointerMove={dragBudget} onPointerUp={endBudgetDrag} onPointerCancel={endBudgetDrag}><GripVertical size={18} /></button>
+          <button className="icon-button" title="Editar orçamento" aria-label={`Editar ${label(item)}`} onClick={() => setEditing(editing?.id === item.id ? undefined : item)}><Pencil size={18} /></button>
+          <button className="icon-button danger-button" title="Excluir orçamento" aria-label={`Excluir ${label(item)}`} onClick={() => remove(item.id)}><Trash2 size={15} /></button>
+        </div>
       </div>
-      <div className="actions">
-        <button className="icon-button" title="Mover para cima" aria-label={`Mover ${label(item)} para cima`} onClick={() => moveBudget(item.id, -1)}><ChevronUp size={16} /></button>
-        <button className="icon-button" title="Mover para baixo" aria-label={`Mover ${label(item)} para baixo`} onClick={() => moveBudget(item.id, 1)}><ChevronDown size={16} /></button>
-        <button className="icon-button" title="Editar orçamento" aria-label={`Editar ${label(item)}`} onClick={() => setEditing(item)}><Pencil size={18} /></button>
-        <button className="icon-button danger-button" title="Excluir orçamento" aria-label={`Excluir ${label(item)}`} onClick={() => remove(item.id)}><Trash2 size={15} /></button>
-      </div>
+      {editing?.id === item.id && budgetEditor(item)}
     </div>
   );
   return (
     <>
       {creating && <UnifiedPlanForm data={data} mutate={mutate} onDone={onCreateDone} />}
-      <section className="grid two">
-        {editing && <div className="panel">
-          <h2>
-            {editing ? "Editar orçamento" : "Novo orçamento com vigência"}
-          </h2>
-          <form
-            className="budget-form"
-            onSubmit={(event) => {
-              event.preventDefault();
-              saveBudget(new FormData(event.currentTarget));
-              event.currentTarget.reset();
-            }}
-          >
-            <select
-              name="target"
-              required
-              defaultValue={
-                editing?.member
-                  ? `member:${editing.member}`
-                  : editing?.categoryId
-                    ? `category:${editing.categoryId}`
-                    : editing?.accountId
-                      ? `account:${editing.accountId}`
-                      : ""
-              }
-            >
-              <option value="">Categoria, conta ou pessoa</option>
-              <optgroup label="Orçamentos pessoais">
-                <option value="member:Olcino">Pessoal — Olcino</option>
-                <option value="member:Mari">Pessoal — Mari</option>
-              </optgroup>
-              <optgroup label="Categorias">
-                {data.categories
-                  .filter((c) => c.nature === "expense")
-                  .map((c) => (
-                    <option key={c.id} value={`category:${c.id}`}>
-                      {c.name}
-                    </option>
-                  ))}
-              </optgroup>
-              <optgroup label="Contas e cartões">
-                {data.accounts.map((a) => (
-                  <option key={a.id} value={`account:${a.id}`}>
-                    {a.name}
-                  </option>
-                ))}
-              </optgroup>
-            </select>
-            <MoneyInput
-              key={editing?.id || data.budgets.length}
-              name="amount"
-              required
-              placeholder="Valor mensal"
-              defaultValue={editing?.amount}
-            />
-            <label>
-              Início
-              <input
-                name="startMonth"
-                required
-                type="month"
-                defaultValue={editing?.startMonth || editing?.month || month}
-              />
-            </label>
-            <label>
-              Fim opcional
-              <input
-                name="endMonth"
-                type="month"
-                defaultValue={editing?.endMonth || ""}
-              />
-            </label>
-            <input
-              name="reason"
-              placeholder="Observação"
-              defaultValue={editing?.reason}
-            />
-            <div className="actions">
-              <button className="primary" type="submit">
-                {editing ? "Salvar alteração" : "Criar orçamento"}
-              </button>
-              {editing && (
-                <button type="button" onClick={() => setEditing(undefined)}>
-                  Cancelar
-                </button>
-              )}
-            </div>
-          </form>
-          <p className="muted">
-            Sem mês final, o valor se repete indefinidamente.
-          </p>
-        </div>}
+      <section className="grid">
         <div>
           <section className="panel">
             <h2>Orçamentos cadastrados</h2>

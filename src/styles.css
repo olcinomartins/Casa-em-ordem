@@ -1129,6 +1129,19 @@ code {
   border-bottom: 1px solid #eee;
   padding: 0.75rem 0;
 }
+.budget-entry { border-bottom: 1px solid #eee; }
+.budget-entry:last-child { border-bottom: 0; }
+.budget-entry .budget-item { border-bottom: 0; }
+.budget-inline-editor {
+  margin: 0 0 .7rem;
+  padding: .75rem;
+  background: #f8faf7;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.drag-handle { cursor: grab; touch-action: none; }
+.drag-handle:active, .budget-entry.is-dragging .drag-handle { cursor: grabbing; }
+.budget-entry.is-dragging { opacity: .72; }
 .budget-item small {
   display: block;
   color: #718078;
@@ -1742,19 +1755,17 @@ button.attention-item { justify-content: initial; }
     gap: .45rem;
     padding: .6rem 0;
   }
-  .budget-item > .actions,
-  .goal-actions {
+  .budget-item > .actions {
     display: grid;
-    grid-template-columns: 38px;
+    grid-template-columns: repeat(3, 34px);
     gap: .3rem;
-    width: 38px;
+    width: auto;
   }
-  .budget-item > .actions button,
-  .goal-actions button {
-    width: 38px;
-    min-width: 38px;
-    min-height: 38px;
-    padding: .4rem;
+  .budget-item > .actions button {
+    width: 34px;
+    min-width: 34px;
+    min-height: 34px;
+    padding: .3rem;
   }
   .account-row {
     display: grid;
