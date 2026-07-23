@@ -1650,7 +1650,7 @@ function QuickActions({
                     <label>Local<input value={receiptDraft.estabelecimento || ""} onChange={(event)=>setReceiptDraft({...receiptDraft, estabelecimento:event.target.value})}/></label>
                     <label>Data<input type="date" value={receiptDraft.data || ""} onChange={(event)=>setReceiptDraft({...receiptDraft, data:event.target.value})}/></label>
                     <label>Valor<CurrencyInput value={Number(receiptDraft.total)||0} onChange={(value)=>setReceiptDraft({...receiptDraft,total:value})}/></label>
-                    <label>Conta ou cartão<select value={accountId} onChange={(event)=>setAccountId(event.target.value)}>{activeAccounts.map(account=><option key={account.id} value={account.id}>{account.name}</option>)}</select></label>
+                    <label>Conta ou cartão<select value={accountId} onChange={(event)=>setAccountId(event.target.value)}>{activeAccounts.map(account=><option key={account.id} value={account.id}>{accountDisplayName(account)}</option>)}</select></label>
                   </div>
                   <p className="muted">A nota será salva no Mercado e incluída como prévia de saída no mês.</p>
                   <button className="primary quick-expense-save" onClick={saveQuickReceipt}>Confirmar nota</button>
@@ -1807,7 +1807,7 @@ function QuickActions({
                     <option value="">Selecione</option>
                     {activeAccounts.map((account) => (
                       <option key={account.id} value={account.id}>
-                        {account.name}
+                        {accountDisplayName(account)}
                       </option>
                     ))}
                   </select>
@@ -2707,6 +2707,19 @@ const initialChores = [
   "Passear com a cachorra",
   "Colocar comida para a cachorra",
   "Cozinhar",
+];
+const setupTasks = [
+  "Definir orçamentos e metas mensais por categoria",
+  "Cadastrar as contas com suas funções de uso",
+  "Cadastrar as categorias",
+  "Cadastrar os orçamentos",
+  "Cadastrar as metas",
+  "Cadastrar os pagamentos nas datas",
+  "Começar a registrar os gastos",
+];
+const bonusSetupTasks = [
+  "Bônus: cadastrar as responsabilidades do casal",
+  "Bônus: utilizar a lista de compras e o leitor de nota fiscal",
 ];
 function Chores({
   data,
@@ -3685,7 +3698,7 @@ function VoiceExpense({
           </select>
           <select value={draft.categoriaSugerida||""} onChange={e=>setDraft({...draft,categoriaSugerida:e.target.value,subcategoriaSugerida:data.categories.find(c=>c.name===e.target.value)?.subcategories[0]})}><option value="">Selecione a categoria</option>{data.categories.map(category=><option key={category.id} value={category.name}>{category.name}</option>)}</select>
           <select value={draft.subcategoriaSugerida||""} onChange={e=>setDraft({...draft,subcategoriaSugerida:e.target.value})}><option value="">Selecione a subcategoria</option>{data.categories.find(category=>category.name===draft.categoriaSugerida)?.subcategories.map(subcategory=><option key={subcategory}>{subcategory}</option>)}</select>
-          <select value={draft.contaOuCartaoSugerido||""} onChange={e=>setDraft({...draft,contaOuCartaoSugerido:e.target.value})}><option value="">Selecione a conta ou cartão</option>{data.accounts.filter(account=>account.active).map(account=><option key={account.id} value={account.name}>{account.name}</option>)}</select>
+          <select value={draft.contaOuCartaoSugerido||""} onChange={e=>setDraft({...draft,contaOuCartaoSugerido:e.target.value})}><option value="">Selecione a conta ou cartão</option>{data.accounts.filter(account=>account.active).map(account=><option key={account.id} value={account.name}>{accountDisplayName(account)}</option>)}</select>
           <select value={draft.responsavelSugerido||currentMember} onChange={e=>setDraft({...draft,responsavelSugerido:e.target.value})}><option>Olcino</option><option>Mari</option><option>Ambos</option></select>
           <select value={draft.escopoSugerido||"Familiar"} onChange={e=>setDraft({...draft,escopoSugerido:e.target.value})}><option>Familiar</option><option>Pessoal — Olcino</option><option>Pessoal — Mari</option><option>Transferência interna</option><option>Fora do orçamento</option></select>
           <button className="primary" onClick={save}>
@@ -4042,7 +4055,7 @@ function Transactions({
               <div className="tx-core-fields"><input type="date" value={t.date} onChange={e=>update(t.id,{date:e.target.value,paymentDate:e.target.value,competence:monthOf(e.target.value)})}/>{hideValues ? <span className="hidden-input"><HiddenValue /></span> : <CurrencyInput value={Math.abs(t.amount)} onChange={value=>update(t.id,{amount:t.amount<0?-Math.abs(value):Math.abs(value)})}/>}</div>
               <small>{t.estimated?`Estimativa ${t.estimateOrigin==="manual"?"manual":"por voz"} · `:""}{t.classification==="confirmed"?"Confirmado":"Em revisão"}</small>
             </div>
-            <select value={t.accountId} onChange={e=>update(t.id,{accountId:e.target.value})}>{data.accounts.filter(account=>account.active).map(account=><option key={account.id} value={account.id}>{account.name}</option>)}</select>
+            <select value={t.accountId} onChange={e=>update(t.id,{accountId:e.target.value})}>{data.accounts.filter(account=>account.active).map(account=><option key={account.id} value={account.id}>{accountDisplayName(account)}</option>)}</select>
             <select value={t.operator} onChange={e=>update(t.id,{operator:e.target.value as Member})}><option>Olcino</option><option>Mari</option><option>Ambos</option></select>
             <select
               value={t.categoryId || ""}
@@ -4335,6 +4348,8 @@ function UnifiedPlanForm({
   onDone: () => void;
 }) {
   const [categoryId, setCategoryId] = useState("");
+  const [newCategoryName, setNewCategoryName] = useState("");
+  const [newSubcategory, setNewSubcategory] = useState("");
   const category = data.categories.find((item) => item.id === categoryId);
   const submit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -4344,16 +4359,29 @@ function UnifiedPlanForm({
     const type = String(form.get("type") || "budget") as "budget" | "provision" | "goal";
     const startDate = String(form.get("startDate") || "");
     const endDate = String(form.get("endDate") || "");
-    const subcategory = String(form.get("subcategory") || "") || undefined;
-    if (!name || !categoryId || !startDate || amount <= 0)
+    const selectedSubcategory = String(form.get("subcategory") || "");
+    const subcategory = newSubcategory.trim() || selectedSubcategory || undefined;
+    if (!name || !categoryId || !startDate || amount <= 0 || (categoryId === "__new__" && !newCategoryName.trim()))
       return alert("Informe nome, valor, categoria e data de início.");
     if (endDate && endDate < startDate)
       return alert("A data de fim não pode ser anterior à data de início.");
     mutate((draft) => {
+      let resolvedCategoryId = categoryId;
+      if (categoryId === "__new__") {
+        const existingCategory = draft.categories.find((item) => normalize(item.name) === normalize(newCategoryName));
+        const resolvedCategory = existingCategory || {
+          ...audit(), name: newCategoryName.trim(), nature: "expense" as const, subcategories: [],
+        };
+        if (!existingCategory) draft.categories.push(resolvedCategory);
+        resolvedCategoryId = resolvedCategory.id;
+      }
+      const resolvedCategory = draft.categories.find((item) => item.id === resolvedCategoryId)!;
+      if (subcategory && !resolvedCategory.subcategories.some((item) => normalize(item) === normalize(subcategory)))
+        resolvedCategory.subcategories.push(subcategory);
       if (type === "goal") {
         draft.goals.push({
           ...audit(), name, kind: "desire", target: amount, startDate,
-          deadline: endDate, categoryId, subcategory,
+          deadline: endDate, categoryId: resolvedCategoryId, subcategory,
           priority: draft.goals.length + 1, minimum: 0, emergency: false,
           active: true, movements: [],
         });
@@ -4363,7 +4391,7 @@ function UnifiedPlanForm({
         ...audit(), reason: name, amount,
         month: startDate.slice(0, 7), startMonth: startDate.slice(0, 7),
         endMonth: endDate ? endDate.slice(0, 7) : undefined,
-        kind: type, categoryId, subcategory,
+        kind: type, categoryId: resolvedCategoryId, subcategory,
       });
       syncProvisionPool(draft);
     });
@@ -4375,8 +4403,10 @@ function UnifiedPlanForm({
       <form className="budget-form" onSubmit={submit}>
         <label>Nome<input name="name" required autoFocus placeholder="Nome" /></label>
         <label>Valor<MoneyInput name="amount" required placeholder="R$ 0,00" /></label>
-        <label>Categoria<select name="categoryId" value={categoryId} required onChange={(event) => setCategoryId(event.target.value)}><option value="">Selecione</option>{data.categories.filter((item) => item.nature === "expense").map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+        <label>Categoria<select name="categoryId" value={categoryId} required onChange={(event) => setCategoryId(event.target.value)}><option value="">Selecione</option>{data.categories.filter((item) => item.nature === "expense").map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}<option value="__new__">Criar categoria agora</option></select></label>
+        {categoryId === "__new__" && <label>Nova categoria<input value={newCategoryName} required autoFocus placeholder="Ex.: Alimentação" onChange={(event) => setNewCategoryName(event.target.value)} /></label>}
         <label>Subcategoria<select name="subcategory"><option value="">Sem subcategoria</option>{category?.subcategories.map((item) => <option key={item}>{item}</option>)}</select></label>
+        <label>Nova subcategoria<input value={newSubcategory} placeholder="Criar junto com o planejamento" onChange={(event) => setNewSubcategory(event.target.value)} /></label>
         <label>Data de início<input name="startDate" type="date" required defaultValue={dateOnly(new Date())} /></label>
         <label>Data de fim<input name="endDate" type="date" /></label>
         <label>Tipo<select name="type" defaultValue="budget"><option value="budget">Orçamento mensal</option><option value="provision">Provisão mensal</option><option value="goal">Meta</option></select></label>
@@ -4513,7 +4543,7 @@ function Payments({
                 <option value="semiannual">Semestral</option>
                 <option value="yearly">Anual</option>
               </select>
-              <select name="accountId"><option value="">Conta do pagamento</option>{data.accounts.filter(account=>account.active).map(account=><option key={account.id} value={account.id}>{account.name}</option>)}</select>
+              <select name="accountId"><option value="">Conta do pagamento</option>{data.accounts.filter(account=>account.active).map(account=><option key={account.id} value={account.id}>{accountDisplayName(account)}</option>)}</select>
               <select name="categoryId"><option value="">Categoria da despesa</option>{data.categories.filter(category=>category.nature==="expense").map(category=><option key={category.id} value={category.id}>{category.name}</option>)}</select>
             </>
           }
@@ -4567,7 +4597,7 @@ function Payments({
                     <label>Dia do pagamento<input name="dueDay" type="number" inputMode="numeric" min="1" max="31" required defaultValue={Number(o.dueDate.slice(8,10)) || 10} /></label>
                     <select name="kind" defaultValue={o.kind}><option>Manual</option><option>Débito automático</option><option>Recorrência no cartão</option><option>Assinatura</option><option>Parcela</option><option>Variável</option><option>Eventual</option></select>
                     <select name="repeat" defaultValue={o.recurrence}><option value="none">Sem repetição</option><option value="monthly">Mensal</option><option value="quarterly">Trimestral</option><option value="semiannual">Semestral</option><option value="yearly">Anual</option></select>
-                    <select name="accountId" defaultValue={o.accountId || ""}><option value="">Conta do pagamento</option>{data.accounts.filter(account=>account.active).map(account=><option key={account.id} value={account.id}>{account.name}</option>)}</select>
+                    <select name="accountId" defaultValue={o.accountId || ""}><option value="">Conta do pagamento</option>{data.accounts.filter(account=>account.active).map(account=><option key={account.id} value={account.id}>{accountDisplayName(account)}</option>)}</select>
                     <select name="categoryId" defaultValue={o.categoryId || ""}><option value="">Categoria da despesa</option>{data.categories.filter(category=>category.nature==="expense").map(category=><option key={category.id} value={category.id}>{category.name}</option>)}</select>
                     <input name="subcategory" defaultValue={o.subcategory || ""} placeholder="Subcategoria" />
                     <input name="pattern" defaultValue={o.pattern || ""} placeholder="Padrão para conciliação" />
@@ -4825,6 +4855,27 @@ function Tasks({
         });
       }
       d.chores = [];
+      if (!d.setupTasksInitialized) {
+        const start = new Date();
+        [...setupTasks, ...bonusSetupTasks].forEach((title, index) => {
+          if (existing.has(normalize(title))) return;
+          const due = new Date(start);
+          due.setMinutes(due.getMinutes() + index);
+          d.tasks.push({
+            ...audit(),
+            title,
+            assignee: "Ambos",
+            due: due.toISOString(),
+            priority: index < setupTasks.length ? "Alta" : "Baixa",
+            status: "Pendente",
+            repeat: "none",
+            shift: "Livre",
+            checklist: [],
+            history: [],
+          });
+        });
+        d.setupTasksInitialized = true;
+      }
     });
   }, []);
   const add = (fd: FormData) =>
@@ -5033,6 +5084,12 @@ function Tasks({
   );
 }
 
+function accountDisplayName(account: Account) {
+  return account.functionalName?.trim()
+    ? `${account.functionalName.trim()} — ${account.name}`
+    : account.name;
+}
+
 function AccountFields({ account }: { account?: Account }) {
   const supportedKind =
     account && ["checking", "card", "investment"].includes(account.kind)
@@ -5050,6 +5107,16 @@ function AccountFields({ account }: { account?: Account }) {
           autoComplete="off"
         />
         <small>Use: instituição, número ou identificação da conta/cartão.</small>
+      </label>
+      <label className="field">
+        <span>Nome funcional</span>
+        <input
+          name="functionalName"
+          defaultValue={account?.functionalName || ""}
+          placeholder="Ex.: mercado e despesas da casa"
+          autoComplete="off"
+        />
+        <small>Explica para que esta conta ou cartão será usada e aparece nas seleções.</small>
       </label>
       <label className="field">
         <span>Tipo de conta</span>
@@ -5121,6 +5188,7 @@ function Config({
   };
   const readAccountForm = (fd: FormData, editingId?: string) => {
     const name = String(fd.get("name") || "").trim();
+    const functionalName = String(fd.get("functionalName") || "").trim() || undefined;
     if (!name) throw new Error("Informe o nome da conta ou cartão.");
     if (
       data.accounts.some(
@@ -5141,6 +5209,7 @@ function Config({
     );
     return {
       name,
+      functionalName,
       kind,
       ...ownership,
       institution:
@@ -5245,6 +5314,7 @@ function Config({
                 <div className="row editable-row account-row">
                   <div>
                     <b>{account.name}</b>
+                    {account.functionalName && <small>{account.functionalName}</small>}
                     <small>{accountKindLabel(account.kind)}</small>
                     <small>{accountResponsibilityLabel(account)}</small>
                   </div>
@@ -5638,7 +5708,7 @@ function Analytics({
           <option value="all">Todas as contas e cartões</option>
           {data.accounts.map((account) => (
             <option key={account.id} value={account.id}>
-              {account.name}
+              {accountDisplayName(account)}
             </option>
           ))}
         </select>

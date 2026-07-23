@@ -21,6 +21,8 @@ export interface Category extends Audit {
 }
 export interface Account extends Audit {
   name: string;
+  /** Nome curto que explica a função no planejamento, exibido nos seletores. */
+  functionalName?: string;
   institution: string;
   kind: "checking" | "card" | "investment" | "cash";
   /** Titular legal. Opcional apenas para bases criadas antes deste campo. */
@@ -191,6 +193,8 @@ export interface FamilyData {
   receipts?: Receipt[];
   shoppingList?: ShoppingListItem[];
   chores?: Chore[];
+  /** Evita recriar as tarefas guiadas caso o casal as exclua depois. */
+  setupTasksInitialized?: boolean;
   lastSavedAt: string;
 }
 export const uid = () => crypto.randomUUID();
