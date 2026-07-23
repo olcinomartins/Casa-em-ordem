@@ -24,6 +24,7 @@ const msal = clientId
 let etag: string | undefined;
 let knownMissing = false;
 const scopes = ["Files.ReadWrite", "User.Read"];
+const rememberedAccountKey = "casa-em-ordem-microsoft-account";
 const ownPath = "/me/drive/root:/Casa em ordem/CasaEmOrdem-familia.json:/content";
 const familyShareUrl = "https://1drv.ms/u/c/f55991dc870e2ff6/IQDzSgFJjs81SZM-o0Azn3oDAVCzNszRi85T6rrUrVVjMzs?e=QUS2Jl";
 export interface CloudLocation {
@@ -116,12 +117,48 @@ async function prepareAuth() {
   await redirectHandling;
 }
 
+const rememberedLoginHint = () => {
+  try {
+    return localStorage.getItem(rememberedAccountKey) || undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+const rememberAccount = (account: AccountInfo) => {
+  try {
+    localStorage.setItem(rememberedAccountKey, account.username);
+  } catch {
+    // O app continua funcionando mesmo se o navegador bloquear o armazenamento.
+  }
+};
+
+const activateAccount = (account: AccountInfo) => {
+  msal!.setActiveAccount(account);
+  rememberAccount(account);
+  return account;
+};
+
 export async function resumeSignIn(): Promise<AccountInfo | undefined> {
   await prepareAuth();
   const result = await redirectHandling;
-  const account = (result as { account?: AccountInfo } | null)?.account || msal!.getActiveAccount() || msal!.getAllAccounts()[0];
-  if (account) msal!.setActiveAccount(account);
-  return account;
+  const account =
+    (result as { account?: AccountInfo } | null)?.account ||
+    msal!.getActiveAccount() ||
+    msal!.getAllAccounts()[0];
+  if (account) return activateAccount(account);
+
+  // Em uma abertura posterior, a conta pode ainda estar autenticada na
+  // Microsoft, mas o cache do aplicativo ter sido descartado pelo Safari/PWA.
+  // Tentamos restaurá-la sem abrir tela nem pedir e-mail novamente.
+  const loginHint = rememberedLoginHint();
+  if (!loginHint) return undefined;
+  try {
+    const silent = await msal!.ssoSilent({ scopes, loginHint });
+    return activateAccount(silent.account);
+  } catch {
+    return undefined;
+  }
 }
 
 async function acquireToken() {
@@ -131,7 +168,7 @@ async function acquireToken() {
     await msal!.loginRedirect({
       scopes,
       redirectStartPage: location.href,
-      prompt: "select_account",
+      loginHint: rememberedLoginHint(),
     });
     throw new Error("Redirecionando para a Microsoft…");
   }
@@ -155,11 +192,11 @@ export async function getMicrosoftAccessToken() { return token(); }
 export async function signIn(): Promise<AccountInfo> {
   await prepareAuth();
   const account = msal!.getActiveAccount() || msal!.getAllAccounts()[0];
-  if (account) { msal!.setActiveAccount(account); return account; }
+  if (account) return activateAccount(account);
   await msal!.loginRedirect({
     scopes,
     redirectStartPage: location.href,
-    prompt: "select_account",
+    loginHint: rememberedLoginHint(),
   });
   throw new Error("Redirecionando para a Microsoft…");
 }
@@ -380,6 +417,11 @@ export function saveCloud(data: FamilyData): Promise<void> {
   return result;
 }
 export async function signOut() {
+  try {
+    localStorage.removeItem(rememberedAccountKey);
+  } catch {
+    // Sem efeito: o logout Microsoft continua sendo concluído normalmente.
+  }
   if (msal) {
     await prepareAuth();
     const a = msal.getAllAccounts()[0];
