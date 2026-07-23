@@ -1711,12 +1711,17 @@ button.attention-item { justify-content: initial; }
   .shopping-product-name,
   .shopping-notes { grid-column: 1 / -1; }
   .shopping-list-item,
-  .shopping-suggestion { grid-template-columns: minmax(0, 1fr); }
+  .shopping-suggestion {
+    grid-template-columns: minmax(0, 1fr) 44px;
+    align-items: start;
+    gap: .65rem;
+  }
   .shopping-item-actions {
     display: grid;
-    grid-template-columns: repeat(3, 44px);
-    justify-content: end;
-    width: 100%;
+    grid-template-columns: 44px;
+    grid-template-rows: repeat(3, 44px);
+    width: 44px;
+    gap: .4rem;
   }
   .shopping-item-actions button { width: 44px; min-width: 44px; white-space: normal; }
   .shopping-item-actions .danger-button { width: 44px; padding: .65rem; }
@@ -1729,16 +1734,18 @@ button.attention-item { justify-content: initial; }
   .account-form { padding: .85rem; }
   .account-row {
     display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    gap: .75rem;
+    grid-template-columns: minmax(0, 1fr) 44px;
+    gap: .65rem;
     align-items: start;
   }
   .account-row > .actions {
-    width: 100%;
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 44px;
+    grid-template-columns: 44px;
+    grid-template-rows: repeat(2, 44px);
+    width: 44px;
+    gap: .4rem;
   }
-  .account-row > .actions button { width: 100%; }
+  .account-row > .actions button { width: 44px; min-width: 44px; }
   .account-form-actions {
     width: 100%;
     display: grid;
@@ -1747,8 +1754,8 @@ button.attention-item { justify-content: initial; }
   .account-form-actions button { width: 100%; }
   .product-catalog .editable-row {
     display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    gap: .7rem;
+    grid-template-columns: minmax(0, 1fr) 52px;
+    gap: .65rem;
   }
   .confirmed-purchase-row {
     display: grid;
@@ -1765,11 +1772,13 @@ button.attention-item { justify-content: initial; }
   .confirmed-purchase-row > .actions button { width: 100%; min-width: 0; white-space: normal; }
   .confirmed-purchase-row > .actions .danger-button { width: 44px; padding: .65rem; }
   .product-catalog .editable-row > .actions {
-    width: 100%;
+    width: 52px;
     max-width: none;
-    align-items: stretch;
+    align-items: center;
+    gap: .35rem;
   }
-  .product-catalog .editable-row > .actions span { text-align: left; }
+  .product-catalog .editable-row > .actions span { text-align: center; font-size: .7rem; }
+  .product-catalog .editable-row > .actions button { width: 44px; min-width: 44px; }
   .product-occurrences { padding: .7rem; }
   .product-occurrence-edit { grid-template-columns: minmax(0, 1fr); padding: .8rem; }
   .product-occurrence-edit .occurrence-context,
@@ -1808,6 +1817,6 @@ button.attention-item { justify-content: initial; }
   .shopping-fields { grid-template-columns: minmax(0, 1fr); }
   .shopping-product-name,
   .shopping-notes { grid-column: 1; }
-  .shopping-item-actions { grid-template-columns: repeat(3, 44px); }
+  .shopping-item-actions { grid-template-columns: 44px; }
   .shopping-item-actions > button:first-child { grid-column: auto; }
 }
