@@ -1128,6 +1128,9 @@ function QuickActions({
   );
   const [saving, setSaving] = useState(false);
   const [showVoice, setShowVoice] = useState(false);
+  const [receiptOrigin, setReceiptOrigin] = useState<"expense" | "market">(
+    "market",
+  );
   const [receiptDraft, setReceiptDraft] = useState<ReadReceipt>();
   const [receiptBusy, setReceiptBusy] = useState(false);
   const [dialogError, setDialogError] = useState("");
@@ -1176,8 +1179,12 @@ function QuickActions({
   };
   const back = () => {
     setDialogError("");
+    if (mode === "receipt") {
+      setMode(receiptOrigin === "expense" ? "expense" : "market");
+      return;
+    }
     if (["expense", "goal-movement", "task", "payment", "import", "receipt", "shopping", "category", "plan", "account"].includes(mode))
-      setMode(mode === "expense" || mode === "goal-movement" ? "transaction-menu" : mode === "task" || mode === "payment" ? "responsibility" : mode === "receipt" || mode === "shopping" ? "market" : "registration");
+      setMode(mode === "expense" || mode === "goal-movement" ? "transaction-menu" : mode === "task" || mode === "payment" ? "responsibility" : mode === "shopping" ? "market" : "registration");
     else setMode("menu");
   };
 
@@ -1552,11 +1559,11 @@ function QuickActions({
               </div>
             ) : mode === "transaction-menu" ? (
               <div className="quick-action-grid">
-                <button onClick={() => setMode("goal-movement")}>
-                  <PiggyBank size={22} /><span><b>Aporte/Retirada em meta</b><small>Movimentar uma meta</small></span>
-                </button>
                 <button className="quick-action-primary" onClick={() => setMode("expense")}>
                   <TrendingDown size={22} /><span><b>Saída/Entrada</b><small>Registrar valor</small></span>
+                </button>
+                <button onClick={() => setMode("goal-movement")}>
+                  <PiggyBank size={22} /><span><b>Aporte/Retirada em meta</b><small>Movimentar uma meta</small></span>
                 </button>
                 <button onClick={() => setMode("import")}>
                   <Upload size={22} /><span><b>Extrato/Fatura</b><small>Importar arquivo</small></span>
@@ -1564,11 +1571,11 @@ function QuickActions({
               </div>
             ) : mode === "market" ? (
               <div className="quick-action-grid">
-                <button onClick={() => setMode("receipt")}>
+                <button onClick={() => { setReceiptOrigin("market"); setMode("receipt"); }}>
                   <Camera size={22} /><span><b>Nota</b><small>Fotografar ou escolher foto</small></span>
                 </button>
                 <button onClick={() => setMode("shopping")}>
-                  <Mic size={22} /><span><b>Comprar</b><small>Adicionar por voz ou texto</small></span>
+                  <Mic size={22} /><span><b>Compra</b><small>Adicionar por voz ou texto</small></span>
                 </button>
               </div>
             ) : mode === "goal-movement" ? (
@@ -1653,7 +1660,7 @@ function QuickActions({
                 </p>
                 <div className="quick-entry-tools">
                   <button type="button" onClick={() => setShowVoice((value) => !value)}><Mic size={17}/> Registrar falando</button>
-                  <button type="button" onClick={() => setMode("receipt")}><Camera size={17}/> Ler nota</button>
+                  <button type="button" onClick={() => { setReceiptOrigin("expense"); setMode("receipt"); }}><Camera size={17}/> Ler nota</button>
                 </div>
                 {showVoice && <VoiceExpense data={data} mutate={mutate} setMessage={setMessage} currentMember={currentMember}/>}
                 <label>

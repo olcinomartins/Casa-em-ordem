@@ -1800,7 +1800,7 @@ button.attention-item { justify-content: initial; }
   header .period input { width: 100%; }
   header .period .privacy-toggle { width: 48px; padding: .65rem; }
   header .period > button:not(.privacy-toggle) { grid-column: 1 / -1; width: 100%; }
-  .quick-action-grid { grid-template-columns: minmax(0, 1fr); }
+  .quick-action-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .quick-action-grid > button { min-height: 62px; }
   .quick-expense-row { grid-template-columns: minmax(0, 1fr); }
   .shopping-fields { grid-template-columns: minmax(0, 1fr); }
