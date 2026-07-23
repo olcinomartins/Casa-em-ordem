@@ -12,12 +12,26 @@ if (!workbookPath || !databasePath || !["--dry-run", "--apply"].includes(mode)) 
 }
 
 const now = new Date().toISOString();
+const importMonth = now.slice(0, 7);
 const fileName = path.basename(workbookPath);
 const sheetName = "Orcamento_Mestre";
 const normalize = (value) => String(value ?? "")
   .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
   .trim().replace(/\s+/g, " ").toLocaleLowerCase("pt-BR");
 const slug = (value) => normalize(value).replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+const paymentKey = (value) => normalize(value)
+  .replace(/\b(e|de|da|do|dos|das)\b/g, " ")
+  .replace(/[^a-z0-9]+/g, "");
+const paymentHolder = (item) => {
+  const explicit = normalize(item.holder || "");
+  if (explicit) return explicit.includes("mariana") || explicit.includes("mari") ? "mariana" : explicit.includes("jose") || explicit.includes("olcino") ? "jose" : explicit;
+  const name = normalize(item.name);
+  return name.includes("mari") ? "mariana" : name.includes("olcino") || name.includes("jose") ? "jose" : "";
+};
+const rowHolder = (holder) => {
+  const value = normalize(holder);
+  return value.includes("mariana") || value.includes("mari") ? "mariana" : value.includes("jose") || value.includes("olcino") ? "jose" : value;
+};
 const money = (value) => Math.round((Math.abs(Number(value) || 0) + Number.EPSILON) * 100) / 100;
 const audit = (id) => ({ id, createdAt: now, updatedAt: now, updatedBy: "Ambos", version: 1 });
 const source = (row, originalName) => ({
@@ -71,11 +85,13 @@ function importPlanning(data, rows) {
   const report = {
     mode,
     categories: { created: [], reused: [] },
+    budgets: { created: [], updated: [] },
     goals: { created: [], updated: [] },
     provisions: { created: [], updated: [] },
+    payments: { created: [], updated: [], assumedDayOne: [] },
     ignored: [], pendingReview: [], conflicts: [], totals: { goals: 0, provisions: 0 },
   };
-  const unchanged = ["accounts", "transactions", "obligations", "rules", "imports", "tasks", "receipts", "shoppingList", "chores"]
+  const unchanged = ["accounts", "transactions", "rules", "imports", "tasks", "receipts", "shoppingList", "chores"]
     .map((key) => [key, JSON.stringify(data[key] ?? [])]);
   const categories = new Map(data.categories.map((item) => [normalize(item.name), item]));
 
@@ -98,7 +114,7 @@ function importPlanning(data, rows) {
 
   for (const row of rows) {
     const classification = normalize(row.classification);
-    if (classification !== classificationGoal && classification !== classificationProvision) {
+    if (classification !== classificationGoal && classification !== classificationProvision && classification !== "contas a pagar mensal") {
       report.ignored.push({ line: row.line, classification: row.classification, reason: "Fora do escopo" });
       continue;
     }
@@ -109,13 +125,75 @@ function importPlanning(data, rows) {
       continue;
     }
     const needsReview = normalize(row.status) === "a validar";
+    if (classification === "contas a pagar mensal") {
+      const normalizedPaymentName = normalize(name);
+      const key = paymentKey(name);
+      const holderKey = rowHolder(row.holder);
+      const existing = data.obligations.find((item) => {
+        const normalizedExistingName = normalize(item.name);
+        const existingHolder = paymentHolder(item);
+        const sameHolder = !holderKey || !existingHolder || existingHolder === holderKey;
+        return item.id === `payment:${slug(row.category)}:${slug(name)}:${slug(row.holder || "casal")}` ||
+          (sameHolder && (normalizedExistingName === normalizedPaymentName ||
+          paymentKey(item.name) === key ||
+          paymentKey(item.name).startsWith(key) ||
+          key.startsWith(paymentKey(item.name))));
+      });
+      const priorDay = Number(String(existing?.dueDate || "").slice(8, 10));
+      const dueDay = Number(row.dueDay) || priorDay || 1;
+      const assumedDayOne = !row.dueDay && !priorDay;
+      const dueDate = `${importMonth}-${String(dueDay).padStart(2, "0")}`;
+      const item = existing || { ...audit(`payment:${slug(row.category)}:${slug(name)}:${slug(row.holder || "casal")}`) };
+      Object.assign(item, {
+        name, kind: "Manual", planned: money(row.value), dueDate, recurrence: "monthly", tolerance: 0,
+        categoryId: category.id, subcategory: undefined, status: "Prevista", holder: row.holder,
+        channel: row.channel, frequency: row.frequency, period: importMonth,
+        needsReview: needsReview || assumedDayOne, dueDateEstimated: assumedDayOne,
+        action: row.action || undefined, importMetadata: source(row.line, row.name),
+        updatedAt: now, updatedBy: "Ambos", version: (existing?.version || 0) + 1,
+      });
+      if (!existing) data.obligations.push(item);
+      report.payments[existing ? "updated" : "created"].push(name);
+      if (assumedDayOne) {
+        report.payments.assumedDayOne.push(name);
+        report.pendingReview.push({ line: row.line, type: "pagamento", name, reason: "Dia 1 usado provisoriamente: confirme o vencimento" });
+      }
+      // Consolidate duplicates that were created before the importer learned
+      // that "Aluguel, IPTU e Condomínio" and "Aluguel + IPTU + condomínio"
+      // describe the same monthly obligation.
+      data.obligations = data.obligations.filter((candidate) =>
+        candidate === item || paymentKey(candidate.name) !== key ||
+        (holderKey && paymentHolder(candidate) && paymentHolder(candidate) !== holderKey),
+      );
+      continue;
+    }
     if (classification === classificationGoal) {
       const id = `goal:${slug(row.category)}:${slug(name)}:${slug(row.holder || "casal")}`;
+      const objectiveNames = new Set(["reserva-de-emergencia-aposentadoria", "reserva-maternidade", "viagem-para-eua", "viagem-para-natal"]);
+      const isGoal = objectiveNames.has(slug(name));
       const value = normalize(name) === "multas de transito meta zero" ? 0 : money(row.value);
+      if (!isGoal) {
+        const budgetId = `budget:${slug(row.category)}:${slug(name)}:${slug(row.holder || "casal")}`;
+        const existingBudget = data.budgets.find((item) => item.id === budgetId);
+        const budget = existingBudget || { ...audit(budgetId) };
+        Object.assign(budget, {
+          month: "", startMonth: undefined, endMonth: undefined, kind: "budget", reason: name, amount: value,
+          categoryId: category.id, subcategory: undefined, holder: row.holder, channel: row.channel,
+          frequency: row.frequency, dueDay: row.dueDay ?? undefined, period: row.period || undefined,
+          status: row.status, needsReview, action: row.action || undefined, importMetadata: source(row.line, row.name || name),
+          referenceValue: normalize(name) === "multas de transito meta zero" ? money(row.value) : undefined,
+          updatedAt: now, updatedBy: "Ambos", version: (existingBudget?.version || 0) + 1,
+        });
+        if (!existingBudget) data.budgets.push(budget);
+        data.goals = data.goals.filter((item) => item.id !== id);
+        report.budgets[existingBudget ? "updated" : "created"].push(name);
+        if (needsReview || normalize(name) === "multas de transito meta zero") report.pendingReview.push({ line: row.line, type: "orçamento", name });
+        continue;
+      }
       const existing = data.goals.find((item) => item.id === id);
       const item = existing || { ...audit(id), movements: [] };
       Object.assign(item, {
-        name, kind: "desire", target: value, referenceValue: normalize(name) === "multas de transito meta zero" ? money(row.value) : undefined,
+        name, kind: "desire", target: value, referenceValue: undefined,
         startDate: "", deadline: "", categoryId: category.id, subcategory: undefined,
         holder: row.holder, channel: row.channel, frequency: row.frequency, dueDay: row.dueDay ?? undefined,
         period: row.period || undefined, status: row.status, needsReview: needsReview || normalize(name) === "multas de transito meta zero",

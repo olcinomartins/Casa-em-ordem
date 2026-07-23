@@ -35,6 +35,8 @@ import {
   PiggyBank,
   TrendingDown,
   ChevronLeft,
+  ChevronUp,
+  ChevronDown,
 } from "lucide-react";
 import {
   Account,
@@ -4164,13 +4166,51 @@ function Budgets({
       syncProvisionPool(draft);
     });
   };
+  const moveBudget = (id: string, direction: -1 | 1) =>
+    mutate((draft) => {
+      const index = draft.budgets.findIndex((item) => item.id === id);
+      if (index < 0) return;
+      const indexes = draft.budgets
+        .map((item, itemIndex) => ({ item, itemIndex }))
+        .filter(({ item }) => item.kind === draft.budgets[index].kind)
+        .map(({ itemIndex }) => itemIndex);
+      const position = indexes.indexOf(index);
+      const nextIndex = indexes[position + direction];
+      if (nextIndex === undefined) return;
+      [draft.budgets[index], draft.budgets[nextIndex]] = [
+        draft.budgets[nextIndex],
+        draft.budgets[index],
+      ];
+    });
   const label = (item: Budget) =>
-    item.reason || item.member
+    item.reason || (item.member
       ? `Pessoal — ${item.member}`
       : item.categoryId
         ? data.categories.find((c) => c.id === item.categoryId)?.name
         : data.accounts.find((a) => a.id === item.accountId)?.name ||
-          "Orçamento";
+          "Orçamento");
+  const regularBudgets = data.budgets.filter((item) => item.kind !== "provision");
+  const provisions = data.budgets.filter((item) => item.kind === "provision");
+  const provisionPool = data.goals.find((item) => item.provisionPool);
+  const provisionTotal = provisions.reduce((sum, item) => sum + item.amount, 0);
+  const provisionBalance = provisionPool?.movements.reduce(
+    (sum, movement) => sum + movement.amount,
+    0,
+  ) || 0;
+  const renderBudget = (item: Budget) => (
+    <div className="budget-item" key={item.id}>
+      <div>
+        <b>{label(item)}</b>
+        <small>{data.categories.find((category) => category.id === item.categoryId)?.name || "Sem categoria"} · {money(item.amount)} · {item.startMonth || item.month || "mensal contínuo"}</small>
+      </div>
+      <div className="actions">
+        <button className="icon-button" title="Mover para cima" aria-label={`Mover ${label(item)} para cima`} onClick={() => moveBudget(item.id, -1)}><ChevronUp size={16} /></button>
+        <button className="icon-button" title="Mover para baixo" aria-label={`Mover ${label(item)} para baixo`} onClick={() => moveBudget(item.id, 1)}><ChevronDown size={16} /></button>
+        <button className="icon-button" title="Editar orçamento" aria-label={`Editar ${label(item)}`} onClick={() => setEditing(item)}><Pencil size={18} /></button>
+        <button className="icon-button danger-button" title="Excluir orçamento" aria-label={`Excluir ${label(item)}`} onClick={() => remove(item.id)}><Trash2 size={15} /></button>
+      </div>
+    </div>
+  );
   return (
     <>
       {creating && <UnifiedPlanForm data={data} mutate={mutate} onDone={onCreateDone} />}
@@ -4269,23 +4309,15 @@ function Budgets({
         <div>
           <section className="panel">
             <h2>Orçamentos cadastrados</h2>
-            {data.budgets.map((item) => (
-              <div className="budget-item" key={item.id}>
-                <div>
-                  <b>{label(item)}</b>
-                  <small>
-                    {money(item.amount)} · {item.startMonth || item.month} até{" "}
-                    {item.endMonth || "indefinido"}
-                  </small>
-                </div>
-                <div className="actions">
-                  <button className="icon-button" title="Editar orçamento" aria-label={`Editar ${label(item)}`} onClick={() => setEditing(item)}><Pencil size={18} /></button>
-                  <button className="icon-button danger-button" title="Excluir orçamento" aria-label={`Excluir ${label(item)}`} onClick={() => remove(item.id)}>
-                    <Trash2 size={15} />
-                  </button>
-                </div>
-              </div>
-            ))}
+            {regularBudgets.map(renderBudget)}
+            {!regularBudgets.length && <Empty />}
+          </section>
+          <section className="panel provision-summary">
+            <h2>Provisões mensais</h2>
+            <p><strong>{money(provisionBalance)}</strong> reservado · {money(provisionTotal)} por mês.</p>
+            <small>Use “Aporte/Retirada em meta” e selecione o Caixa unificado de provisões.</small>
+            <div className="provision-list">{provisions.map(renderBudget)}</div>
+            {!provisions.length && <Empty />}
           </section>
         </div>
       </section>
@@ -4634,9 +4666,18 @@ function Goals({
         d.goals = d.goals.filter((g) => g.id !== id);
       });
   };
-  const setKind = (id: string, kind: "provision" | "desire") =>
+  const moveGoal = (id: string, direction: -1 | 1) =>
     mutate((d) => {
-      d.goals.find((g) => g.id === id)!.kind = kind;
+      const ordered = d.goals
+        .filter((goal) => (goal.kind || "desire") === "desire" && !goal.provisionPool)
+        .sort((a, b) => a.priority - b.priority);
+      const index = ordered.findIndex((goal) => goal.id === id);
+      const nextIndex = index + direction;
+      if (index < 0 || nextIndex < 0 || nextIndex >= ordered.length) return;
+      [ordered[index].priority, ordered[nextIndex].priority] = [
+        ordered[nextIndex].priority,
+        ordered[index].priority,
+      ];
     });
   return (
     <section className="panel">
@@ -4712,20 +4753,9 @@ function Goals({
                       </span>
                     </div>
                     <div className="actions goal-actions">
+                      <button className="icon-button" title="Subir prioridade" aria-label={`Subir ${g.name}`} onClick={() => moveGoal(g.id, -1)}><ChevronUp size={16} /></button>
+                      <button className="icon-button" title="Descer prioridade" aria-label={`Descer ${g.name}`} onClick={() => moveGoal(g.id, 1)}><ChevronDown size={16} /></button>
                       <button className="icon-button" title="Editar meta" aria-label={`Editar ${g.name}`} onClick={() => edit(g.id)}><Pencil size={18} /></button>
-                      <select
-                        aria-label="Tipo da meta"
-                        value={g.kind || "desire"}
-                        onChange={(e) =>
-                          setKind(
-                            g.id,
-                            e.target.value as "provision" | "desire",
-                          )
-                        }
-                      >
-                        <option value="provision">Provisão</option>
-                        <option value="desire">Desejo</option>
-                      </select>
                       <button
                         className="danger-button icon-button"
                         title="Excluir meta"
@@ -5174,6 +5204,16 @@ function Config({
         d.accounts = d.accounts.filter((a) => a.id !== id);
       });
   };
+  const moveAccount = (id: string, direction: -1 | 1) =>
+    mutate((d) => {
+      const index = d.accounts.findIndex((account) => account.id === id);
+      const nextIndex = index + direction;
+      if (index < 0 || nextIndex < 0 || nextIndex >= d.accounts.length) return;
+      [d.accounts[index], d.accounts[nextIndex]] = [
+        d.accounts[nextIndex],
+        d.accounts[index],
+      ];
+    });
   return (
     <div className={mode === "all" ? "grid two" : "grid"}>
       {mode !== "categories" && (
@@ -5209,6 +5249,8 @@ function Config({
                     <small>{accountResponsibilityLabel(account)}</small>
                   </div>
                   <div className="actions">
+                    <button type="button" className="icon-button" title="Mover para cima" aria-label={`Mover ${account.name} para cima`} onClick={() => moveAccount(account.id, -1)}><ChevronUp size={16} /></button>
+                    <button type="button" className="icon-button" title="Mover para baixo" aria-label={`Mover ${account.name} para baixo`} onClick={() => moveAccount(account.id, 1)}><ChevronDown size={16} /></button>
                     <button
                       type="button"
                       className="icon-button"
@@ -5338,6 +5380,16 @@ function CategoryEditor({
         d.rules = d.rules.filter((r) => r.categoryId !== id);
       });
   };
+  const moveCategory = (id: string, direction: -1 | 1) =>
+    mutate((d) => {
+      const index = d.categories.findIndex((category) => category.id === id);
+      const nextIndex = index + direction;
+      if (index < 0 || nextIndex < 0 || nextIndex >= d.categories.length) return;
+      [d.categories[index], d.categories[nextIndex]] = [
+        d.categories[nextIndex],
+        d.categories[index],
+      ];
+    });
   const removeSub = (id: string, sub: string) => {
     if (
       data.transactions.some(
@@ -5370,8 +5422,10 @@ function CategoryEditor({
         <details className="category-details" key={c.id}>
           <summary>{c.name}</summary>
           <div className="actions">
+            <button className="icon-button" title="Mover para cima" aria-label={`Mover ${c.name} para cima`} onClick={() => moveCategory(c.id, -1)}><ChevronUp size={16}/></button>
+            <button className="icon-button" title="Mover para baixo" aria-label={`Mover ${c.name} para baixo`} onClick={() => moveCategory(c.id, 1)}><ChevronDown size={16}/></button>
             <button className="icon-button" title="Renomear categoria" aria-label={`Renomear ${c.name}`} onClick={() => rename(c.id, c.name)}><Pencil size={18}/></button>
-            <button onClick={() => addSub(c.id)}>Adicionar subcategoria</button>
+            <button className="icon-button" title="Adicionar subcategoria" aria-label={`Adicionar subcategoria a ${c.name}`} onClick={() => addSub(c.id)}><Plus size={16}/></button>
             <button
               className="danger-button icon-button"
               title="Excluir categoria"

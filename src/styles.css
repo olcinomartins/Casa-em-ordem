@@ -1133,6 +1133,10 @@ code {
   display: block;
   color: #718078;
 }
+.budget-item > .actions,
+.goal-actions {
+  flex: 0 0 auto;
+}
 .subcategories {
   display: flex;
   flex-wrap: wrap;
@@ -1712,19 +1716,20 @@ button.attention-item { justify-content: initial; }
   .shopping-notes { grid-column: 1 / -1; }
   .shopping-list-item,
   .shopping-suggestion {
-    grid-template-columns: minmax(0, 1fr) 44px;
+    grid-template-columns: minmax(0, 1fr) 38px;
     align-items: start;
-    gap: .65rem;
+    gap: .45rem;
+    padding: .65rem;
   }
   .shopping-item-actions {
     display: grid;
-    grid-template-columns: 44px;
-    grid-template-rows: repeat(3, 44px);
-    width: 44px;
-    gap: .4rem;
+    grid-template-columns: 38px;
+    grid-template-rows: repeat(3, 38px);
+    width: 38px;
+    gap: .3rem;
   }
-  .shopping-item-actions button { width: 44px; min-width: 44px; white-space: normal; }
-  .shopping-item-actions .danger-button { width: 44px; padding: .65rem; }
+  .shopping-item-actions button { width: 38px; min-width: 38px; min-height: 38px; padding: .4rem; white-space: normal; }
+  .shopping-item-actions .danger-button { width: 38px; min-height: 38px; padding: .4rem; }
   .shopping-item-actions .danger-button span { display: none; }
   .shopping-suggestion-actions,
   .shopping-suggestion-actions > button,
@@ -1732,20 +1737,39 @@ button.attention-item { justify-content: initial; }
   .shopping-voice-row > button.primary { width: 100%; }
   .shopping-voice-row small { width: 100%; }
   .account-form { padding: .85rem; }
+  .budget-item {
+    align-items: flex-start;
+    gap: .45rem;
+    padding: .6rem 0;
+  }
+  .budget-item > .actions,
+  .goal-actions {
+    display: grid;
+    grid-template-columns: 38px;
+    gap: .3rem;
+    width: 38px;
+  }
+  .budget-item > .actions button,
+  .goal-actions button {
+    width: 38px;
+    min-width: 38px;
+    min-height: 38px;
+    padding: .4rem;
+  }
   .account-row {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 44px;
-    gap: .65rem;
+    grid-template-columns: minmax(0, 1fr) 38px;
+    gap: .45rem;
     align-items: start;
   }
   .account-row > .actions {
     display: grid;
-    grid-template-columns: 44px;
-    grid-template-rows: repeat(2, 44px);
-    width: 44px;
-    gap: .4rem;
+    grid-template-columns: 38px;
+    grid-template-rows: repeat(4, 38px);
+    width: 38px;
+    gap: .3rem;
   }
-  .account-row > .actions button { width: 44px; min-width: 44px; }
+  .account-row > .actions button { width: 38px; min-width: 38px; min-height: 38px; padding: .4rem; }
   .account-form-actions {
     width: 100%;
     display: grid;
@@ -1754,8 +1778,8 @@ button.attention-item { justify-content: initial; }
   .account-form-actions button { width: 100%; }
   .product-catalog .editable-row {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 52px;
-    gap: .65rem;
+    grid-template-columns: minmax(0, 1fr) 42px;
+    gap: .45rem;
   }
   .confirmed-purchase-row {
     display: grid;
@@ -1772,13 +1796,13 @@ button.attention-item { justify-content: initial; }
   .confirmed-purchase-row > .actions button { width: 100%; min-width: 0; white-space: normal; }
   .confirmed-purchase-row > .actions .danger-button { width: 44px; padding: .65rem; }
   .product-catalog .editable-row > .actions {
-    width: 52px;
+    width: 42px;
     max-width: none;
     align-items: center;
     gap: .35rem;
   }
   .product-catalog .editable-row > .actions span { text-align: center; font-size: .7rem; }
-  .product-catalog .editable-row > .actions button { width: 44px; min-width: 44px; }
+  .product-catalog .editable-row > .actions button { width: 38px; min-width: 38px; min-height: 38px; padding: .4rem; }
   .product-occurrences { padding: .7rem; }
   .product-occurrence-edit { grid-template-columns: minmax(0, 1fr); padding: .8rem; }
   .product-occurrence-edit .occurrence-context,
@@ -1817,6 +1841,6 @@ button.attention-item { justify-content: initial; }
   .shopping-fields { grid-template-columns: minmax(0, 1fr); }
   .shopping-product-name,
   .shopping-notes { grid-column: 1; }
-  .shopping-item-actions { grid-template-columns: 44px; }
+  .shopping-item-actions { grid-template-columns: 38px; }
   .shopping-item-actions > button:first-child { grid-column: auto; }
 }

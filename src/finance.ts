@@ -112,7 +112,9 @@ export function budgetApplies(
   budget: FamilyData["budgets"][number],
   month: string,
 ) {
-  if (!budget.startMonth) return budget.month === month;
+  // Importações sem período explícito representam uma regra mensal contínua,
+  // sem inventar uma data de início que não existia na fonte.
+  if (!budget.startMonth) return !budget.month || budget.month === month;
   const start = budget.startMonth;
   return start <= month && (!budget.endMonth || budget.endMonth >= month);
 }
