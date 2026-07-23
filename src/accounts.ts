@@ -1,12 +1,13 @@
 import type { Account, Member } from "./domain";
 
-export type AccountHolder = "Olcino" | "Mari";
+export type AccountHolder = Member;
 export type AccountOwnership = `${AccountHolder}:${Member}`;
 
 export const ACCOUNT_OWNERSHIP_OPTIONS: ReadonlyArray<{
   value: AccountOwnership;
   label: string;
 }> = [
+  { value: "Ambos:Ambos", label: "No nome dos dois · uso dos dois" },
   { value: "Olcino:Ambos", label: "No nome de Olcino · uso familiar" },
   { value: "Mari:Ambos", label: "No nome de Mari · uso familiar" },
   {

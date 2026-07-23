@@ -35,10 +35,14 @@ describe("cadastro simplificado de contas", () => {
       holder: "Olcino",
       operator: "Mari",
     });
+    expect(parseAccountOwnership("Ambos:Ambos")).toEqual({
+      holder: "Ambos",
+      operator: "Ambos",
+    });
   });
 
   it("rejeita combinações não oferecidas pelo formulário", () => {
-    expect(() => parseAccountOwnership("Ambos:Ambos")).toThrow(
+    expect(() => parseAccountOwnership("Ambos:Olcino")).toThrow(
       "Selecione a titularidade",
     );
   });
