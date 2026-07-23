@@ -217,6 +217,37 @@ const sameFamilyContent = (left: FamilyData, right: FamilyData) =>
   JSON.stringify({ ...left, lastSavedAt: "" }) ===
   JSON.stringify({ ...right, lastSavedAt: "" });
 
+const provisionPoolName = "Caixa unificado de provisões";
+const syncProvisionPool = (data: FamilyData, by: Member = "Ambos") => {
+  const monthlyTotal = data.budgets
+    .filter((item) => item.kind === "provision")
+    .reduce((sum, item) => sum + item.amount, 0);
+  let pool = data.goals.find((item) => item.provisionPool);
+  if (!pool && monthlyTotal > 0) {
+    pool = {
+      ...audit(by),
+      name: provisionPoolName,
+      kind: "provision",
+      provisionPool: true,
+      target: monthlyTotal,
+      startDate: dateOnly(new Date()),
+      deadline: "",
+      priority: 0,
+      minimum: 0,
+      emergency: false,
+      active: true,
+      movements: [],
+    };
+    data.goals.push(pool);
+  }
+  if (pool) {
+    pool.target = monthlyTotal;
+    pool.active = monthlyTotal > 0;
+    pool.updatedAt = now();
+    pool.version++;
+  }
+};
+
 export default function App() {
   const [hadStoredUiPreferences] = useState(() => {
     try {
@@ -907,23 +938,18 @@ export default function App() {
                 setMessage={setMessage}
               />
             </Collapsible>
-            <Collapsible id="budgets-section" title="Orçamentos">
+            <Collapsible id="budgets-section" title="Orçamentos, provisões e metas">
               <Budgets
                 data={data}
                 month={month}
-                view={view}
-                setView={setView}
                 mutate={mutate}
-                hideValues={hideValues}
-                creating={createIntent === "budget"}
+                creating={createIntent === "budget" || createIntent === "goal"}
                 onCreateDone={() => setCreateIntent(undefined)}
               />
-            </Collapsible>
-            <Collapsible id="goals-section" title="Metas e reservas">
               <Goals
                 data={data}
                 mutate={mutate}
-                creating={createIntent === "goal"}
+                creating={false}
                 onCreateDone={() => setCreateIntent(undefined)}
               />
             </Collapsible>
@@ -1318,17 +1344,22 @@ function QuickActions({
   const savePlanInline = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
-    const type = String(form.get("planType") || "budget");
+    const type = String(form.get("planType") || "budget") as "budget" | "provision" | "goal";
     const amount = parseCurrency(form.get("amount"));
     const name = String(form.get("name") || "").trim();
-    if (amount <= 0 || !name) return showDialogError("Informe o nome e um valor maior que zero.");
+    const categoryId = String(form.get("categoryId") || "");
+    const subcategory = String(form.get("subcategory") || "") || undefined;
+    const startDate = String(form.get("startDate") || "");
+    const endDate = String(form.get("endDate") || "");
+    if (amount <= 0 || !name || !categoryId || !startDate)
+      return showDialogError("Informe nome, valor, categoria e data de início.");
+    if (endDate && endDate < startDate)
+      return showDialogError("A data de fim não pode ser anterior à data de início.");
     mutate((family) => {
-      if (type === "goal") family.goals.push({ ...audit(currentMember), name, kind: String(form.get("goalKind") || "desire") as Goal["kind"], target: amount, startDate: String(form.get("startDate") || dateOnly(new Date())), deadline: String(form.get("deadline") || dateOnly(new Date())), priority: family.goals.length + 1, minimum: 0, emergency: false, active: true, movements: [] });
+      if (type === "goal") family.goals.push({ ...audit(currentMember), name, kind: "desire", target: amount, startDate, deadline: endDate, categoryId, subcategory, priority: family.goals.length + 1, minimum: 0, emergency: false, active: true, movements: [] });
       else {
-        const categoryId = String(form.get("categoryId") || "");
-        if (!categoryId) throw new Error("Selecione a categoria do orçamento.");
-        const startMonth = String(form.get("startMonth") || monthOf(new Date().toISOString()));
-        family.budgets.push({ ...audit(currentMember), amount, month: startMonth, startMonth, endMonth: String(form.get("endMonth") || "") || undefined, categoryId, reason: name });
+        family.budgets.push({ ...audit(currentMember), amount, month: startDate.slice(0, 7), startMonth: startDate.slice(0, 7), endMonth: endDate ? endDate.slice(0, 7) : undefined, kind: type, categoryId, subcategory, reason: name });
+        syncProvisionPool(family, currentMember);
       }
     });
     close();
@@ -1634,14 +1665,13 @@ function QuickActions({
               </form>
             ) : mode === "plan" ? (
               <form className="quick-expense-form" onSubmit={savePlanInline}>
-                <label>Cadastro<select name="planType"><option value="budget">Orçamento</option><option value="goal">Meta</option></select></label>
+                <label>Tipo<select name="planType"><option value="budget">Orçamento mensal</option><option value="provision">Provisão mensal</option><option value="goal">Meta</option></select></label>
                 <label className="quick-expense-value">Nome<input name="name" required autoFocus placeholder="Ex.: Reforma ou Alimentação"/></label>
                 <label>Valor<MoneyInput name="amount" required placeholder="R$ 0,00"/></label>
-                <label>Categoria do orçamento<select name="categoryId"><option value="">Selecione quando for orçamento</option>{data.categories.filter(category=>category.nature==="expense").map(category=><option key={category.id} value={category.id}>{category.name}</option>)}</select></label>
-                <label>Início<input name="startMonth" type="month" defaultValue={monthOf(new Date().toISOString())}/></label>
-                <label>Fim (opcional)<input name="endMonth" type="month"/></label>
-                <label>Tipo da meta<select name="goalKind"><option value="provision">Provisão</option><option value="desire">Desejo</option></select></label>
-                <label>Prazo da meta<input name="deadline" type="date" defaultValue={dateOnly(new Date())}/></label>
+                <label>Categoria<select name="categoryId" required><option value="">Selecione</option>{data.categories.filter(category=>category.nature==="expense").map(category=><option key={category.id} value={category.id}>{category.name}</option>)}</select></label>
+                <label>Subcategoria<input name="subcategory" placeholder="Opcional"/></label>
+                <label>Data de início<input name="startDate" type="date" required defaultValue={dateOnly(new Date())}/></label>
+                <label>Data de fim<input name="endDate" type="date"/></label>
                 <button className="primary quick-expense-save">Salvar planejamento</button>
               </form>
             ) : mode === "account" ? (
@@ -4077,19 +4107,13 @@ function Transactions({
 function Budgets({
   data,
   month,
-  view,
-  setView,
   mutate,
-  hideValues,
   creating,
   onCreateDone,
 }: {
   data: FamilyData;
   month: string;
-  view: CashView;
-  setView: (v: CashView) => void;
   mutate: (f: (d: FamilyData) => void) => void;
-  hideValues: boolean;
   creating: boolean;
   onCreateDone: () => void;
 }) {
@@ -4128,6 +4152,7 @@ function Budgets({
       item.updatedAt = now();
       item.version++;
       if (!existing) draft.budgets.push(item);
+      syncProvisionPool(draft);
     });
     if (!editing) onCreateDone();
     setEditing(undefined);
@@ -4136,10 +4161,11 @@ function Budgets({
     if (!confirm("Excluir este orçamento?")) return;
     mutate((draft) => {
       draft.budgets = draft.budgets.filter((item) => item.id !== id);
+      syncProvisionPool(draft);
     });
   };
   const label = (item: Budget) =>
-    item.member
+    item.reason || item.member
       ? `Pessoal — ${item.member}`
       : item.categoryId
         ? data.categories.find((c) => c.id === item.categoryId)?.name
@@ -4147,11 +4173,9 @@ function Budgets({
           "Orçamento";
   return (
     <>
-      <div className="toolbar">
-        <ViewSwitch view={view} setView={setView} />
-      </div>
+      {creating && <UnifiedPlanForm data={data} mutate={mutate} onDone={onCreateDone} />}
       <section className="grid two">
-        {(creating || editing) && <div className="panel">
+        {editing && <div className="panel">
           <h2>
             {editing ? "Editar orçamento" : "Novo orçamento com vigência"}
           </h2>
@@ -4263,22 +4287,71 @@ function Budgets({
               </div>
             ))}
           </section>
-          <section className="panel">
-            <h2>Realizado e estimado</h2>
-            {view === "compare" ? (
-              <>
-                <h3>Fluxo</h3>
-                <BudgetBars data={data} month={month} view="cash" hideValues={hideValues} />
-                <h3>Compra integral</h3>
-                <BudgetBars data={data} month={month} view="accrual" hideValues={hideValues} />
-              </>
-            ) : (
-              <BudgetBars data={data} month={month} view={view} hideValues={hideValues} />
-            )}
-          </section>
         </div>
       </section>
     </>
+  );
+}
+
+function UnifiedPlanForm({
+  data,
+  mutate,
+  onDone,
+}: {
+  data: FamilyData;
+  mutate: (f: (d: FamilyData) => void) => void;
+  onDone: () => void;
+}) {
+  const [categoryId, setCategoryId] = useState("");
+  const category = data.categories.find((item) => item.id === categoryId);
+  const submit = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const name = String(form.get("name") || "").trim();
+    const amount = parseCurrency(form.get("amount"));
+    const type = String(form.get("type") || "budget") as "budget" | "provision" | "goal";
+    const startDate = String(form.get("startDate") || "");
+    const endDate = String(form.get("endDate") || "");
+    const subcategory = String(form.get("subcategory") || "") || undefined;
+    if (!name || !categoryId || !startDate || amount <= 0)
+      return alert("Informe nome, valor, categoria e data de início.");
+    if (endDate && endDate < startDate)
+      return alert("A data de fim não pode ser anterior à data de início.");
+    mutate((draft) => {
+      if (type === "goal") {
+        draft.goals.push({
+          ...audit(), name, kind: "desire", target: amount, startDate,
+          deadline: endDate, categoryId, subcategory,
+          priority: draft.goals.length + 1, minimum: 0, emergency: false,
+          active: true, movements: [],
+        });
+        return;
+      }
+      draft.budgets.push({
+        ...audit(), reason: name, amount,
+        month: startDate.slice(0, 7), startMonth: startDate.slice(0, 7),
+        endMonth: endDate ? endDate.slice(0, 7) : undefined,
+        kind: type, categoryId, subcategory,
+      });
+      syncProvisionPool(draft);
+    });
+    onDone();
+  };
+  return (
+    <section className="panel">
+      <h2>Novo planejamento</h2>
+      <form className="budget-form" onSubmit={submit}>
+        <label>Nome<input name="name" required autoFocus placeholder="Nome" /></label>
+        <label>Valor<MoneyInput name="amount" required placeholder="R$ 0,00" /></label>
+        <label>Categoria<select name="categoryId" value={categoryId} required onChange={(event) => setCategoryId(event.target.value)}><option value="">Selecione</option>{data.categories.filter((item) => item.nature === "expense").map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+        <label>Subcategoria<select name="subcategory"><option value="">Sem subcategoria</option>{category?.subcategories.map((item) => <option key={item}>{item}</option>)}</select></label>
+        <label>Data de início<input name="startDate" type="date" required defaultValue={dateOnly(new Date())} /></label>
+        <label>Data de fim<input name="endDate" type="date" /></label>
+        <label>Tipo<select name="type" defaultValue="budget"><option value="budget">Orçamento mensal</option><option value="provision">Provisão mensal</option><option value="goal">Meta</option></select></label>
+        <button className="primary" type="submit">Criar</button>
+      </form>
+      <p className="muted">Sem data de fim, orçamento e provisão se repetem indefinidamente.</p>
+    </section>
   );
 }
 
@@ -4490,6 +4563,14 @@ function Goals({
   creating: boolean;
   onCreateDone: () => void;
 }) {
+  const provisionPool = data.goals.find((goal) => goal.provisionPool);
+  const provisionMonthly = data.budgets
+    .filter((budget) => budget.kind === "provision")
+    .reduce((sum, budget) => sum + budget.amount, 0);
+  const provisionBalance = provisionPool?.movements.reduce(
+    (sum, movement) => sum + movement.amount,
+    0,
+  ) || 0;
   const add = (fd: FormData) => {
     const target = parseCurrency(fd.get("target")),
       minimum = parseCurrency(fd.get("minimum"));
@@ -4567,6 +4648,11 @@ function Goals({
           </p>
         </div>
       </div>
+      <section className="provision-pool">
+        <h2>Caixa unificado de provisões</h2>
+        <p><strong>{money(provisionBalance)}</strong> reservado · {money(provisionMonthly)} por mês planejados.</p>
+        <small>Para aportar ou retirar, use o botão + e escolha Aporte/Retirada em meta.</small>
+      </section>
       {creating && (
         <QuickForm
           onSubmit={(fd) => {
@@ -4588,13 +4674,9 @@ function Goals({
           }
         />
       )}
-      {(["provision", "desire"] as const).map((kind) => (
+      {(["desire"] as const).map((kind) => (
         <div key={kind} className="goal-section">
-          <h2>
-            {kind === "provision"
-              ? "Provisões para despesas"
-              : "Metas de desejos"}
-          </h2>
+          <h2>Metas de desejos</h2>
           <div className="goals">
             {data.goals
               .filter((g) => (g.kind || "desire") === kind)
@@ -5285,7 +5367,7 @@ function CategoryEditor({
         }
       />
       {data.categories.map((c) => (
-        <details key={c.id}>
+        <details className="category-details" key={c.id}>
           <summary>{c.name}</summary>
           <div className="actions">
             <button className="icon-button" title="Renomear categoria" aria-label={`Renomear ${c.name}`} onClick={() => rename(c.id, c.name)}><Pencil size={18}/></button>

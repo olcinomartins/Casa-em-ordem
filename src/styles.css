@@ -300,6 +300,8 @@ nav button.active {
 .quick-action-grid small { margin-top: .12rem; color: #718078; font-size: .72rem; }
 .quick-action-grid .quick-action-primary { background: var(--green); color: #fff; border-color: var(--green); }
 .quick-action-grid .quick-action-primary small { color: #c4d4cc; }
+.category-details > summary { list-style: none; cursor: pointer; }
+.category-details > summary::-webkit-details-marker { display: none; }
 .quick-import-link { width: 100%; margin-top: .7rem; }
 .quick-expense-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; }
 .quick-expense-form > .muted,

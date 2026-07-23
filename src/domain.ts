@@ -76,6 +76,9 @@ export interface Budget extends Audit {
   month: string;
   startMonth?: string;
   endMonth?: string;
+  /** Orçamento normal ou provisão mensal para a reserva unificada. */
+  kind?: "budget" | "provision";
+  subcategory?: string;
   categoryId?: string;
   accountId?: string;
   member?: Exclude<Member, "Ambos">;
@@ -123,6 +126,10 @@ export interface GoalMovement {
 export interface Goal extends Audit {
   name: string;
   kind?: "provision" | "desire";
+  /** Reserva técnica que reúne os aportes das provisões mensais. */
+  provisionPool?: boolean;
+  categoryId?: string;
+  subcategory?: string;
   target: number;
   startDate?: string;
   deadline: string;
