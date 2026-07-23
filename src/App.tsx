@@ -39,8 +39,10 @@ import {
 import {
   Account,
   Budget,
+  Category,
   CashView,
   FamilyData,
+  Goal,
   Member,
   Obligation,
   Receipt,
@@ -146,7 +148,8 @@ type CreateIntent =
   | "voice-transaction"
   | "import"
   | "receipt"
-  | "shopping";
+  | "shopping"
+  | "category";
 type QuickExpenseNotice = {
   transactionId: string;
   date: string;
@@ -155,13 +158,12 @@ type QuickExpenseNotice = {
 const nav: [Page, string, typeof BarChart3][] = [
   ["visao", "Painel e Análises", BarChart3],
   ["rotinas", "Responsabilidades, Tarefas e Pagamentos", CheckSquare],
-  ["planejamento", "Categorias, Contas, Orçamentos e Metas", WalletCards],
-  ["importar", "Importar extratos e faturas", Upload],
   ["supermercado", "Supermercado", ShoppingCart],
+  ["importar", "Importar extratos e faturas", Upload],
+  ["planejamento", "Categorias, Contas, Orçamentos e Metas", WalletCards],
 ];
 const pageBlocks: Record<Page, ReadonlyArray<[string, string]>> = {
   visao: [
-    ["attention-section", "Resumo que pede atenção"],
     ["dashboard-panel", "Painel"],
     ["analytics-section", "Análises históricas"],
   ],
@@ -236,7 +238,7 @@ export default function App() {
     "Olcino",
   );
   const [authError, setAuthError] = useState("");
-  const [authBusy, setAuthBusy] = useState(false);
+  const [authBusy, setAuthBusy] = useState(true);
   const [hideValues, setHideValues] = useState(
     () => localStorage.getItem("casa-em-ordem-hide-values") === "true",
   );
@@ -429,9 +431,13 @@ export default function App() {
     setAuthenticated(true);
   };
   useEffect(() => {
+    let active = true;
+    setAuthBusy(true);
     resumeSignIn()
       .then((account) => account && allowAccount(account))
-      .catch((error) => setAuthError((error as Error).message));
+      .catch((error) => active && setAuthError((error as Error).message))
+      .finally(() => active && setAuthBusy(false));
+    return () => { active = false; };
   }, []);
   const login = async () => {
     setAuthBusy(true);
@@ -600,11 +606,12 @@ export default function App() {
       window.cancelAnimationFrame(frame);
     };
   }, [focusedTransactionId, page, pendingQuickTarget]);
+  if (!authenticated && authBusy)
+    return <div className="splash">Conectando sua conta Microsoft…</div>;
   if (!authenticated)
     return (
       <div className="login-page">
         <section className="login-card">
-          <div className="login-mark">⌂</div>
           <p className="eyebrow">FINANÇAS DA FAMÍLIA</p>
           <h1>Casa em Ordem</h1>
           <p>Um espaço privado para Olcino e Mariana planejarem juntos.</p>
@@ -636,7 +643,6 @@ export default function App() {
     <div className={`app ${hideValues ? "values-hidden" : ""}`}>
       <aside>
         <div className="brand">
-          <span>⌂</span>
           <div>
             Casa em Ordem<small>Finanças da família</small>
           </div>
@@ -672,19 +678,6 @@ export default function App() {
       <main>
         <header>
           <div>
-            <select
-              className="mobile-page-select"
-              value={page}
-              onChange={(event) => setPage(event.target.value as Page)}
-              aria-label="Selecionar página"
-            >
-              {nav.map(([id, label]) => (
-                <option key={id} value={id}>
-                  {label}
-                </option>
-              ))}
-            </select>
-            <h1>{nav.find((n) => n[0] === page)?.[1]}</h1>
             <p>
               {data.household.name} · dinheiro compartilhado, decisões em
               conjunto
@@ -849,14 +842,6 @@ export default function App() {
         <div className="page-blocks">
         {page === "visao" && (
           <>
-            <Collapsible id="attention-section" title="Resumo que pede atenção">
-              <DashboardActionSummary
-                summary={appActionSummary}
-                cloud={cloud}
-                hideValues={hideValues}
-                onNavigate={goToQuickAction}
-              />
-            </Collapsible>
             <Collapsible id="dashboard-panel" title="Painel">
               <Dashboard
                 data={data}
@@ -877,7 +862,7 @@ export default function App() {
         )}
         {page === "rotinas" && (
           <>
-            <Collapsible id="quick-tasks" title="Responsabilidades, tarefas e agenda">
+            <Collapsible id="quick-tasks" title="Responsabilidades">
               <Tasks
                 data={data}
                 mutate={mutate}
@@ -989,6 +974,7 @@ export default function App() {
         mutate={mutate}
         currentMember={currentMember}
         onCreate={startCreation}
+        setMessage={setMessage}
         onExpenseCreated={(transaction) =>
           setQuickExpenseNotice({
             transactionId: transaction.id,
@@ -1099,12 +1085,14 @@ function QuickActions({
   currentMember,
   onCreate,
   onExpenseCreated,
+  setMessage,
 }: {
   data: FamilyData;
   mutate: (f: (data: FamilyData) => void) => void;
   currentMember: Exclude<Member, "Ambos">;
   onCreate: (intent: CreateIntent, page: Page, sectionId: string) => void;
   onExpenseCreated: (transaction: Transaction) => void;
+  setMessage: (message: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<
@@ -1115,6 +1103,14 @@ function QuickActions({
     | "market"
     | "expense"
     | "goal-movement"
+    | "task"
+    | "payment"
+    | "import"
+    | "receipt"
+    | "shopping"
+    | "category"
+    | "plan"
+    | "account"
   >("menu");
   const [transactionKind, setTransactionKind] = useState<"expense" | "income">(
     "expense",
@@ -1131,11 +1127,15 @@ function QuickActions({
       )?.id || data.accounts.find((account) => account.active)?.id || "",
   );
   const [saving, setSaving] = useState(false);
+  const [showVoice, setShowVoice] = useState(false);
+  const [receiptDraft, setReceiptDraft] = useState<ReadReceipt>();
+  const [receiptBusy, setReceiptBusy] = useState(false);
   const [dialogError, setDialogError] = useState("");
   const savingRef = useRef(false);
   const fabRef = useRef<HTMLButtonElement>(null);
   const sheetRef = useRef<HTMLDivElement>(null);
   const errorRef = useRef<HTMLDivElement>(null);
+  const receiptFileRef = useRef<HTMLInputElement>(null);
   const transactionCategories = data.categories.filter(
     (category) =>
       category.nature === (transactionKind === "expense" ? "expense" : "income"),
@@ -1176,8 +1176,8 @@ function QuickActions({
   };
   const back = () => {
     setDialogError("");
-    if (mode === "expense" || mode === "goal-movement")
-      setMode("transaction-menu");
+    if (["expense", "goal-movement", "task", "payment", "import", "receipt", "shopping", "category", "plan", "account"].includes(mode))
+      setMode(mode === "expense" || mode === "goal-movement" ? "transaction-menu" : mode === "task" || mode === "payment" ? "responsibility" : mode === "receipt" || mode === "shopping" ? "market" : "registration");
     else setMode("menu");
   };
 
@@ -1231,10 +1231,6 @@ function QuickActions({
     };
   }, [open]);
 
-  const create = (intent: CreateIntent, page: Page, sectionId: string) => {
-    close(false);
-    onCreate(intent, page, sectionId);
-  };
 
   const saveGoalMovement = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -1262,13 +1258,120 @@ function QuickActions({
     close();
   };
 
+  const saveTaskInline = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const title = String(form.get("title") || "").trim();
+    const due = String(form.get("due") || "");
+    if (!title || !due) return showDialogError("Informe a responsabilidade e a próxima data.");
+    mutate((family) => family.tasks.push({
+      ...audit(currentMember), title, due: new Date(due).toISOString(),
+      assignee: String(form.get("assignee") || currentMember) as Member,
+      priority: "Média", status: "Pendente",
+      repeat: String(form.get("repeat") || "none") as Task["repeat"],
+      shift: String(form.get("shift") || "Livre") as Task["shift"],
+      weekdays: form.getAll("weekday").map(Number), checklist: [], history: [],
+    }));
+    close();
+  };
+
+  const savePaymentInline = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const name = String(form.get("name") || "").trim();
+    const dueDate = String(form.get("dueDate") || "");
+    const planned = parseCurrency(form.get("planned"));
+    if (!name || !dueDate || planned <= 0) return showDialogError("Informe nome, valor e data do pagamento.");
+    mutate((family) => family.obligations.push({
+      ...audit(currentMember), name, planned, dueDate,
+      categoryId: String(form.get("categoryId") || "") || undefined,
+      kind: "Manual", recurrence: String(form.get("repeat") || "monthly") as Obligation["recurrence"],
+      tolerance: 0, status: "A pagar",
+    }));
+    close();
+  };
+
+  const saveCategoryInline = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const name = String(form.get("name") || "").trim();
+    const subcategory = String(form.get("subcategory") || "").trim();
+    if (!name) return showDialogError("Informe o nome da categoria.");
+    mutate((family) => {
+      let category = family.categories.find((item) => normalize(item.name) === normalize(name));
+      if (!category) {
+        category = { ...audit(currentMember), name, subcategories: [], nature: String(form.get("nature") || "expense") as Category["nature"] };
+        family.categories.push(category);
+      }
+      if (subcategory && !category.subcategories.some((item) => normalize(item) === normalize(subcategory))) category.subcategories.push(subcategory);
+    });
+    close();
+  };
+
+  const savePlanInline = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const type = String(form.get("planType") || "budget");
+    const amount = parseCurrency(form.get("amount"));
+    const name = String(form.get("name") || "").trim();
+    if (amount <= 0 || !name) return showDialogError("Informe o nome e um valor maior que zero.");
+    mutate((family) => {
+      if (type === "goal") family.goals.push({ ...audit(currentMember), name, kind: String(form.get("goalKind") || "desire") as Goal["kind"], target: amount, startDate: String(form.get("startDate") || dateOnly(new Date())), deadline: String(form.get("deadline") || dateOnly(new Date())), priority: family.goals.length + 1, minimum: 0, emergency: false, active: true, movements: [] });
+      else {
+        const categoryId = String(form.get("categoryId") || "");
+        if (!categoryId) throw new Error("Selecione a categoria do orçamento.");
+        const startMonth = String(form.get("startMonth") || monthOf(new Date().toISOString()));
+        family.budgets.push({ ...audit(currentMember), amount, month: startMonth, startMonth, endMonth: String(form.get("endMonth") || "") || undefined, categoryId, reason: name });
+      }
+    });
+    close();
+  };
+
+  const saveAccountInline = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const name = String(form.get("name") || "").trim();
+    if (!name) return showDialogError("Informe o nome da conta ou cartão.");
+    const values = parseAccountOwnership(String(form.get("ownership") || ""));
+    mutate((family) => family.accounts.push({ ...audit(currentMember), name, kind: String(form.get("kind")) as Account["kind"], ...values, institution: inferInstitution(name), lastDigits: inferLastDigits(name), active: true, importAliases: [name] }));
+    close();
+  };
+
+  const readQuickReceipt = async (file?: File) => {
+    if (!file) return;
+    setReceiptBusy(true);
+    try {
+      setReceiptDraft(await readReceipt(file));
+    } catch (error) {
+      showDialogError(`Não foi possível ler a nota: ${(error as Error).message}`);
+    } finally { setReceiptBusy(false); }
+  };
+  const saveQuickReceipt = async () => {
+    if (!receiptDraft) return;
+    const total = Number(receiptDraft.total) || 0;
+    const receipt: Receipt = {
+      ...audit(currentMember), store: receiptDraft.estabelecimento || "Supermercado",
+      date: receiptDraft.data || dateOnly(new Date()), total, confidence: receiptDraft.confianca,
+      notes: receiptDraft.observacoes,
+      items: (receiptDraft.itens || []).map((item) => ({ id: uid(), description: item.descricao || "Item", quantity: Number(item.quantidade) || 1, unit: item.unidade, unitPrice: item.valorUnitario == null ? undefined : Number(item.valorUnitario), total: Number(item.valorTotal) || 0, macroCategory: item.categoriaMacro || groceryMacro(item.descricao || "") })),
+    };
+    const account = data.accounts.find((item) => item.id === accountId) || data.accounts.find((item) => item.active);
+    if (!account) return showDialogError("Selecione ou cadastre a conta/cartão usado na compra.");
+    const categoryId = data.categories.find((category) => normalize(category.name) === "ALIMENTAÇÃO")?.id || data.categories.find((category) => category.nature === "expense")?.id;
+    const transaction: Transaction = { ...audit(currentMember), date: receipt.date, competence: monthOf(receipt.date), purchaseDate: receipt.date, paymentDate: receipt.date, description: receipt.store, normalized: normalize(receipt.store), amount: total, accountId: account.id, operator: account.operator, scope: "Familiar", categoryId, classification: "suggested", dedupeKey: "", transfer: false, movement: "expense_income", sourceKind: account.kind === "card" ? "card" : "statement", estimated: true, estimateOrigin: "manual", notes: "Estimativa criada pela nota de supermercado." };
+    transaction.dedupeKey = await dedupeKey(transaction);
+    mutate((family) => { (family.receipts ??= []).push(receipt); family.transactions.push(transaction); });
+    setReceiptDraft(undefined);
+    close();
+  };
+
   const saveExpense = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (savingRef.current) return;
     savingRef.current = true;
     const form = new FormData(event.currentTarget);
     const amount = Math.abs(parseCurrency(form.get("amount")));
-    const cleanDescription = String(form.get("description") || "").trim();
+    const cleanDescription = String(form.get("description") || "").trim() || data.categories.find((category) => category.id === categoryId)?.name || "Lançamento manual";
     const date = String(form.get("date") || dateOnly(new Date()));
     const selectedAccountId = String(form.get("accountId") || "");
     const selectedOperator = String(
@@ -1276,7 +1379,7 @@ function QuickActions({
     ) as Member;
     const scope = String(form.get("scope") || "Familiar") as Transaction["scope"];
     const account = data.accounts.find((item) => item.id === selectedAccountId);
-    if (!amount || !cleanDescription || !date || !account || !categoryId) {
+    if (!amount || !date || !account || !categoryId) {
       showDialogError(
         "Preencha valor, descrição, categoria, conta ou cartão e data.",
       );
@@ -1300,6 +1403,9 @@ function QuickActions({
         scope,
         categoryId,
         subcategory: subcategory || undefined,
+        installment: Number(form.get("installment") || 1),
+        installments: Math.max(1, Number(form.get("installments") || 1)),
+        totalAmount: Math.abs(parseCurrency(form.get("amount"))) * Math.max(1, Number(form.get("installments") || 1)),
         classification: "confirmed",
         dedupeKey: "",
         transfer: false,
@@ -1360,7 +1466,23 @@ function QuickActions({
                             ? "Mercado"
                             : mode === "goal-movement"
                               ? "Aporte ou retirada"
-                              : "Saída ou entrada"}
+                              : mode === "task"
+                                ? "Nova atribuição"
+                                : mode === "payment"
+                                  ? "Novo pagamento"
+                                  : mode === "import"
+                                    ? "Importar extrato ou fatura"
+                                    : mode === "receipt"
+                                      ? "Registrar nota"
+                                      : mode === "shopping"
+                                        ? "Adicionar à lista de compras"
+                                        : mode === "category"
+                                          ? "Categoria e subcategoria"
+                                          : mode === "plan"
+                                            ? "Orçamento ou meta"
+                                            : mode === "account"
+                                              ? "Nova conta ou cartão"
+                                              : "Saída ou entrada"}
                 </h2>
               </div>
               <button
@@ -1390,41 +1512,41 @@ function QuickActions({
 
             {mode === "menu" ? (
               <div className="quick-action-grid quick-action-groups">
-                <button onClick={() => setMode("responsibility")}>
-                  <CheckSquare size={22} />
-                  <span><b>Responsabilidade</b><small>Atribuições e pagamentos</small></span>
-                </button>
-                <button onClick={() => setMode("registration")}>
-                  <Tags size={22} />
-                  <span><b>Cadastro</b><small>Metas, orçamentos e contas</small></span>
-                </button>
                 <button className="quick-action-primary" onClick={() => setMode("transaction-menu")}>
                   <CircleDollarSign size={22} />
                   <span><b>Lançamento</b><small>Movimentações e arquivos</small></span>
+                </button>
+                <button onClick={() => setMode("responsibility")}>
+                  <CheckSquare size={22} />
+                  <span><b>Responsabilidade</b><small>Atribuições e pagamentos</small></span>
                 </button>
                 <button onClick={() => setMode("market")}>
                   <ShoppingCart size={22} />
                   <span><b>Mercado</b><small>Notas e lista de compras</small></span>
                 </button>
+                <button onClick={() => setMode("registration")}>
+                  <Tags size={22} />
+                  <span><b>Cadastro</b><small>Categorias, planejamento e contas</small></span>
+                </button>
               </div>
             ) : mode === "responsibility" ? (
               <div className="quick-action-grid">
-                <button onClick={() => create("task", "rotinas", "quick-tasks")}>
+                <button onClick={() => setMode("task")}>
                   <CheckSquare size={22} /><span><b>Atribuição</b><small>Responsabilidade ou rotina</small></span>
                 </button>
-                <button onClick={() => create("payment", "rotinas", "quick-payments")}>
+                <button onClick={() => setMode("payment")}>
                   <ReceiptText size={22} /><span><b>Pagamento</b><small>Conta ou compromisso</small></span>
                 </button>
               </div>
             ) : mode === "registration" ? (
               <div className="quick-action-grid">
-                <button onClick={() => create("goal", "planejamento", "goals-section")}>
-                  <Target size={22} /><span><b>Meta</b><small>Provisão ou desejo</small></span>
+                <button onClick={() => setMode("category")}>
+                  <Tags size={22} /><span><b>Categoria/Subcategoria</b><small>Classificação de receitas e despesas</small></span>
                 </button>
-                <button onClick={() => create("budget", "planejamento", "budgets-section")}>
-                  <BarChart3 size={22} /><span><b>Orçamento</b><small>Valor e vigência</small></span>
+                <button onClick={() => setMode("plan")}>
+                  <Target size={22} /><span><b>Orçamento e meta</b><small>Planejamento e objetivos</small></span>
                 </button>
-                <button onClick={() => create("account", "planejamento", "accounts-section")}>
+                <button onClick={() => setMode("account")}>
                   <WalletCards size={22} /><span><b>Conta</b><small>Conta, cartão ou investimento</small></span>
                 </button>
               </div>
@@ -1436,16 +1558,16 @@ function QuickActions({
                 <button className="quick-action-primary" onClick={() => setMode("expense")}>
                   <TrendingDown size={22} /><span><b>Saída/Entrada</b><small>Registrar valor</small></span>
                 </button>
-                <button onClick={() => create("import", "importar", "quick-import")}>
+                <button onClick={() => setMode("import")}>
                   <Upload size={22} /><span><b>Extrato/Fatura</b><small>Importar arquivo</small></span>
                 </button>
               </div>
             ) : mode === "market" ? (
               <div className="quick-action-grid">
-                <button onClick={() => create("receipt", "supermercado", "quick-receipts")}>
+                <button onClick={() => setMode("receipt")}>
                   <Camera size={22} /><span><b>Nota</b><small>Fotografar ou escolher foto</small></span>
                 </button>
-                <button onClick={() => create("shopping", "supermercado", "quick-shopping")}>
+                <button onClick={() => setMode("shopping")}>
                   <Mic size={22} /><span><b>Comprar</b><small>Adicionar por voz ou texto</small></span>
                 </button>
               </div>
@@ -1458,6 +1580,65 @@ function QuickActions({
                 <label>Motivo<input name="reason" placeholder="Opcional" /></label>
                 <button className="primary">Confirmar movimento</button>
               </form>
+            ) : mode === "task" ? (
+              <form className="quick-expense-form" onSubmit={saveTaskInline}>
+                <label className="quick-expense-value">Responsabilidade<input name="title" required autoFocus placeholder="Ex.: pagar DARF" /></label>
+                <label>Próxima data e horário<input name="due" type="datetime-local" required defaultValue={new Date().toISOString().slice(0,16)} /></label>
+                <label>Responsável<select name="assignee" defaultValue={currentMember}><option>Olcino</option><option>Mari</option><option>Ambos</option></select></label>
+                <label>Repetição<select name="repeat" defaultValue="none"><option value="none">Não se repete</option><option value="daily">Diariamente</option><option value="weekly">Semanalmente</option><option value="monthly">Mensalmente</option><option value="yearly">Anualmente</option></select></label>
+                <label>Turno<select name="shift" defaultValue="Livre"><option>Livre</option><option>Manhã</option><option>Tarde</option><option>Noite</option></select></label>
+                <details className="compact-weekdays"><summary>Escolher dias da semana (quando necessário)</summary><fieldset className="weekday-picker"><legend>Dias</legend>{["dom","seg","ter","qua","qui","sex","sáb"].map((day,index)=><label key={day}><input type="checkbox" name="weekday" value={index}/>{day}</label>)}</fieldset></details>
+                <button className="primary quick-expense-save">Salvar atribuição</button>
+              </form>
+            ) : mode === "payment" ? (
+              <form className="quick-expense-form" onSubmit={savePaymentInline}>
+                <label className="quick-expense-value">Nome<input name="name" required autoFocus placeholder="Ex.: condomínio" /></label>
+                <label>Categoria<select name="categoryId"><option value="">Selecione</option>{data.categories.filter(category=>category.nature==="expense").map(category=><option key={category.id} value={category.id}>{category.name}</option>)}</select></label>
+                <label>Valor<MoneyInput name="planned" required placeholder="R$ 0,00" /></label>
+                <label>Data de pagamento<input name="dueDate" type="date" required defaultValue={dateOnly(new Date())}/></label>
+                <label>Frequência<select name="repeat" defaultValue="monthly"><option value="none">Único</option><option value="monthly">Mensal</option><option value="quarterly">Trimestral</option><option value="semiannual">Semestral</option><option value="yearly">Anual</option></select></label>
+                <button className="primary quick-expense-save">Salvar pagamento</button>
+              </form>
+            ) : mode === "import" ? (
+              <ImportPage data={data} mutate={mutate} setMessage={setMessage} hideValues={false} creating onCreateDone={close}/>
+            ) : mode === "receipt" ? (
+              <div className="quick-receipt-form">
+                <input ref={receiptFileRef} hidden type="file" accept="image/*" capture="environment" onChange={(event)=>readQuickReceipt(event.target.files?.[0])}/>
+                <button className="primary quick-expense-save" disabled={receiptBusy} onClick={()=>receiptFileRef.current?.click()}><Camera size={18}/>{receiptBusy ? "Lendo nota…" : "Fotografar ou escolher nota"}</button>
+                {receiptDraft && <>
+                  <div className="quick-expense-form">
+                    <label>Local<input value={receiptDraft.estabelecimento || ""} onChange={(event)=>setReceiptDraft({...receiptDraft, estabelecimento:event.target.value})}/></label>
+                    <label>Data<input type="date" value={receiptDraft.data || ""} onChange={(event)=>setReceiptDraft({...receiptDraft, data:event.target.value})}/></label>
+                    <label>Valor<CurrencyInput value={Number(receiptDraft.total)||0} onChange={(value)=>setReceiptDraft({...receiptDraft,total:value})}/></label>
+                    <label>Conta ou cartão<select value={accountId} onChange={(event)=>setAccountId(event.target.value)}>{activeAccounts.map(account=><option key={account.id} value={account.id}>{account.name}</option>)}</select></label>
+                  </div>
+                  <p className="muted">A nota será salva no Mercado e incluída como prévia de saída no mês.</p>
+                  <button className="primary quick-expense-save" onClick={saveQuickReceipt}>Confirmar nota</button>
+                </>}
+              </div>
+            ) : mode === "shopping" ? (
+              <ShoppingListManager data={data} currentMember={currentMember} mutate={mutate} setMessage={setMessage} suggestions={[]} showCreate onCreateDone={close}/>
+            ) : mode === "category" ? (
+              <form className="quick-expense-form" onSubmit={saveCategoryInline}>
+                <label className="quick-expense-value">Categoria<input name="name" required autoFocus placeholder="Ex.: Alimentação"/></label>
+                <label>Subcategoria<input name="subcategory" placeholder="Ex.: Supermercado"/></label>
+                <label>Tipo<select name="nature"><option value="expense">Despesa</option><option value="income">Receita</option><option value="transfer">Transferência</option><option value="goal">Meta</option></select></label>
+                <button className="primary quick-expense-save">Salvar categoria</button>
+              </form>
+            ) : mode === "plan" ? (
+              <form className="quick-expense-form" onSubmit={savePlanInline}>
+                <label>Cadastro<select name="planType"><option value="budget">Orçamento</option><option value="goal">Meta</option></select></label>
+                <label className="quick-expense-value">Nome<input name="name" required autoFocus placeholder="Ex.: Reforma ou Alimentação"/></label>
+                <label>Valor<MoneyInput name="amount" required placeholder="R$ 0,00"/></label>
+                <label>Categoria do orçamento<select name="categoryId"><option value="">Selecione quando for orçamento</option>{data.categories.filter(category=>category.nature==="expense").map(category=><option key={category.id} value={category.id}>{category.name}</option>)}</select></label>
+                <label>Início<input name="startMonth" type="month" defaultValue={monthOf(new Date().toISOString())}/></label>
+                <label>Fim (opcional)<input name="endMonth" type="month"/></label>
+                <label>Tipo da meta<select name="goalKind"><option value="provision">Provisão</option><option value="desire">Desejo</option></select></label>
+                <label>Prazo da meta<input name="deadline" type="date" defaultValue={dateOnly(new Date())}/></label>
+                <button className="primary quick-expense-save">Salvar planejamento</button>
+              </form>
+            ) : mode === "account" ? (
+              <form className="quick-expense-form" onSubmit={saveAccountInline}><AccountFields/><button className="primary quick-expense-save">Salvar conta</button></form>
             ) : (
               <form
                 className="quick-expense-form"
@@ -1470,6 +1651,11 @@ function QuickActions({
                   Entra como prévia do mês e será conciliada quando a fatura ou
                   o extrato forem importados.
                 </p>
+                <div className="quick-entry-tools">
+                  <button type="button" onClick={() => setShowVoice((value) => !value)}><Mic size={17}/> Registrar falando</button>
+                  <button type="button" onClick={() => setMode("receipt")}><Camera size={17}/> Ler nota</button>
+                </div>
+                {showVoice && <VoiceExpense data={data} mutate={mutate} setMessage={setMessage} currentMember={currentMember}/>}
                 <label>
                   Tipo
                   <select
@@ -1494,22 +1680,9 @@ function QuickActions({
                     placeholder="R$ 0,00"
                   />
                 </label>
-                <label>
-                  Descrição ou estabelecimento
-                  <input
-                    name="description"
-                    required
-                    placeholder="Ex.: farmácia"
-                    value={description}
-                    onChange={(event) => setDescription(event.target.value)}
-                    onBlur={(event) =>
-                      applyCategorySuggestion(event.target.value)
-                    }
-                  />
-                </label>
                 <div className="quick-expense-row">
                   <label>
-                    Data
+                    Data da compra
                     <input
                       name="date"
                       type="date"
@@ -1584,6 +1757,7 @@ function QuickActions({
                     onChange={(event) => {
                       const nextAccountId = event.target.value;
                       setAccountId(nextAccountId);
+                      setOperator(data.accounts.find((account)=>account.id===nextAccountId)?.operator || currentMember);
                       applyCategorySuggestion(
                         description,
                         nextAccountId,
@@ -1599,23 +1773,9 @@ function QuickActions({
                     ))}
                   </select>
                 </label>
-                <label>
-                  Uso do gasto
-                  <select name="scope" defaultValue="Familiar">
-                    <option>Familiar</option>
-                    <option>Pessoal — Olcino</option>
-                    <option>Pessoal — Mari</option>
-                    <option>Fora do orçamento</option>
-                  </select>
-                </label>
+                <label>Parcelamento<select name="installments" defaultValue="1"><option value="1">À vista</option>{[2,3,4,5,6,7,8,9,10,11,12].map(value=><option key={value} value={value}>{value} parcelas</option>)}</select></label>
                 <button className="primary quick-expense-save" disabled={saving}>
                   {saving ? "Salvando…" : "Adicionar à prévia"}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => create("voice-transaction", "importar", "quick-voice")}
-                >
-                  <Mic size={17} /> Registrar falando
                 </button>
               </form>
             )}
@@ -3228,7 +3388,7 @@ function Receipts({
           </div>
       </section>
       </Collapsible>
-      <Collapsible title={`Catálogo de produtos (${products.length})`}>
+      <Collapsible id="product-catalog" title={`Catálogo de produtos (${products.length})`}>
       <section className="panel supermarket-panel product-catalog">
         <h2>Produtos e valores médios</h2>
         <p className="muted">
@@ -3256,14 +3416,16 @@ function Receipts({
               </div>
               <div className="actions">
                 <span>{p.price == null ? "—" : <><SensitiveMoney value={p.price} hidden={hideValues} /> médio</>}</span>
-                <button
+                <button className="icon-button"
+                  title="Ver e editar ocorrências"
+                  aria-label={`Ver e editar ocorrências de ${p.name}`}
                   onClick={() => {
                     setEditingProductKey(p.key);
                     setOccurrenceStart("");
                     setOccurrenceEnd("");
                   }}
                 >
-                  Ver e editar ocorrências
+                  <Eye size={17} /><Pencil size={15} />
                 </button>
               </div>
             </div>
@@ -3517,6 +3679,7 @@ function ImportPage({
     () => sessionStorage.getItem("inter-pdf-password") || "",
   );
   const [rememberPassword, setRememberPassword] = useState(false);
+  const [needsPassword, setNeedsPassword] = useState(false);
   const input = useRef<HTMLInputElement>(null);
   const choose = async (files: File[]) => {
     if (!files.length)
@@ -3565,6 +3728,7 @@ function ImportPage({
           const visibleError = passwordLookupError && isPdfPasswordError(error)
             ? passwordLookupError
             : error;
+          if (isPdf && isPdfPasswordError(error)) setNeedsPassword(true);
           setMessage(`${file.name}: ${(visibleError as Error).message}`);
         }
       }
@@ -3600,21 +3764,23 @@ function ImportPage({
             </option>
           ))}
         </select>
-        <input
-          type="password"
-          value={pdfPassword}
-          onChange={(e) => setPdfPassword(e.target.value)}
-          placeholder="Senha manual (somente se o automático falhar)"
-          autoComplete="off"
-        />
-        <label>
+        {needsPassword && <>
           <input
-            type="checkbox"
-            checked={rememberPassword}
-            onChange={(e) => setRememberPassword(e.target.checked)}
+            type="password"
+            value={pdfPassword}
+            onChange={(e) => setPdfPassword(e.target.value)}
+            placeholder="Senha solicitada pelo documento"
+            autoComplete="off"
           />
-          Lembrar somente até fechar o navegador
-        </label>
+          <label>
+            <input
+              type="checkbox"
+              checked={rememberPassword}
+              onChange={(e) => setRememberPassword(e.target.checked)}
+            />
+            Lembrar somente até fechar o navegador
+          </label>
+        </>}
         <input
           ref={input}
           type="file"
@@ -4124,6 +4290,13 @@ function Payments({
   creating: boolean;
   onCreateDone: () => void;
 }) {
+  const recurrenceLabel: Record<Obligation["recurrence"], string> = { none: "Único", monthly: "Mensal", quarterly: "Trimestral", semiannual: "Semestral", yearly: "Anual" };
+  const futureDates = (obligation: Obligation) => {
+    const step = obligation.recurrence === "monthly" ? 1 : obligation.recurrence === "quarterly" ? 3 : obligation.recurrence === "semiannual" ? 6 : obligation.recurrence === "yearly" ? 12 : 0;
+    if (!step) return [obligation.dueDate];
+    const start = new Date(`${obligation.dueDate}T12:00:00`);
+    return [0, 1, 2].map((index) => { const date = new Date(start); date.setMonth(date.getMonth() + step * index); return dateOnly(date); });
+  };
   const [editingId, setEditingId] = useState<string>();
   const dueDateForDay = (baseMonth: string, rawDay: FormDataEntryValue | null) => {
     const day = Math.max(1, Math.min(31, Number(rawDay) || 10));
@@ -4224,6 +4397,8 @@ function Payments({
               <select name="repeat">
                 <option value="none">Sem repetição</option>
                 <option value="monthly">Mensal</option>
+                <option value="quarterly">Trimestral</option>
+                <option value="semiannual">Semestral</option>
                 <option value="yearly">Anual</option>
               </select>
               <select name="accountId"><option value="">Conta do pagamento</option>{data.accounts.filter(account=>account.active).map(account=><option key={account.id} value={account.id}>{account.name}</option>)}</select>
@@ -4253,7 +4428,7 @@ function Payments({
                   <Badge text={o.status} />
                   <h3>{o.name}</h3>
                   <small>
-                    {o.kind} · vence {o.dueDate}
+                    {o.kind} · {recurrenceLabel[o.recurrence]} · próximos: {futureDates(o).join(", ")}
                   </small>
                 </div>
                 <strong><SensitiveMoney value={o.planned} hidden={hideValues} /></strong>
@@ -4279,7 +4454,7 @@ function Payments({
                     <MoneyInput name="tolerance" defaultValue={o.tolerance} placeholder="Tolerância" />
                     <label>Dia do pagamento<input name="dueDay" type="number" inputMode="numeric" min="1" max="31" required defaultValue={Number(o.dueDate.slice(8,10)) || 10} /></label>
                     <select name="kind" defaultValue={o.kind}><option>Manual</option><option>Débito automático</option><option>Recorrência no cartão</option><option>Assinatura</option><option>Parcela</option><option>Variável</option><option>Eventual</option></select>
-                    <select name="repeat" defaultValue={o.recurrence}><option value="none">Sem repetição</option><option value="monthly">Mensal</option><option value="yearly">Anual</option></select>
+                    <select name="repeat" defaultValue={o.recurrence}><option value="none">Sem repetição</option><option value="monthly">Mensal</option><option value="quarterly">Trimestral</option><option value="semiannual">Semestral</option><option value="yearly">Anual</option></select>
                     <select name="accountId" defaultValue={o.accountId || ""}><option value="">Conta do pagamento</option>{data.accounts.filter(account=>account.active).map(account=><option key={account.id} value={account.id}>{account.name}</option>)}</select>
                     <select name="categoryId" defaultValue={o.categoryId || ""}><option value="">Categoria da despesa</option>{data.categories.filter(category=>category.nature==="expense").map(category=><option key={category.id} value={category.id}>{category.name}</option>)}</select>
                     <input name="subcategory" defaultValue={o.subcategory || ""} placeholder="Subcategoria" />
@@ -4595,6 +4770,24 @@ function Tasks({
   const completedOccurrences=data.tasks.flatMap(task=>task.history.map((completedAt,index)=>({task,completedAt,index}))).sort((a,b)=>b.completedAt.localeCompare(a.completedAt));
   const undoCompletion=(taskId:string,index:number,completedAt:string)=>mutate(d=>{const task=d.tasks.find(item=>item.id===taskId);if(!task)return;task.history.splice(index,1);task.status="Pendente";task.due=completedAt;task.updatedAt=now();task.version++});
   const dayNames = ["dom", "seg", "ter", "qua", "qui", "sex", "sáb"];
+  const dayStart = (value: Date) => new Date(value.getFullYear(), value.getMonth(), value.getDate());
+  const today = dayStart(new Date());
+  const taskGroups = (items: Task[]) => {
+    const groups: Array<[string, Task[]]> = [
+      ["Hoje", []],
+      ["Amanhã", []],
+      ["Final de semana", []],
+      ["Próximos dias", []],
+    ];
+    for (const item of items) {
+      const due = dayStart(new Date(item.due));
+      const days = Math.round((due.getTime() - today.getTime()) / 86_400_000);
+      const weekend = due.getDay() === 0 || due.getDay() === 6;
+      const target = days <= 0 ? 0 : days === 1 ? 1 : weekend ? 2 : 3;
+      groups[target][1].push(item);
+    }
+    return groups.filter(([, items]) => items.length);
+  };
   const renderTasks = (items: Task[]) => (
     <div className="task-list">
       {items.map((t) => (
@@ -4640,7 +4833,7 @@ function Tasks({
     <section className="panel">
       <div className="panel-head">
         <div>
-          <h2>Agenda e rotinas</h2>
+          <h2>Responsabilidades</h2>
           <p className="muted">
             Concluir uma ocorrência mantém a próxima recorrência.
           </p>
@@ -4707,18 +4900,15 @@ function Tasks({
           }
         />
       )}
-      <h3>Minhas responsabilidades e tarefas</h3>
-      {renderTasks(
-        active.filter(
-          (t) => t.assignee === currentMember || t.assignee === "Ambos",
-        ),
-      )}
-      <h3>Outras responsabilidades e tarefas</h3>
-      {renderTasks(
-        active.filter(
-          (t) => t.assignee !== currentMember && t.assignee !== "Ambos",
-        ),
-      )}
+      <div className="responsibility-groups">
+        <h3>Minhas responsabilidades</h3>
+        {taskGroups(active.filter((t) => t.assignee === currentMember || t.assignee === "Ambos")).map(([label, items]) => (
+          <section key={label} className="responsibility-group"><h4>{label}<small>{items.length}</small></h4>{renderTasks(items)}</section>
+        ))}
+        {!active.some((t) => t.assignee === currentMember || t.assignee === "Ambos") && <Empty />}
+        <h3>Outras responsabilidades</h3>
+        {renderTasks(active.filter((t) => t.assignee !== currentMember && t.assignee !== "Ambos"))}
+      </div>
       <details className="completed-block"><summary>Concluídas ({completedOccurrences.length})</summary>{completedOccurrences.map(item=><div className="confirmed-row" key={`${item.task.id}-${item.completedAt}`}><div><b>{item.task.title}</b><small>{new Date(item.completedAt).toLocaleString("pt-BR")} · {item.task.assignee}</small></div><button onClick={()=>undoCompletion(item.task.id,item.index,item.completedAt)}>Desfazer conclusão</button></div>)}</details>
     </section>
   );

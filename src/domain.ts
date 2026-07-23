@@ -102,7 +102,7 @@ export interface Obligation extends Audit {
     | "Eventual";
   planned: number;
   dueDate: string;
-  recurrence: "none" | "monthly" | "yearly";
+  recurrence: "none" | "monthly" | "quarterly" | "semiannual" | "yearly";
   tolerance: number;
   accountId?: string;
   pattern?: string;

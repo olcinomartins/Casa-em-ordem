@@ -11,9 +11,14 @@ const msal = clientId
         authority: "https://login.microsoftonline.com/common",
         redirectUri,
       },
-      // O estado transitório da autenticação fica limitado à aba. Isso evita que
-      // um popup interrompido no celular bloqueie sessões futuras.
-      cache: { cacheLocation: "localStorage", cacheRetentionDays: 0 },
+      // Mantém a sessão Microsoft no aparelho. No iPhone isso evita uma nova
+      // autenticação a cada abertura normal do Safari/PWA; navegação privada e
+      // limpeza manual de dados continuam removendo a sessão por segurança.
+      cache: {
+        cacheLocation: "localStorage",
+        temporaryCacheLocation: "localStorage",
+        storeAuthStateInCookie: true,
+      },
     })
   : null;
 let etag: string | undefined;
@@ -113,7 +118,10 @@ async function prepareAuth() {
 
 export async function resumeSignIn(): Promise<AccountInfo | undefined> {
   await prepareAuth();
-  return msal!.getAllAccounts()[0];
+  const result = await redirectHandling;
+  const account = (result as { account?: AccountInfo } | null)?.account || msal!.getActiveAccount() || msal!.getAllAccounts()[0];
+  if (account) msal!.setActiveAccount(account);
+  return account;
 }
 
 async function acquireToken() {
@@ -146,8 +154,8 @@ async function token() {
 export async function getMicrosoftAccessToken() { return token(); }
 export async function signIn(): Promise<AccountInfo> {
   await prepareAuth();
-  const account = msal!.getAllAccounts()[0];
-  if (account) return account;
+  const account = msal!.getActiveAccount() || msal!.getAllAccounts()[0];
+  if (account) { msal!.setActiveAccount(account); return account; }
   await msal!.loginRedirect({
     scopes,
     redirectStartPage: location.href,

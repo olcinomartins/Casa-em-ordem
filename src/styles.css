@@ -257,6 +257,36 @@ nav button.active {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: .7rem;
 }
+.quick-entry-tools { display: flex; flex-wrap: wrap; gap: .55rem; grid-column: 1 / -1; }
+.quick-entry-tools button { flex: 1 1 180px; }
+.quick-receipt-form { display: grid; gap: .75rem; }
+.compact-weekdays { grid-column: 1 / -1; border: 1px solid var(--line); border-radius: 10px; padding: .65rem .75rem; }
+.compact-weekdays summary { cursor: pointer; color: #64746b; font-size: .85rem; }
+.responsibility-groups { display: grid; gap: .7rem; }
+.responsibility-groups > h3 { margin: .5rem 0 0; font-size: 1rem; }
+.responsibility-group { border: 1px solid #e7e5dc; border-radius: 12px; overflow: hidden; }
+.responsibility-group h4 { display: flex; justify-content: space-between; align-items: center; margin: 0; padding: .5rem .7rem; background: #f6f5ef; font-size: .82rem; }
+.responsibility-group h4 small { border-radius: 999px; background: #e3eee6; color: #285643; padding: .1rem .45rem; }
+.responsibility-groups .task-list article { padding: .55rem .7rem; gap: .55rem; }
+.responsibility-groups .task-list h3 { font-size: .9rem; }
+.responsibility-groups .task-list small { font-size: .72rem; }
+.responsibility-groups .check { width: 34px; height: 34px; }
+.payment { padding: .75rem; gap: .55rem; }
+.payment h3 { margin: .25rem 0; font-size: .96rem; }
+.payment small { font-size: .72rem; }
+.payment-grid { gap: .65rem; }
+@media (min-width: 721px) {
+  .app { grid-template-columns: 255px minmax(0, 1fr); }
+  main { max-width: 1700px; padding: 1.5rem 2.5rem 5rem; }
+  header { min-height: 48px; }
+  .quick-action-backdrop { place-items: center; }
+  .quick-action-sheet { width: min(940px, calc(100vw - 3rem)); max-height: min(86dvh, 820px); }
+  .quick-action-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .quick-action-groups { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .quick-expense-form { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .quick-expense-value, .quick-expense-form > .muted, .quick-expense-save { grid-column: span 3; }
+  .payment-grid { grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); }
+}
 .quick-action-grid > button {
   min-width: 0;
   min-height: 72px;
@@ -280,6 +310,8 @@ nav button.active {
 .quick-expense-form label > select { display: block; width: 100%; margin-top: .25rem; }
 .quick-expense-value input { font-size: 1.35rem; font-weight: 700; padding: .85rem; }
 .quick-expense-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; grid-column: 1 / -1; }
+.quick-expense-row > label { min-width: 0; }
+.quick-expense-row input, .quick-expense-row select { width: 100%; }
 .quick-expense-save { width: 100% !important; min-height: 48px; }
 main {
   padding: 1.7rem 2.2rem 6rem;
@@ -1740,6 +1772,16 @@ button.attention-item { justify-content: initial; }
   .product-occurrence-edit { grid-template-columns: minmax(0, 1fr); padding: .8rem; }
   .product-occurrence-edit .occurrence-context,
   .product-occurrence-edit > button { grid-column: 1; }
+}
+
+@media (min-width: 721px) {
+  .quick-action-backdrop { place-items: center; }
+  .quick-action-sheet { width: min(940px, calc(100vw - 3rem)); max-height: min(86dvh, 820px); }
+  .quick-action-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .quick-action-groups { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .quick-expense-form { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .quick-expense-value, .quick-expense-form > .muted, .quick-expense-save { grid-column: span 3; }
+  .payment-grid { grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); }
 }
 
 @media (max-width: 380px) {
