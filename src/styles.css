@@ -21,6 +21,14 @@
 .collapsible-content > *, .grid > *, .panel { min-width: 0; max-width: 100%; }
 .page-blocks { display: flex; flex-direction: column; min-width: 0; }
 .page-organization-toolbar { display: flex; justify-content: flex-end; margin: 0 0 1rem; }
+.page-order-button {
+  width: 38px;
+  min-width: 38px;
+  min-height: 38px;
+  padding: .35rem;
+  display: grid;
+  place-items: center;
+}
 .page-organizer { margin-bottom: 1rem; }
 .notification-center { position: relative; }
 .notification-button { position: relative; min-width: 46px; justify-content: center; }
@@ -1139,9 +1147,8 @@ code {
   border: 1px solid var(--line);
   border-radius: 12px;
 }
-.drag-handle { cursor: grab; touch-action: none; }
-.drag-handle:active, .budget-entry.is-dragging .drag-handle { cursor: grabbing; }
-.budget-entry.is-dragging { opacity: .72; }
+.sortable-item { touch-action: pan-y; }
+.sortable-item.is-dragging { opacity: .72; user-select: none; }
 .budget-item small {
   display: block;
   color: #718078;
@@ -1757,7 +1764,7 @@ button.attention-item { justify-content: initial; }
   }
   .budget-item > .actions {
     display: grid;
-    grid-template-columns: repeat(3, 34px);
+    grid-template-columns: repeat(2, 34px);
     gap: .3rem;
     width: auto;
   }
@@ -1769,20 +1776,20 @@ button.attention-item { justify-content: initial; }
   }
   .account-row {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 102px;
+    grid-template-columns: minmax(0, 1fr) 68px;
     gap: .45rem;
     align-items: start;
   }
   .account-row > .actions {
     display: grid;
-    grid-template-columns: repeat(3, 32px);
-    width: 102px;
+    grid-template-columns: repeat(2, 32px);
+    width: 68px;
     gap: .3rem;
   }
   .account-row > .actions button { width: 32px; min-width: 32px; min-height: 32px; padding: .25rem; }
   .goal-actions {
     display: grid;
-    grid-template-columns: repeat(3, 34px);
+    grid-template-columns: repeat(2, 34px);
     gap: .3rem;
     width: max-content;
   }

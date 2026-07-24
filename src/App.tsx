@@ -14,7 +14,6 @@ import {
   ReceiptText,
   Target,
   CheckSquare,
-  Settings,
   Cloud,
   CloudOff,
   Plus,
@@ -35,7 +34,7 @@ import {
   PiggyBank,
   TrendingDown,
   ChevronLeft,
-  GripVertical,
+  ArrowDownUp,
 } from "lucide-react";
 import {
   Account,
@@ -179,8 +178,6 @@ const pageBlocks: Record<Page, ReadonlyArray<[string, string]>> = {
     ["goals-section", "Metas e reservas"],
   ],
   importar: [
-    ["quick-voice", "Registrar por voz"],
-    ["quick-import", "Importar extratos e faturas"],
     ["quick-transactions", "Transações e revisão"],
   ],
   supermercado: [
@@ -813,11 +810,13 @@ export default function App() {
         )}
         <div className="page-organization-toolbar">
           <button
+            className="page-order-button"
+            title={organizingPage ? "Concluir ajuste da ordem" : "Ajustar ordem dos blocos"}
+            aria-label={organizingPage ? "Concluir ajuste da ordem" : "Ajustar ordem dos blocos"}
             aria-expanded={organizingPage}
             onClick={() => setOrganizingPage((current) => !current)}
           >
-            <Settings size={17} />
-            {organizingPage ? "Concluir organização" : "Organizar página"}
+            <ArrowDownUp size={18} />
           </button>
         </div>
         {organizingPage && (
@@ -958,17 +957,6 @@ export default function App() {
         )}
         {page === "importar" && (
           <>
-            <Collapsible id="quick-voice" title="Registrar despesa por voz">
-              <VoiceExpense
-                data={data}
-                mutate={mutate}
-                setMessage={setMessage}
-                currentMember={currentMember}
-              />
-            </Collapsible>
-            <Collapsible id="quick-import" title="Importar extratos e faturas">
-              <ImportPage data={data} mutate={mutate} setMessage={setMessage} hideValues={hideValues} creating={createIntent === "import"} onCreateDone={() => setCreateIntent(undefined)} />
-            </Collapsible>
             <Collapsible id="quick-transactions" title="Transações e revisão">
               <Transactions
                 data={data}
@@ -1144,6 +1132,9 @@ function QuickActions({
   );
   const [categoryId, setCategoryId] = useState("");
   const [subcategory, setSubcategory] = useState("");
+  const [newCategoryName, setNewCategoryName] = useState("");
+  const [newSubcategoryName, setNewSubcategoryName] = useState("");
+  const [planCategoryId, setPlanCategoryId] = useState("");
   const [categoryTouched, setCategoryTouched] = useState(false);
   const [description, setDescription] = useState("");
   const [operator, setOperator] = useState<Member>(currentMember);
@@ -1196,6 +1187,9 @@ function QuickActions({
     setOpen(false);
     setMode("menu");
     setDialogError("");
+    setPlanCategoryId("");
+    setNewCategoryName("");
+    setNewSubcategoryName("");
     if (restoreFocus)
       window.setTimeout(() => fabRef.current?.focus(), 0);
   };
@@ -1348,15 +1342,24 @@ function QuickActions({
     const type = String(form.get("planType") || "budget") as "budget" | "provision" | "goal";
     const amount = parseCurrency(form.get("amount"));
     const name = String(form.get("name") || "").trim();
-    const categoryId = String(form.get("categoryId") || "");
-    const subcategory = String(form.get("subcategory") || "") || undefined;
+    const selectedCategoryId = String(form.get("categoryId") || "");
+    const subcategory = (String(form.get("subcategory") || "") || newSubcategoryName.trim()) || undefined;
     const startDate = String(form.get("startDate") || "");
     const endDate = String(form.get("endDate") || "");
-    if (amount <= 0 || !name || !categoryId || !startDate)
+    if (amount <= 0 || !name || !selectedCategoryId || !startDate || (selectedCategoryId === "__new__" && !newCategoryName.trim()))
       return showDialogError("Informe nome, valor, categoria e data de início.");
     if (endDate && endDate < startDate)
       return showDialogError("A data de fim não pode ser anterior à data de início.");
     mutate((family) => {
+      let categoryId = selectedCategoryId;
+      if (selectedCategoryId === "__new__") {
+        const existing = family.categories.find((category) => normalize(category.name) === normalize(newCategoryName));
+        const category = existing || { ...audit(currentMember), name: newCategoryName.trim(), nature: "expense" as const, subcategories: [] };
+        if (!existing) family.categories.push(category);
+        categoryId = category.id;
+      }
+      const category = family.categories.find((item) => item.id === categoryId)!;
+      if (subcategory && !category.subcategories.some((item) => normalize(item) === normalize(subcategory))) category.subcategories.push(subcategory);
       if (type === "goal") family.goals.push({ ...audit(currentMember), name, kind: "desire", target: amount, startDate, deadline: endDate, categoryId, subcategory, priority: family.goals.length + 1, minimum: 0, emergency: false, active: true, movements: [] });
       else {
         family.budgets.push({ ...audit(currentMember), amount, month: startDate.slice(0, 7), startMonth: startDate.slice(0, 7), endMonth: endDate ? endDate.slice(0, 7) : undefined, kind: type, categoryId, subcategory, reason: name });
@@ -1370,9 +1373,10 @@ function QuickActions({
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     const name = String(form.get("name") || "").trim();
+    const functionalName = String(form.get("functionalName") || "").trim() || undefined;
     if (!name) return showDialogError("Informe o nome da conta ou cartão.");
     const values = parseAccountOwnership(String(form.get("ownership") || ""));
-    mutate((family) => family.accounts.push({ ...audit(currentMember), name, kind: String(form.get("kind")) as Account["kind"], ...values, institution: inferInstitution(name), lastDigits: inferLastDigits(name), active: true, importAliases: [name] }));
+    mutate((family) => family.accounts.push({ ...audit(currentMember), name, functionalName, kind: String(form.get("kind")) as Account["kind"], ...values, institution: inferInstitution(name), lastDigits: inferLastDigits(name), active: true, importAliases: [name] }));
     close();
   };
 
@@ -1410,7 +1414,9 @@ function QuickActions({
     savingRef.current = true;
     const form = new FormData(event.currentTarget);
     const amount = Math.abs(parseCurrency(form.get("amount")));
-    const cleanDescription = String(form.get("description") || "").trim() || data.categories.find((category) => category.id === categoryId)?.name || "Lançamento manual";
+    const resolvedCategoryId = categoryId === "__new__" ? uid() : categoryId;
+    const resolvedSubcategory = newSubcategoryName.trim() || subcategory || undefined;
+    const cleanDescription = String(form.get("description") || "").trim() || (categoryId === "__new__" ? newCategoryName.trim() : data.categories.find((category) => category.id === categoryId)?.name) || "Lançamento manual";
     const date = String(form.get("date") || dateOnly(new Date()));
     const selectedAccountId = String(form.get("accountId") || "");
     const selectedOperator = String(
@@ -1418,7 +1424,7 @@ function QuickActions({
     ) as Member;
     const scope = String(form.get("scope") || "Familiar") as Transaction["scope"];
     const account = data.accounts.find((item) => item.id === selectedAccountId);
-    if (!amount || !date || !account || !categoryId) {
+    if (!amount || !date || !account || !categoryId || (categoryId === "__new__" && !newCategoryName.trim())) {
       showDialogError(
         "Preencha valor, descrição, categoria, conta ou cartão e data.",
       );
@@ -1440,8 +1446,8 @@ function QuickActions({
         accountId: selectedAccountId,
         operator: selectedOperator,
         scope,
-        categoryId,
-        subcategory: subcategory || undefined,
+        categoryId: resolvedCategoryId,
+        subcategory: resolvedSubcategory,
         installment: Number(form.get("installment") || 1),
         installments: Math.max(1, Number(form.get("installments") || 1)),
         totalAmount: Math.abs(parseCurrency(form.get("amount"))) * Math.max(1, Number(form.get("installments") || 1)),
@@ -1455,9 +1461,18 @@ function QuickActions({
         notes: "Estimativa manual registrada pelo botão de ação rápida.",
       };
       transaction.dedupeKey = await dedupeKey(transaction);
-      mutate((family) => family.transactions.push(transaction));
+      mutate((family) => {
+        if (categoryId === "__new__") {
+          const existing = family.categories.find((category) => normalize(category.name) === normalize(newCategoryName));
+          if (existing) transaction.categoryId = existing.id;
+          else family.categories.push({ ...audit(currentMember), id: resolvedCategoryId, name: newCategoryName.trim(), nature: transactionKind === "income" ? "income" : "expense", subcategories: resolvedSubcategory ? [resolvedSubcategory] : [] });
+        }
+        family.transactions.push(transaction);
+      });
       setCategoryId("");
       setSubcategory("");
+      setNewCategoryName("");
+      setNewSubcategoryName("");
       setCategoryTouched(false);
       setDescription("");
       close();
@@ -1669,8 +1684,10 @@ function QuickActions({
                 <label>Tipo<select name="planType"><option value="budget">Orçamento mensal</option><option value="provision">Provisão mensal</option><option value="goal">Meta</option></select></label>
                 <label className="quick-expense-value">Nome<input name="name" required autoFocus placeholder="Ex.: Reforma ou Alimentação"/></label>
                 <label>Valor<MoneyInput name="amount" required placeholder="R$ 0,00"/></label>
-                <label>Categoria<select name="categoryId" required><option value="">Selecione</option>{data.categories.filter(category=>category.nature==="expense").map(category=><option key={category.id} value={category.id}>{category.name}</option>)}</select></label>
+                <label>Categoria<select name="categoryId" required value={planCategoryId} onChange={(event)=>setPlanCategoryId(event.target.value)}><option value="">Selecione</option>{data.categories.filter(category=>category.nature==="expense").map(category=><option key={category.id} value={category.id}>{category.name}</option>)}<option value="__new__">Criar categoria agora</option></select></label>
+                {planCategoryId === "__new__" && <label>Nova categoria<input required value={newCategoryName} placeholder="Ex.: Alimentação" onChange={(event)=>setNewCategoryName(event.target.value)}/></label>}
                 <label>Subcategoria<input name="subcategory" placeholder="Opcional"/></label>
+                <label>Nova subcategoria<input value={newSubcategoryName} placeholder="Criar junto" onChange={(event)=>setNewSubcategoryName(event.target.value)}/></label>
                 <label>Data de início<input name="startDate" type="date" required defaultValue={dateOnly(new Date())}/></label>
                 <label>Data de fim<input name="endDate" type="date"/></label>
                 <button className="primary quick-expense-save">Salvar planejamento</button>
@@ -1770,8 +1787,10 @@ function QuickActions({
                         {category.name}
                       </option>
                     ))}
+                    <option value="__new__">Criar categoria agora</option>
                   </select>
                 </label>
+                {categoryId === "__new__" && <label>Nova categoria<input required value={newCategoryName} placeholder="Ex.: Alimentação" onChange={(event) => setNewCategoryName(event.target.value)} /></label>}
                 <label>
                   Subcategoria
                   <select
@@ -1786,6 +1805,7 @@ function QuickActions({
                       ))}
                   </select>
                 </label>
+                <label>Nova subcategoria<input value={newSubcategoryName} placeholder="Criar junto" onChange={(event) => setNewSubcategoryName(event.target.value)} /></label>
                 <label>
                   Conta ou cartão
                   <select
@@ -1992,11 +2012,13 @@ function Dashboard({
       <div className="toolbar dashboard-toolbar">
         <ViewSwitch view={view} setView={setView} />
         <button
+          className="page-order-button"
+          title={organizing ? "Concluir ajuste da ordem" : "Ajustar ordem dos blocos"}
+          aria-label={organizing ? "Concluir ajuste da ordem" : "Ajustar ordem dos blocos"}
           aria-expanded={organizing}
           onClick={() => setOrganizing((current) => !current)}
         >
-          <Settings size={17} />
-          {organizing ? "Concluir organização" : "Organizar painel"}
+          <ArrowDownUp size={18} />
         </button>
       </div>
       {organizing && (
@@ -4125,6 +4147,8 @@ function useHoldToSort(
   const activeId = useRef<string>();
   const pointer = useRef<{ x: number; y: number }>();
   const frame = useRef<number>();
+  const pressTimer = useRef<number>();
+  const pressOrigin = useRef<{ x: number; y: number }>();
   const [draggingId, setDraggingId] = useState<string>();
   const moveAtPointer = (x: number, y: number) => {
     const sourceId = activeId.current;
@@ -4147,24 +4171,37 @@ function useHoldToSort(
     }
     frame.current = requestAnimationFrame(autoScroll);
   };
-  const start = (event: React.PointerEvent<HTMLButtonElement>, id: string) => {
-    event.preventDefault();
+  const start = (event: React.PointerEvent<HTMLElement>, id: string) => {
+    if ((event.target as HTMLElement).closest("button, input, select, textarea, a")) return;
     event.currentTarget.setPointerCapture(event.pointerId);
-    activeId.current = id;
     pointer.current = { x: event.clientX, y: event.clientY };
-    setDraggingId(id);
-    frame.current = requestAnimationFrame(autoScroll);
+    pressOrigin.current = pointer.current;
+    pressTimer.current = window.setTimeout(() => {
+      activeId.current = id;
+      setDraggingId(id);
+      frame.current = requestAnimationFrame(autoScroll);
+    }, 280);
   };
-  const drag = (event: React.PointerEvent<HTMLButtonElement>) => {
-    if (!activeId.current) return;
+  const drag = (event: React.PointerEvent<HTMLElement>) => {
     pointer.current = { x: event.clientX, y: event.clientY };
+    if (!activeId.current) {
+      const origin = pressOrigin.current;
+      if (origin && Math.hypot(event.clientX - origin.x, event.clientY - origin.y) > 10 && pressTimer.current) {
+        window.clearTimeout(pressTimer.current);
+        pressTimer.current = undefined;
+      }
+      return;
+    }
     moveAtPointer(event.clientX, event.clientY);
   };
   const end = () => {
+    if (pressTimer.current) window.clearTimeout(pressTimer.current);
+    pressTimer.current = undefined;
     if (frame.current) cancelAnimationFrame(frame.current);
     frame.current = undefined;
     activeId.current = undefined;
     pointer.current = undefined;
+    pressOrigin.current = undefined;
     setDraggingId(undefined);
   };
   return { draggingId, start, drag, end };
@@ -4272,14 +4309,13 @@ function Budgets({
     </form>
   );
   const renderBudget = (item: Budget) => (
-    <div className={`budget-entry${budgetSort.draggingId === item.id ? " is-dragging" : ""}`} key={item.id} data-sort-budget data-sort-id={item.id}>
+    <div className={`budget-entry sortable-item${budgetSort.draggingId === item.id ? " is-dragging" : ""}`} key={item.id} data-sort-budget data-sort-id={item.id} onPointerDown={(event) => budgetSort.start(event, item.id)} onPointerMove={budgetSort.drag} onPointerUp={budgetSort.end} onPointerCancel={budgetSort.end}>
       <div className="budget-item">
         <div>
           <b>{label(item)}</b>
           <small>{data.categories.find((category) => category.id === item.categoryId)?.name || "Sem categoria"} · {money(item.amount)} · {item.startMonth || item.month || "mensal contínuo"}</small>
         </div>
         <div className="actions">
-          <button className="icon-button drag-handle" title="Pressione e arraste para ordenar" aria-label={`Arrastar ${label(item)} para ordenar`} onPointerDown={(event) => budgetSort.start(event, item.id)} onPointerMove={budgetSort.drag} onPointerUp={budgetSort.end} onPointerCancel={budgetSort.end}><GripVertical size={18} /></button>
           <button className="icon-button" title="Editar orçamento" aria-label={`Editar ${label(item)}`} onClick={() => setEditing(editing?.id === item.id ? undefined : item)}><Pencil size={18} /></button>
           <button className="icon-button danger-button" title="Excluir orçamento" aria-label={`Excluir ${label(item)}`} onClick={() => remove(item.id)}><Trash2 size={15} /></button>
         </div>
@@ -4728,7 +4764,7 @@ function Goals({
               .map((g) => {
                 const total = g.movements.reduce((s, m) => s + m.amount, 0);
                 return (
-                  <article className={goalSort.draggingId === g.id ? "is-dragging" : ""} key={g.id} data-sort-goal data-sort-id={g.id}>
+                  <article className={`sortable-item${goalSort.draggingId === g.id ? " is-dragging" : ""}`} key={g.id} data-sort-goal data-sort-id={g.id} onPointerDown={(event) => goalSort.start(event, g.id)} onPointerMove={goalSort.drag} onPointerUp={goalSort.end} onPointerCancel={goalSort.end}>
                     <div className="goal-top">
                       <div>
                         <small>
@@ -4756,7 +4792,6 @@ function Goals({
                       </span>
                     </div>
                     <div className="actions goal-actions">
-                      <button className="icon-button drag-handle" title="Pressione e arraste para ordenar" aria-label={`Arrastar ${g.name} para ordenar`} onPointerDown={(event) => goalSort.start(event, g.id)} onPointerMove={goalSort.drag} onPointerUp={goalSort.end} onPointerCancel={goalSort.end}><GripVertical size={18} /></button>
                       <button className="icon-button" title="Editar meta" aria-label={`Editar ${g.name}`} onClick={() => edit(g.id)}><Pencil size={18} /></button>
                       <button
                         className="danger-button icon-button"
@@ -4870,8 +4905,10 @@ function Tasks({
     mutate((d) => {
       const t = d.tasks.find((x) => x.id === id)!;
       t.history.push(now());
-      if (t.repeat === "none") t.status = "Concluída";
-      else {
+      t.status = "Concluída";
+      t.updatedAt = now();
+      t.version++;
+      if (t.repeat !== "none") {
         const dt = new Date(t.due);
         if (t.repeat === "daily") dt.setDate(dt.getDate() + 1);
         if (t.repeat === "weekly" && t.weekdays?.length) {
@@ -4881,7 +4918,11 @@ function Tasks({
         } else if (t.repeat === "weekly") dt.setDate(dt.getDate() + 7);
         if (t.repeat === "monthly") dt.setMonth(dt.getMonth() + 1);
         if (t.repeat === "yearly") dt.setFullYear(dt.getFullYear() + 1);
-        t.due = dt.toISOString();
+        d.tasks.push({
+          ...audit(), title: t.title, assignee: t.assignee, due: dt.toISOString(),
+          priority: t.priority, status: "Pendente", repeat: t.repeat,
+          shift: t.shift, weekdays: t.weekdays, checklist: t.checklist, history: [],
+        });
       }
     });
   const saveEdit = (id: string, form: FormData) => {
@@ -5283,7 +5324,7 @@ function Config({
               <p className="empty">Nenhuma conta ou cartão cadastrado.</p>
             )}
             {data.accounts.map((account) => (
-              <div className={`account-entry${accountSort.draggingId === account.id ? " is-dragging" : ""}`} key={account.id} data-sort-account data-sort-id={account.id}>
+              <div className={`account-entry sortable-item${accountSort.draggingId === account.id ? " is-dragging" : ""}`} key={account.id} data-sort-account data-sort-id={account.id} onPointerDown={(event) => accountSort.start(event, account.id)} onPointerMove={accountSort.drag} onPointerUp={accountSort.end} onPointerCancel={accountSort.end}>
                 <div className="row editable-row account-row">
                   <div>
                     <b>{account.name}</b>
@@ -5292,7 +5333,6 @@ function Config({
                     <small>{accountResponsibilityLabel(account)}</small>
                   </div>
                   <div className="actions">
-                    <button type="button" className="icon-button drag-handle" title="Pressione e arraste para ordenar" aria-label={`Arrastar ${account.name} para ordenar`} onPointerDown={(event) => accountSort.start(event, account.id)} onPointerMove={accountSort.drag} onPointerUp={accountSort.end} onPointerCancel={accountSort.end}><GripVertical size={18} /></button>
                     <button
                       type="button"
                       className="icon-button"
@@ -5363,9 +5403,6 @@ function CategoryEditor({
   data: FamilyData;
   mutate: (f: (d: FamilyData) => void) => void;
 }) {
-  const [bulkText,setBulkText]=useState("");
-  const bulkRows=bulkText.split(/\r?\n/).map(line=>line.split(/[;,\t]/).map(value=>value.trim())).filter(row=>row[0]);
-  const createBulk=()=>{if(!bulkRows.length)return;const preview=bulkRows.slice(0,5).map(row=>`${row[0]} > ${row[1]||"sem subcategoria"}`).join("\n");if(!confirm(`Criar/atualizar ${bulkRows.length} linha(s)?\n\n${preview}${bulkRows.length>5?"\n…":""}`))return;mutate(d=>{for(const [name,subcategory,natureRaw] of bulkRows){let category=d.categories.find(c=>normalize(c.name)===normalize(name));if(!category){const nature=normalize(natureRaw||"DESPESA");category={...audit(),name,subcategories:[],nature:nature.includes("RECEITA")?"income":nature.includes("TRANSFER")?"transfer":nature.includes("META")?"goal":"expense"};d.categories.push(category)}if(subcategory&&!category.subcategories.some(item=>normalize(item)===normalize(subcategory)))category.subcategories.push(subcategory)}});setBulkText("")};
   const addCategory = (fd: FormData) =>
     mutate((d) =>
       d.categories.push({
@@ -5448,7 +5485,6 @@ function CategoryEditor({
   };
   return (
     <>
-      <div className="bulk-category"><h3>Criar categorias em massa</h3><p className="muted">Cole uma linha por subcategoria: Categoria; Subcategoria; Natureza.</p><textarea rows={6} value={bulkText} onChange={e=>setBulkText(e.target.value)} placeholder={'Alimentação;Supermercado;Despesa\nReceitas;Salário;Receita'}/><small>{bulkRows.length} linha(s) válida(s)</small><button className="primary" disabled={!bulkRows.length} onClick={createBulk}>Pré-visualizar e criar</button></div>
       <QuickForm
         onSubmit={addCategory}
         fields={[["name", "Nova categoria", "text"]]}
@@ -5462,10 +5498,9 @@ function CategoryEditor({
         }
       />
       {data.categories.map((c) => (
-        <details className={`category-details${categorySort.draggingId === c.id ? " is-dragging" : ""}`} key={c.id} data-sort-category data-sort-id={c.id}>
-          <summary>{c.name}</summary>
+        <details className={`category-details sortable-item${categorySort.draggingId === c.id ? " is-dragging" : ""}`} key={c.id} data-sort-category data-sort-id={c.id}>
+          <summary onPointerDown={(event) => categorySort.start(event, c.id)} onPointerMove={categorySort.drag} onPointerUp={categorySort.end} onPointerCancel={categorySort.end}>{c.name}</summary>
           <div className="actions">
-            <button className="icon-button drag-handle" title="Pressione e arraste para ordenar" aria-label={`Arrastar ${c.name} para ordenar`} onPointerDown={(event) => categorySort.start(event, c.id)} onPointerMove={categorySort.drag} onPointerUp={categorySort.end} onPointerCancel={categorySort.end}><GripVertical size={18}/></button>
             <button className="icon-button" title="Renomear categoria" aria-label={`Renomear ${c.name}`} onClick={() => rename(c.id, c.name)}><Pencil size={18}/></button>
             <button className="icon-button" title="Adicionar subcategoria" aria-label={`Adicionar subcategoria a ${c.name}`} onClick={() => addSub(c.id)}><Plus size={16}/></button>
             <button
