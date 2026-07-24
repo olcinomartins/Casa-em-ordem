@@ -35,8 +35,6 @@ import {
   PiggyBank,
   TrendingDown,
   ChevronLeft,
-  ChevronUp,
-  ChevronDown,
   GripVertical,
 } from "lucide-react";
 import {
@@ -4120,6 +4118,58 @@ function Transactions({
   );
 }
 
+function useHoldToSort(
+  selector: string,
+  move: (sourceId: string, targetId: string) => void,
+) {
+  const activeId = useRef<string>();
+  const pointer = useRef<{ x: number; y: number }>();
+  const frame = useRef<number>();
+  const [draggingId, setDraggingId] = useState<string>();
+  const moveAtPointer = (x: number, y: number) => {
+    const sourceId = activeId.current;
+    if (!sourceId) return;
+    const target = document.elementFromPoint(x, y)?.closest<HTMLElement>(selector);
+    const targetId = target?.dataset.sortId;
+    if (!targetId || targetId === sourceId) return;
+    move(sourceId, targetId);
+    activeId.current = targetId;
+    setDraggingId(targetId);
+  };
+  const autoScroll = () => {
+    const point = pointer.current;
+    if (!activeId.current || !point) return;
+    const edge = 80;
+    const delta = point.y < edge ? -16 : point.y > window.innerHeight - edge ? 16 : 0;
+    if (delta) {
+      window.scrollBy({ top: delta, behavior: "auto" });
+      moveAtPointer(point.x, point.y);
+    }
+    frame.current = requestAnimationFrame(autoScroll);
+  };
+  const start = (event: React.PointerEvent<HTMLButtonElement>, id: string) => {
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    activeId.current = id;
+    pointer.current = { x: event.clientX, y: event.clientY };
+    setDraggingId(id);
+    frame.current = requestAnimationFrame(autoScroll);
+  };
+  const drag = (event: React.PointerEvent<HTMLButtonElement>) => {
+    if (!activeId.current) return;
+    pointer.current = { x: event.clientX, y: event.clientY };
+    moveAtPointer(event.clientX, event.clientY);
+  };
+  const end = () => {
+    if (frame.current) cancelAnimationFrame(frame.current);
+    frame.current = undefined;
+    activeId.current = undefined;
+    pointer.current = undefined;
+    setDraggingId(undefined);
+  };
+  return { draggingId, start, drag, end };
+}
+
 function Budgets({
   data,
   month,
@@ -4134,8 +4184,6 @@ function Budgets({
   onCreateDone: () => void;
 }) {
   const [editing, setEditing] = useState<Budget>();
-  const [draggingBudgetId, setDraggingBudgetId] = useState<string>();
-  const draggingBudgetIdRef = useRef<string>();
   const saveBudget = (form: FormData) => {
     const target = String(form.get("target"));
     const startMonth = String(form.get("startMonth"));
@@ -4192,25 +4240,7 @@ function Budgets({
         draft.budgets[index],
       ];
     });
-  const startBudgetDrag = (event: React.PointerEvent<HTMLButtonElement>, id: string) => {
-    event.currentTarget.setPointerCapture(event.pointerId);
-    draggingBudgetIdRef.current = id;
-    setDraggingBudgetId(id);
-  };
-  const dragBudget = (event: React.PointerEvent<HTMLButtonElement>) => {
-    const sourceId = draggingBudgetIdRef.current;
-    if (!sourceId) return;
-    const target = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>("[data-budget-id]");
-    const targetId = target?.dataset.budgetId;
-    if (!targetId || targetId === sourceId) return;
-    moveBudget(sourceId, targetId);
-    draggingBudgetIdRef.current = targetId;
-    setDraggingBudgetId(targetId);
-  };
-  const endBudgetDrag = () => {
-    draggingBudgetIdRef.current = undefined;
-    setDraggingBudgetId(undefined);
-  };
+  const budgetSort = useHoldToSort("[data-sort-budget]", moveBudget);
   const label = (item: Budget) =>
     item.reason || (item.member
       ? `Pessoal — ${item.member}`
@@ -4242,14 +4272,14 @@ function Budgets({
     </form>
   );
   const renderBudget = (item: Budget) => (
-    <div className={`budget-entry${draggingBudgetId === item.id ? " is-dragging" : ""}`} key={item.id} data-budget-id={item.id}>
+    <div className={`budget-entry${budgetSort.draggingId === item.id ? " is-dragging" : ""}`} key={item.id} data-sort-budget data-sort-id={item.id}>
       <div className="budget-item">
         <div>
           <b>{label(item)}</b>
           <small>{data.categories.find((category) => category.id === item.categoryId)?.name || "Sem categoria"} · {money(item.amount)} · {item.startMonth || item.month || "mensal contínuo"}</small>
         </div>
         <div className="actions">
-          <button className="icon-button drag-handle" title="Pressione e arraste para ordenar" aria-label={`Arrastar ${label(item)} para ordenar`} onPointerDown={(event) => startBudgetDrag(event, item.id)} onPointerMove={dragBudget} onPointerUp={endBudgetDrag} onPointerCancel={endBudgetDrag}><GripVertical size={18} /></button>
+          <button className="icon-button drag-handle" title="Pressione e arraste para ordenar" aria-label={`Arrastar ${label(item)} para ordenar`} onPointerDown={(event) => budgetSort.start(event, item.id)} onPointerMove={budgetSort.drag} onPointerUp={budgetSort.end} onPointerCancel={budgetSort.end}><GripVertical size={18} /></button>
           <button className="icon-button" title="Editar orçamento" aria-label={`Editar ${label(item)}`} onClick={() => setEditing(editing?.id === item.id ? undefined : item)}><Pencil size={18} /></button>
           <button className="icon-button danger-button" title="Excluir orçamento" aria-label={`Excluir ${label(item)}`} onClick={() => remove(item.id)}><Trash2 size={15} /></button>
         </div>
@@ -4638,19 +4668,20 @@ function Goals({
         d.goals = d.goals.filter((g) => g.id !== id);
       });
   };
-  const moveGoal = (id: string, direction: -1 | 1) =>
+  const moveGoal = (id: string, targetId: string) =>
     mutate((d) => {
       const ordered = d.goals
         .filter((goal) => (goal.kind || "desire") === "desire" && !goal.provisionPool)
         .sort((a, b) => a.priority - b.priority);
       const index = ordered.findIndex((goal) => goal.id === id);
-      const nextIndex = index + direction;
-      if (index < 0 || nextIndex < 0 || nextIndex >= ordered.length) return;
+      const nextIndex = ordered.findIndex((goal) => goal.id === targetId);
+      if (index < 0 || nextIndex < 0 || index === nextIndex) return;
       [ordered[index].priority, ordered[nextIndex].priority] = [
         ordered[nextIndex].priority,
         ordered[index].priority,
       ];
     });
+  const goalSort = useHoldToSort("[data-sort-goal]", moveGoal);
   return (
     <section className="panel">
       <div className="panel-head">
@@ -4697,7 +4728,7 @@ function Goals({
               .map((g) => {
                 const total = g.movements.reduce((s, m) => s + m.amount, 0);
                 return (
-                  <article key={g.id}>
+                  <article className={goalSort.draggingId === g.id ? "is-dragging" : ""} key={g.id} data-sort-goal data-sort-id={g.id}>
                     <div className="goal-top">
                       <div>
                         <small>
@@ -4725,8 +4756,7 @@ function Goals({
                       </span>
                     </div>
                     <div className="actions goal-actions">
-                      <button className="icon-button" title="Subir prioridade" aria-label={`Subir ${g.name}`} onClick={() => moveGoal(g.id, -1)}><ChevronUp size={16} /></button>
-                      <button className="icon-button" title="Descer prioridade" aria-label={`Descer ${g.name}`} onClick={() => moveGoal(g.id, 1)}><ChevronDown size={16} /></button>
+                      <button className="icon-button drag-handle" title="Pressione e arraste para ordenar" aria-label={`Arrastar ${g.name} para ordenar`} onPointerDown={(event) => goalSort.start(event, g.id)} onPointerMove={goalSort.drag} onPointerUp={goalSort.end} onPointerCancel={goalSort.end}><GripVertical size={18} /></button>
                       <button className="icon-button" title="Editar meta" aria-label={`Editar ${g.name}`} onClick={() => edit(g.id)}><Pencil size={18} /></button>
                       <button
                         className="danger-button icon-button"
@@ -5215,16 +5245,17 @@ function Config({
         d.accounts = d.accounts.filter((a) => a.id !== id);
       });
   };
-  const moveAccount = (id: string, direction: -1 | 1) =>
+  const moveAccount = (id: string, targetId: string) =>
     mutate((d) => {
       const index = d.accounts.findIndex((account) => account.id === id);
-      const nextIndex = index + direction;
+      const nextIndex = d.accounts.findIndex((account) => account.id === targetId);
       if (index < 0 || nextIndex < 0 || nextIndex >= d.accounts.length) return;
       [d.accounts[index], d.accounts[nextIndex]] = [
         d.accounts[nextIndex],
         d.accounts[index],
       ];
     });
+  const accountSort = useHoldToSort("[data-sort-account]", moveAccount);
   return (
     <div className={mode === "all" ? "grid two" : "grid"}>
       {mode !== "categories" && (
@@ -5252,7 +5283,7 @@ function Config({
               <p className="empty">Nenhuma conta ou cartão cadastrado.</p>
             )}
             {data.accounts.map((account) => (
-              <div className="account-entry" key={account.id}>
+              <div className={`account-entry${accountSort.draggingId === account.id ? " is-dragging" : ""}`} key={account.id} data-sort-account data-sort-id={account.id}>
                 <div className="row editable-row account-row">
                   <div>
                     <b>{account.name}</b>
@@ -5261,8 +5292,7 @@ function Config({
                     <small>{accountResponsibilityLabel(account)}</small>
                   </div>
                   <div className="actions">
-                    <button type="button" className="icon-button" title="Mover para cima" aria-label={`Mover ${account.name} para cima`} onClick={() => moveAccount(account.id, -1)}><ChevronUp size={16} /></button>
-                    <button type="button" className="icon-button" title="Mover para baixo" aria-label={`Mover ${account.name} para baixo`} onClick={() => moveAccount(account.id, 1)}><ChevronDown size={16} /></button>
+                    <button type="button" className="icon-button drag-handle" title="Pressione e arraste para ordenar" aria-label={`Arrastar ${account.name} para ordenar`} onPointerDown={(event) => accountSort.start(event, account.id)} onPointerMove={accountSort.drag} onPointerUp={accountSort.end} onPointerCancel={accountSort.end}><GripVertical size={18} /></button>
                     <button
                       type="button"
                       className="icon-button"
@@ -5392,16 +5422,17 @@ function CategoryEditor({
         d.rules = d.rules.filter((r) => r.categoryId !== id);
       });
   };
-  const moveCategory = (id: string, direction: -1 | 1) =>
+  const moveCategory = (id: string, targetId: string) =>
     mutate((d) => {
       const index = d.categories.findIndex((category) => category.id === id);
-      const nextIndex = index + direction;
+      const nextIndex = d.categories.findIndex((category) => category.id === targetId);
       if (index < 0 || nextIndex < 0 || nextIndex >= d.categories.length) return;
       [d.categories[index], d.categories[nextIndex]] = [
         d.categories[nextIndex],
         d.categories[index],
       ];
     });
+  const categorySort = useHoldToSort("[data-sort-category]", moveCategory);
   const removeSub = (id: string, sub: string) => {
     if (
       data.transactions.some(
@@ -5431,11 +5462,10 @@ function CategoryEditor({
         }
       />
       {data.categories.map((c) => (
-        <details className="category-details" key={c.id}>
+        <details className={`category-details${categorySort.draggingId === c.id ? " is-dragging" : ""}`} key={c.id} data-sort-category data-sort-id={c.id}>
           <summary>{c.name}</summary>
           <div className="actions">
-            <button className="icon-button" title="Mover para cima" aria-label={`Mover ${c.name} para cima`} onClick={() => moveCategory(c.id, -1)}><ChevronUp size={16}/></button>
-            <button className="icon-button" title="Mover para baixo" aria-label={`Mover ${c.name} para baixo`} onClick={() => moveCategory(c.id, 1)}><ChevronDown size={16}/></button>
+            <button className="icon-button drag-handle" title="Pressione e arraste para ordenar" aria-label={`Arrastar ${c.name} para ordenar`} onPointerDown={(event) => categorySort.start(event, c.id)} onPointerMove={categorySort.drag} onPointerUp={categorySort.end} onPointerCancel={categorySort.end}><GripVertical size={18}/></button>
             <button className="icon-button" title="Renomear categoria" aria-label={`Renomear ${c.name}`} onClick={() => rename(c.id, c.name)}><Pencil size={18}/></button>
             <button className="icon-button" title="Adicionar subcategoria" aria-label={`Adicionar subcategoria a ${c.name}`} onClick={() => addSub(c.id)}><Plus size={16}/></button>
             <button

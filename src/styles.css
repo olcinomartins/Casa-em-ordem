@@ -1769,18 +1769,26 @@ button.attention-item { justify-content: initial; }
   }
   .account-row {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 38px;
+    grid-template-columns: minmax(0, 1fr) 102px;
     gap: .45rem;
     align-items: start;
   }
   .account-row > .actions {
     display: grid;
-    grid-template-columns: 38px;
-    grid-template-rows: repeat(4, 38px);
-    width: 38px;
+    grid-template-columns: repeat(3, 32px);
+    width: 102px;
     gap: .3rem;
   }
-  .account-row > .actions button { width: 38px; min-width: 38px; min-height: 38px; padding: .4rem; }
+  .account-row > .actions button { width: 32px; min-width: 32px; min-height: 32px; padding: .25rem; }
+  .goal-actions {
+    display: grid;
+    grid-template-columns: repeat(3, 34px);
+    gap: .3rem;
+    width: max-content;
+  }
+  .goal-actions button { width: 34px; min-width: 34px; min-height: 34px; padding: .3rem; }
+  .category-details > .actions { gap: .35rem; }
+  .category-details > .actions .icon-button { width: 34px; min-width: 34px; min-height: 34px; padding: .3rem; }
   .account-form-actions {
     width: 100%;
     display: grid;
