@@ -4157,8 +4157,6 @@ function useHoldToSort(
     const targetId = target?.dataset.sortId;
     if (!targetId || targetId === sourceId) return;
     move(sourceId, targetId);
-    activeId.current = targetId;
-    setDraggingId(targetId);
   };
   const autoScroll = () => {
     const point = pointer.current;
