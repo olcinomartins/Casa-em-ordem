@@ -2002,8 +2002,8 @@ function Dashboard({
   const shownSpending = panelMode === "registered"
     ? spending.filter((entry) => entry.source !== "transaction" && !(entry.source === "payment" && entry.state === "estimated"))
     : spending.filter((entry) => entry.source === "transaction");
-  const realizedExpenses = shownSpending.filter((entry) => entry.state === "realized").reduce((sum, entry) => sum + entry.amount, 0);
-  const estimatedEntries = shownSpending.filter((entry) => entry.state === "estimated");
+  const realizedExpenses = (panelMode === "registered" ? shownSpending : shownSpending.filter((entry) => entry.state === "realized")).reduce((sum, entry) => sum + entry.amount, 0);
+  const estimatedEntries = panelMode === "registered" ? [] : shownSpending.filter((entry) => entry.state === "estimated");
   const expectedBeforeClosing = estimatedEntries.filter((entry) => entry.source === "payment").reduce((sum, entry) => sum + entry.amount, 0);
   const voiceExpected = estimatedEntries.filter((entry) => entry.source === "voice").reduce((sum, entry) => sum + entry.amount, 0);
   const manualExpected = estimatedEntries.filter((entry) => entry.source === "manual").reduce((sum, entry) => sum + entry.amount, 0);
@@ -2722,10 +2722,10 @@ function BudgetBars({
     .map((c) => {
       const planned = budgetValue(data, month, (b) => b.categoryId === c.id);
       const actual = spending
-        .filter((entry) => entry.categoryId === c.id && entry.state === "realized")
+        .filter((entry) => entry.categoryId === c.id && (mode === "registered" || entry.state === "realized"))
         .reduce((sum, entry) => sum + entry.amount, 0);
       const estimated = spending
-        .filter((entry) => entry.categoryId === c.id && entry.state === "estimated")
+        .filter((entry) => entry.categoryId === c.id && mode !== "registered" && entry.state === "estimated")
         .reduce((sum, entry) => sum + entry.amount, 0);
       const plannedItems = data.budgets.filter((item) => item.categoryId === c.id && budgetApplies(item, month));
       const entries = spending.filter((entry) => entry.categoryId === c.id);
@@ -2746,7 +2746,7 @@ function BudgetBars({
               <SensitiveMoney value={r.planned} hidden={hideValues} />
             </span>
           </label>
-          <small><SensitiveMoney value={r.actual} hidden={hideValues} /> realizado · <SensitiveMoney value={r.estimated} hidden={hideValues} /> estimado</small>
+          <small>{mode === "registered" ? <><SensitiveMoney value={r.actual} hidden={hideValues} /> realizado no app</> : <><SensitiveMoney value={r.actual} hidden={hideValues} /> realizado · <SensitiveMoney value={r.estimated} hidden={hideValues} /> estimado</>}</small>
           <progress
             value={r.tracked}
             max={r.planned || r.tracked || 1}
@@ -2760,7 +2760,7 @@ function BudgetBars({
             {r.plannedItems.map((item) => <Row key={item.id} a={item.reason || "Orçamento"} b={item.subcategory || "Categoria"} c={<SensitiveMoney value={item.amount} hidden={hideValues} />} />)}
             {!r.plannedItems.length && <small>Nenhum orçamento específico nesta categoria.</small>}
             <b>Acompanhado no mês</b>
-            {r.entries.map((entry) => <Row key={entry.id} a={entry.description} b={`${sourceLabel[entry.source]} · ${entry.state === "estimated" ? "Estimado" : "Confirmado"}`} c={<SensitiveMoney value={entry.amount} hidden={hideValues} />} />)}
+            {r.entries.map((entry) => <Row key={entry.id} a={entry.description} b={`${sourceLabel[entry.source]} · ${mode === "registered" ? "Realizado no app" : entry.state === "estimated" ? "Estimado" : "Realizado"}`} c={<SensitiveMoney value={entry.amount} hidden={hideValues} />} />)}
             {!r.entries.length && <small>Nenhum lançamento considerado ainda.</small>}
             {r.planned > r.tracked && <><b>Ainda sem lançamento ou previsão</b><Row a="Espaço restante do orçamento" b="Não é incluído como gasto estimado" c={<SensitiveMoney value={r.planned - r.tracked} hidden={hideValues} />} /></>}
           </div>
