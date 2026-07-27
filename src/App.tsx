@@ -291,6 +291,7 @@ export default function App() {
   } | null>(null);
   const [month, setMonth] = useState(initialUiPreferences.month);
   const [view, setView] = useState<CashView>(initialUiPreferences.view);
+  const [panelMode, setPanelMode] = useState<"registered" | "realized">("registered");
   const [message, setMessage] = useState("");
   const [quickExpenseNotice, setQuickExpenseNotice] =
     useState<QuickExpenseNotice>();
@@ -871,6 +872,15 @@ export default function App() {
             </div>
           </section>
         )}
+        {page === "visao" && (
+          <section className="page-analysis-controls" aria-label="Leitura do painel e análises">
+            <div className="panel-mode-switch" role="group" aria-label="Origem dos gastos">
+              <button className={panelMode === "registered" ? "on" : ""} onClick={() => setPanelMode("registered")}>Registrados</button>
+              <button className={panelMode === "realized" ? "on" : ""} onClick={() => setPanelMode("realized")}>Realizado por extrato/fatura</button>
+            </div>
+            <ViewSwitch view={view} setView={setView} />
+          </section>
+        )}
         <PageOrderContext.Provider value={pageOrderMap}>
         <div className="page-blocks">
         {page === "visao" && (
@@ -880,7 +890,7 @@ export default function App() {
                 data={data}
                 month={month}
                 view={view}
-                setView={setView}
+                panelMode={panelMode}
                 hideValues={hideValues}
                 currentMember={currentMember}
               />
@@ -889,6 +899,8 @@ export default function App() {
               <Analytics
                 data={data}
                 hadStoredPreferences={hadStoredUiPreferences}
+                view={view}
+                panelMode={panelMode}
               />
             </Collapsible>
           </>
@@ -1927,18 +1939,17 @@ function Dashboard({
   data,
   month,
   view,
-  setView,
+  panelMode,
   hideValues,
   currentMember,
 }: {
   data: FamilyData;
   month: string;
   view: CashView;
-  setView: (v: CashView) => void;
+  panelMode: "registered" | "realized";
   hideValues: boolean;
   currentMember: Exclude<Member, "Ambos">;
 }) {
-  const [panelMode, setPanelMode] = useState<"registered" | "realized">("registered");
   const orderKey = dashboardOrderStorageKey(currentMember);
   const hiddenKey = `${orderKey}:hidden`;
   const [blockOrder, setBlockOrder] = useState<DashboardBlockId[]>(() => {
@@ -2023,12 +2034,7 @@ function Dashboard({
     .slice(0, 4);
   return (
     <>
-      <div className="panel-mode-switch" role="group" aria-label="Leitura do acompanhamento">
-        <button className={panelMode === "registered" ? "on" : ""} onClick={() => setPanelMode("registered")}>Registrados</button>
-        <button className={panelMode === "realized" ? "on" : ""} onClick={() => setPanelMode("realized")}>Realizado por extrato/fatura</button>
-      </div>
       <div className="toolbar dashboard-toolbar">
-        <ViewSwitch view={view} setView={setView} />
         <button
           className="page-order-button"
           title={organizing ? "Concluir ajuste da ordem" : "Ajustar ordem dos blocos"}
@@ -5631,9 +5637,13 @@ function CategoryEditor({
 function Analytics({
   data,
   hadStoredPreferences,
+  view,
+  panelMode,
 }: {
   data: FamilyData;
   hadStoredPreferences: boolean;
+  view: CashView;
+  panelMode: "registered" | "realized";
 }) {
   const [initialPreferences] = useState(() => loadUiPreferences().analytics);
   const available = [
@@ -5653,9 +5663,7 @@ function Analytics({
       ? initialPreferences.end
       : available.at(-1) || initialPreferences.end,
   );
-  const [mode, setMode] = useState<"cash" | "accrual">(
-    initialPreferences.mode,
-  );
+  const mode: "cash" | "accrual" = view === "accrual" ? "accrual" : "cash";
   const [report, setReport] = useState<"budget" | "reserve" | "final">(
     initialPreferences.report,
   );
@@ -5682,7 +5690,7 @@ function Analytics({
   }, [start, end, mode, report, accountId]);
   const months = available.filter((month) => month >= start && month <= end);
   const belongs = (t: Transaction, kind: "budget" | "reserve" | "final") =>
-    !t.estimated &&
+    (panelMode === "registered" || !t.estimated) &&
     (accountId === "all" || t.accountId === accountId) &&
     (kind === "final"
       ? t.movement !== "transfer" && !t.transfer
@@ -5796,13 +5804,6 @@ function Analytics({
             onChange={(e) => setEnd(e.target.value)}
           />
         </label>
-        <select
-          value={mode}
-          onChange={(e) => setMode(e.target.value as "cash" | "accrual")}
-        >
-          <option value="accrual">Data da compra</option>
-          <option value="cash">Data da parcela</option>
-        </select>
         <select
           value={accountId}
           onChange={(event) => setAccountId(event.target.value)}

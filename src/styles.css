@@ -1229,6 +1229,9 @@ code {
 .panel-mode-switch { display: flex; width: fit-content; max-width: 100%; margin: 0 auto .65rem; padding: .22rem; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
 .panel-mode-switch button { min-height: 34px; padding: .35rem .65rem; border: 0; background: transparent; font-size: .78rem; }
 .panel-mode-switch button.on { background: var(--green); color: #fff; }
+.page-analysis-controls { display: grid; gap: .55rem; justify-items: center; margin: 0 auto .8rem; }
+.page-analysis-controls .panel-mode-switch { margin: 0; }
+.page-analysis-controls .segmented { max-width: 100%; overflow-x: auto; }
 .budget-detail { border-bottom: 1px solid var(--line); padding: .55rem 0; }
 .budget-detail summary { cursor: pointer; list-style: none; }
 .budget-detail summary::-webkit-details-marker { display: none; }
