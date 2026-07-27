@@ -2732,6 +2732,7 @@ function BudgetBars({
             <b>Acompanhado no mês</b>
             {r.entries.map((entry) => <Row key={entry.id} a={entry.description} b={`${sourceLabel[entry.source]} · ${entry.state === "estimated" ? "Estimado" : "Confirmado"}`} c={<SensitiveMoney value={entry.amount} hidden={hideValues} />} />)}
             {!r.entries.length && <small>Nenhum lançamento considerado ainda.</small>}
+            {r.planned > r.tracked && <><b>Ainda sem lançamento ou previsão</b><Row a="Espaço restante do orçamento" b="Não é incluído como gasto estimado" c={<SensitiveMoney value={r.planned - r.tracked} hidden={hideValues} />} /></>}
           </div>
         </details>
       ))}
