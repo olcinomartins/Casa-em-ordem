@@ -197,6 +197,8 @@ export interface FamilyData {
   receipts?: Receipt[];
   shoppingList?: ShoppingListItem[];
   chores?: Chore[];
+  /** Histórico resumido de alterações para conferência da base compartilhada. */
+  auditLog?: Array<{ id: string; at: string; by: Member; action: string }>;
   /** Evita recriar as tarefas guiadas caso o casal as exclua depois. */
   setupTasksInitialized?: boolean;
   lastSavedAt: string;

@@ -487,6 +487,8 @@ export default function App() {
       if (!old) return old;
       const draft = structuredClone(old);
       fn(draft);
+      (draft.auditLog ??= []).push({ id: uid(), at: now(), by: currentMember, action: "Alteração registrada no aplicativo" });
+      if (draft.auditLog.length > 500) draft.auditLog.splice(0, draft.auditLog.length - 500);
       draft.lastSavedAt = now();
       markLocalPending(draft.lastSavedAt);
       return draft;

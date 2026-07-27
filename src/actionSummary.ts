@@ -60,6 +60,18 @@ const comparePayments = (left: Obligation, right: Obligation) =>
   compareText(left.name, right.name) ||
   left.id.localeCompare(right.id);
 
+/** Mantém os alertas alinhados à Central: recorrências antigas são projetadas
+ * para a próxima ocorrência, e não ficam eternamente como vencidas. */
+const nextPaymentDue = (payment: Obligation, today: string) => {
+  const step = payment.recurrence === "monthly" ? 1 : payment.recurrence === "quarterly" ? 3 : payment.recurrence === "semiannual" ? 6 : payment.recurrence === "yearly" ? 12 : 0;
+  if (!step) return payment.dueDate;
+  const date = new Date(`${payment.dueDate}T12:00:00`);
+  const todayDate = new Date(`${today}T12:00:00`);
+  while (date < todayDate || payment.skippedDates?.includes(dateOnly(date))) date.setMonth(date.getMonth() + step);
+  return dateOnly(date);
+};
+const dateOnly = (date: Date) => date.toISOString().slice(0, 10);
+
 const effectiveDate = (
   transaction: Transaction,
   view: Exclude<CashView, "compare">,
@@ -136,9 +148,9 @@ export function selectActionSummary(
         left.categoryId.localeCompare(right.categoryId),
     );
 
-  const openPayments = data.obligations.filter(
-    (payment) => !completedPaymentStatuses.has(payment.status),
-  );
+  const openPayments = data.obligations
+    .filter((payment) => !completedPaymentStatuses.has(payment.status))
+    .map((payment) => ({ ...payment, dueDate: nextPaymentDue(payment, today) }));
   const overduePayments = openPayments
     .filter((payment) => payment.dueDate < today)
     .slice()
