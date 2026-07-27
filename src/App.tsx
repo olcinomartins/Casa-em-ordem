@@ -2000,10 +2000,10 @@ function Dashboard({
     view === "accrual" ? "accrual" : "cash",
   );
   const shownSpending = panelMode === "registered"
-    ? spending.filter((entry) => entry.source !== "transaction")
+    ? spending.filter((entry) => entry.source !== "transaction" && !(entry.source === "payment" && entry.state === "estimated"))
     : spending.filter((entry) => entry.source === "transaction");
-  const realizedExpenses = spending.filter((entry) => entry.state === "realized").reduce((sum, entry) => sum + entry.amount, 0);
-  const estimatedEntries = spending.filter((entry) => entry.state === "estimated");
+  const realizedExpenses = shownSpending.filter((entry) => entry.state === "realized").reduce((sum, entry) => sum + entry.amount, 0);
+  const estimatedEntries = shownSpending.filter((entry) => entry.state === "estimated");
   const expectedBeforeClosing = estimatedEntries.filter((entry) => entry.source === "payment").reduce((sum, entry) => sum + entry.amount, 0);
   const voiceExpected = estimatedEntries.filter((entry) => entry.source === "voice").reduce((sum, entry) => sum + entry.amount, 0);
   const manualExpected = estimatedEntries.filter((entry) => entry.source === "manual").reduce((sum, entry) => sum + entry.amount, 0);
@@ -2637,7 +2637,7 @@ function CategorySpendingCharts({
 }) {
   const resultFor = (cashView: "cash" | "accrual") => {
     const values = monthlySpending(data, month, cashView).filter((entry) =>
-      mode === "registered" ? entry.source !== "transaction" : entry.source === "transaction",
+      mode === "registered" ? entry.source !== "transaction" && !(entry.source === "payment" && entry.state === "estimated") : entry.source === "transaction",
     );
     const sums = new Map<string, number>();
     for (const entry of values) sums.set(entry.categoryId || "", (sums.get(entry.categoryId || "") || 0) + entry.amount);
@@ -2712,7 +2712,7 @@ function BudgetBars({
   mode?: "registered" | "realized";
 }) {
   const spending = monthlySpending(data, month, view).filter((entry) =>
-    mode === "registered" ? entry.source !== "transaction" : entry.source === "transaction",
+    mode === "registered" ? entry.source !== "transaction" && !(entry.source === "payment" && entry.state === "estimated") : entry.source === "transaction",
   );
   const sourceLabel: Record<(typeof spending)[number]["source"], string> = {
     transaction: "Lançamento confirmado", voice: "Lançamento por voz", manual: "Lançamento manual", receipt: "Nota de supermercado", payment: "Pagamento confirmado",
