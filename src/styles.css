@@ -268,8 +268,12 @@ nav button.active {
 .quick-entry-tools { display: flex; flex-wrap: wrap; gap: .55rem; grid-column: 1 / -1; }
 .quick-entry-tools button { flex: 1 1 180px; }
 .quick-receipt-form { display: grid; gap: .75rem; }
+.quick-action-sheet .shopping-list-panel > :not(.shopping-entry-section) { display: none; }
 .compact-weekdays { grid-column: 1 / -1; border: 1px solid var(--line); border-radius: 10px; padding: .65rem .75rem; }
-.compact-weekdays summary { cursor: pointer; color: #64746b; font-size: .85rem; }
+.compact-weekdays summary { cursor: pointer; color: #64746b; font-size: .85rem; list-style: none; display: flex; justify-content: space-between; }
+.compact-weekdays summary::-webkit-details-marker { display: none; }
+.compact-weekdays summary::after { content: "⌄"; font-size: 1rem; }
+.compact-weekdays[open] summary::after { transform: rotate(180deg); }
 .responsibility-groups { display: grid; gap: .7rem; }
 .responsibility-groups > h3 { margin: .5rem 0 0; font-size: 1rem; }
 .responsibility-group { border: 1px solid #e7e5dc; border-radius: 12px; overflow: hidden; }
@@ -748,6 +752,9 @@ th {
   grid-template-columns: repeat(2, 1fr);
   gap: 0.8rem;
 }
+.payment-grid-grouped { align-items: start; }
+.payment-group-title { grid-column: 1 / -1; margin: .4rem 0 -.1rem; font-size: .88rem; color: #52665b; }
+.reconciliation-help { grid-column: 1 / -1; color: #64746b; font-size: .75rem; }
 .payment {
   border: 1px solid #e4e3da;
   border-radius: 12px;
@@ -1590,6 +1597,8 @@ button.attention-item { justify-content: initial; }
   .dashboard-block.wide { grid-column: 1; }
 }
 @media (max-width: 720px) {
+  /* O Safari só amplia a página ao focar controles com fonte menor que 16px. */
+  input, select, textarea { font-size: 16px; }
   .app {
     display: block;
   }

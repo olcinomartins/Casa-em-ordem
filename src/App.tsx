@@ -1,4 +1,5 @@
 import {
+  Fragment,
   createContext,
   useContext,
   useEffect,
@@ -1293,7 +1294,7 @@ function QuickActions({
     const due = String(form.get("due") || "");
     if (!title || !due) return showDialogError("Informe a responsabilidade e a próxima data.");
     mutate((family) => family.tasks.push({
-      ...audit(currentMember), title, due: new Date(due).toISOString(),
+      ...audit(currentMember), seriesId: uid(), title, due: new Date(due).toISOString(),
       assignee: String(form.get("assignee") || currentMember) as Member,
       priority: "Média", status: "Pendente",
       repeat: String(form.get("repeat") || "none") as Task["repeat"],
@@ -1313,8 +1314,11 @@ function QuickActions({
     mutate((family) => family.obligations.push({
       ...audit(currentMember), name, planned, dueDate,
       categoryId: String(form.get("categoryId") || "") || undefined,
-      kind: "Manual", recurrence: String(form.get("repeat") || "monthly") as Obligation["recurrence"],
-      tolerance: 0, status: "A pagar",
+      subcategory: String(form.get("subcategory") || "") || undefined,
+      accountId: String(form.get("accountId") || "") || undefined,
+      pattern: String(form.get("pattern") || "") || undefined,
+      kind: String(form.get("kind") || "Manual") as Obligation["kind"], recurrence: String(form.get("repeat") || "monthly") as Obligation["recurrence"],
+      tolerance: parseCurrency(form.get("tolerance")), status: "A pagar",
     }));
     close();
   };
@@ -1651,13 +1655,18 @@ function QuickActions({
                 <label>Valor<MoneyInput name="planned" required placeholder="R$ 0,00" /></label>
                 <label>Data de pagamento<input name="dueDate" type="date" required defaultValue={dateOnly(new Date())}/></label>
                 <label>Frequência<select name="repeat" defaultValue="monthly"><option value="none">Único</option><option value="monthly">Mensal</option><option value="quarterly">Trimestral</option><option value="semiannual">Semestral</option><option value="yearly">Anual</option></select></label>
+                <label>Tipo<select name="kind" defaultValue="Manual"><option>Manual</option><option>Débito automático</option><option>Recorrência no cartão</option><option>Assinatura</option><option>Parcela</option><option>Variável</option><option>Eventual</option></select></label>
+                <label>Conta ou cartão<select name="accountId"><option value="">Não definido</option>{activeAccounts.map(account=><option key={account.id} value={account.id}>{accountDisplayName(account)}</option>)}</select></label>
+                <label>Subcategoria<input name="subcategory" placeholder="Opcional"/></label>
+                <label>Tolerância<MoneyInput name="tolerance" placeholder="R$ 0,00"/></label>
+                <label>Padrão para conciliação<input name="pattern" placeholder="Ex.: nome que vem na fatura"/></label>
                 <button className="primary quick-expense-save">Salvar pagamento</button>
               </form>
             ) : mode === "import" ? (
               <ImportPage data={data} mutate={mutate} setMessage={setMessage} hideValues={false} creating onCreateDone={close}/>
             ) : mode === "receipt" ? (
               <div className="quick-receipt-form">
-                <input ref={receiptFileRef} hidden type="file" accept="image/*" capture="environment" onChange={(event)=>readQuickReceipt(event.target.files?.[0])}/>
+                <input ref={receiptFileRef} hidden type="file" accept="image/*" onChange={(event)=>readQuickReceipt(event.target.files?.[0])}/>
                 <button className="primary quick-expense-save" disabled={receiptBusy} onClick={()=>receiptFileRef.current?.click()}><Camera size={18}/>{receiptBusy ? "Lendo nota…" : "Fotografar ou escolher nota"}</button>
                 {receiptDraft && <>
                   <div className="quick-expense-form">
@@ -4445,6 +4454,19 @@ function Payments({
     const start = new Date(`${obligation.dueDate}T12:00:00`);
     return [0, 1, 2].map((index) => { const date = new Date(start); date.setMonth(date.getMonth() + step * index); return dateOnly(date); });
   };
+  const nextDueDate = (obligation: Obligation) => {
+    const step = obligation.recurrence === "monthly" ? 1 : obligation.recurrence === "quarterly" ? 3 : obligation.recurrence === "semiannual" ? 6 : obligation.recurrence === "yearly" ? 12 : 0;
+    const date = new Date(`${obligation.dueDate}T12:00:00`);
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    while (step && date < today) date.setMonth(date.getMonth() + step);
+    return dateOnly(date);
+  };
+  const paymentGroup = (obligation: Obligation) => {
+    const due = nextDueDate(obligation).slice(0, 7);
+    const current = monthOf(dateOnly(new Date()));
+    const next = new Date(); next.setMonth(next.getMonth() + 1);
+    return due === current ? "No mês" : due === monthOf(dateOnly(next)) ? "Próximo mês" : "Próximos meses";
+  };
   const [editingId, setEditingId] = useState<string>();
   const dueDateForDay = (baseMonth: string, rawDay: FormDataEntryValue | null) => {
     const day = Math.max(1, Math.min(31, Number(rawDay) || 10));
@@ -4480,15 +4502,12 @@ function Payments({
   };
   const saveEdit = (id: string, form: FormData) => {
     const current = data.obligations.find((o) => o.id === id)!;
-    const day = Math.max(1, Math.min(31, Number(form.get("dueDay")) || 10));
-    const baseMonth = current.dueDate.slice(0, 7);
-    const [year, monthNumber] = baseMonth.split("-").map(Number);
-    const lastDay = new Date(year, monthNumber, 0).getDate();
+    const dueDate = String(form.get("dueDate") || current.dueDate);
     mutate((d) => {
       const o = d.obligations.find((x) => x.id === id)!;
       o.name = String(form.get("name") || o.name).trim();
       o.planned = parseCurrency(form.get("planned"));
-      o.dueDate = `${baseMonth}-${String(Math.min(day, lastDay)).padStart(2, "0")}`;
+      o.dueDate = dueDate;
       o.kind = String(form.get("kind")) as Obligation["kind"];
       o.recurrence = String(form.get("repeat")) as Obligation["recurrence"];
       o.tolerance = parseCurrency(form.get("tolerance"));
@@ -4555,12 +4574,14 @@ function Payments({
           }
         />
       )}
-      <div className="payment-grid">
+      <div className="payment-grid payment-grid-grouped">
         {data.obligations
           .slice()
           .filter(o=>!["Paga","Confirmada","Dispensada"].includes(o.status))
-          .sort((a, b) => a.dueDate.localeCompare(b.dueDate))
-          .map((o) => {
+          .sort((a, b) => nextDueDate(a).localeCompare(nextDueDate(b)))
+          .map((o, index, items) => {
+            const group = paymentGroup(o);
+            const previousGroup = index ? paymentGroup(items[index - 1]) : "";
             const actual = o.pattern
               ? data.transactions.find((t) =>
                   normalize(t.description).includes(normalize(o.pattern!)),
@@ -4570,13 +4591,14 @@ function Payments({
               o.kind === "Recorrência no cartão"
                 ? recurringCheck(o.planned, actual, o.tolerance)
                 : undefined;
-            return (
-              <article className="payment" key={o.id}>
+            return <Fragment key={o.id}>
+              {group !== previousGroup && <h3 className="payment-group-title">{group}</h3>}
+              <article className="payment">
                 <div>
                   <Badge text={o.status} />
                   <h3>{o.name}</h3>
                   <small>
-                    {o.kind} · {recurrenceLabel[o.recurrence]} · próximos: {futureDates(o).join(", ")}
+                    {o.kind} · {recurrenceLabel[o.recurrence]} · próximo: {nextDueDate(o)}
                   </small>
                 </div>
                 <strong><SensitiveMoney value={o.planned} hidden={hideValues} /></strong>
@@ -4600,18 +4622,19 @@ function Payments({
                     <input name="name" required defaultValue={o.name} placeholder="Nome do pagamento" />
                     <MoneyInput name="planned" required defaultValue={o.planned} placeholder="Valor planejado" />
                     <MoneyInput name="tolerance" defaultValue={o.tolerance} placeholder="Tolerância" />
-                    <label>Dia do pagamento<input name="dueDay" type="number" inputMode="numeric" min="1" max="31" required defaultValue={Number(o.dueDate.slice(8,10)) || 10} /></label>
+                    <label>Data do próximo pagamento<input name="dueDate" type="date" required defaultValue={o.dueDate} /></label>
                     <select name="kind" defaultValue={o.kind}><option>Manual</option><option>Débito automático</option><option>Recorrência no cartão</option><option>Assinatura</option><option>Parcela</option><option>Variável</option><option>Eventual</option></select>
                     <select name="repeat" defaultValue={o.recurrence}><option value="none">Sem repetição</option><option value="monthly">Mensal</option><option value="quarterly">Trimestral</option><option value="semiannual">Semestral</option><option value="yearly">Anual</option></select>
                     <select name="accountId" defaultValue={o.accountId || ""}><option value="">Conta do pagamento</option>{data.accounts.filter(account=>account.active).map(account=><option key={account.id} value={account.id}>{accountDisplayName(account)}</option>)}</select>
                     <select name="categoryId" defaultValue={o.categoryId || ""}><option value="">Categoria da despesa</option>{data.categories.filter(category=>category.nature==="expense").map(category=><option key={category.id} value={category.id}>{category.name}</option>)}</select>
                     <input name="subcategory" defaultValue={o.subcategory || ""} placeholder="Subcategoria" />
-                    <input name="pattern" defaultValue={o.pattern || ""} placeholder="Padrão para conciliação" />
+                    <label>Padrão para conciliação<input name="pattern" defaultValue={o.pattern || ""} placeholder="Ex.: nome que vem na fatura" /></label>
+                    <small className="reconciliation-help">Opcional: identifica o lançamento correspondente na fatura/extrato para conciliar este pagamento automaticamente.</small>
                     <div className="actions"><button className="primary" type="submit">Salvar alterações</button><button type="button" onClick={()=>setEditingId(undefined)}>Cancelar</button></div>
                   </form>
                 )}
               </article>
-            );
+            </Fragment>;
           })}
       </div>
       <details className="completed-block"><summary>Pagamentos confirmados ({data.obligations.filter(o=>["Paga","Confirmada","Dispensada"].includes(o.status)).length})</summary>{data.obligations.filter(o=>["Paga","Confirmada","Dispensada"].includes(o.status)).sort((a,b)=>b.dueDate.localeCompare(a.dueDate)).map(o=><div className="confirmed-row" key={o.id}><div><b>{o.name}</b><small>{o.dueDate} · <SensitiveMoney value={o.paidAmount??o.planned} hidden={hideValues} /> · {o.status}</small></div><button onClick={()=>mutate(d=>{const item=d.obligations.find(x=>x.id===o.id);if(item){item.status="A pagar";item.paidAt=undefined;item.paidAmount=undefined;item.reconciledTransactionId=undefined;d.transactions=d.transactions.filter(transaction=>transaction.obligationId!==o.id||!transaction.provisional);for(const transaction of d.transactions)if(transaction.obligationId===o.id)transaction.obligationId=undefined}})}>Desconfirmar</button></div>)}</details>
@@ -4886,7 +4909,7 @@ function Tasks({
   const add = (fd: FormData) =>
     mutate((d) =>
       d.tasks.push({
-        ...audit(),
+        ...audit(), seriesId: uid(),
         title: String(fd.get("title")),
         assignee: String(fd.get("assignee")) as Member,
         due: new Date(String(fd.get("due"))).toISOString(),
@@ -4917,7 +4940,7 @@ function Tasks({
         if (t.repeat === "monthly") dt.setMonth(dt.getMonth() + 1);
         if (t.repeat === "yearly") dt.setFullYear(dt.getFullYear() + 1);
         d.tasks.push({
-          ...audit(), title: t.title, assignee: t.assignee, due: dt.toISOString(),
+          ...audit(), seriesId: t.seriesId || t.id, title: t.title, assignee: t.assignee, due: dt.toISOString(),
           priority: t.priority, status: "Pendente", repeat: t.repeat,
           shift: t.shift, weekdays: t.weekdays, checklist: t.checklist, history: [],
         });
@@ -4939,10 +4962,24 @@ function Tasks({
     setEditingTaskId(undefined);
   };
   const remove = (id: string) => {
-    if (confirm("Excluir esta tarefa e seu histórico?"))
+    const task = data.tasks.find((item) => item.id === id);
+    if (!task) return;
+    if (task.repeat === "none") {
+      if (confirm("Excluir esta responsabilidade?")) mutate((d) => { d.tasks = d.tasks.filter((item) => item.id !== id); });
+      return;
+    }
+    const choice = prompt("Digite ‘esta’ para excluir somente esta ocorrência ou ‘próximas’ para excluir esta e as próximas recorrências.", "esta");
+    if (!choice) return;
+    const normalized = normalize(choice);
+    if (normalized.startsWith("proxim")) {
       mutate((d) => {
-        d.tasks = d.tasks.filter((t) => t.id !== id);
+        const current = d.tasks.find((item) => item.id === id);
+        const series = current?.seriesId || id;
+        d.tasks = d.tasks.filter((item) => (item.seriesId || item.id) !== series);
       });
+    } else if (normalized.startsWith("esta")) {
+      mutate((d) => { d.tasks = d.tasks.filter((item) => item.id !== id); });
+    }
   };
   const active = data.tasks
     .filter((t) => t.status !== "Concluída")

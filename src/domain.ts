@@ -142,6 +142,8 @@ export interface Goal extends Audit {
   movements: GoalMovement[];
 }
 export interface Task extends Audit {
+  /** Identifica todas as ocorrências de uma mesma rotina recorrente. */
+  seriesId?: string;
   title: string;
   description?: string;
   assignee: Member;
