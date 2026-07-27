@@ -1938,6 +1938,7 @@ function Dashboard({
   hideValues: boolean;
   currentMember: Exclude<Member, "Ambos">;
 }) {
+  const [panelMode, setPanelMode] = useState<"registered" | "realized">("registered");
   const orderKey = dashboardOrderStorageKey(currentMember);
   const hiddenKey = `${orderKey}:hidden`;
   const [blockOrder, setBlockOrder] = useState<DashboardBlockId[]>(() => {
@@ -1987,13 +1988,14 @@ function Dashboard({
     month,
     view === "accrual" ? "accrual" : "cash",
   );
+  const shownSpending = panelMode === "registered" ? spending : spending.filter((entry) => entry.state === "realized");
   const realizedExpenses = spending.filter((entry) => entry.state === "realized").reduce((sum, entry) => sum + entry.amount, 0);
   const estimatedEntries = spending.filter((entry) => entry.state === "estimated");
   const expectedBeforeClosing = estimatedEntries.filter((entry) => entry.source === "payment").reduce((sum, entry) => sum + entry.amount, 0);
   const voiceExpected = estimatedEntries.filter((entry) => entry.source === "voice").reduce((sum, entry) => sum + entry.amount, 0);
   const manualExpected = estimatedEntries.filter((entry) => entry.source === "manual").reduce((sum, entry) => sum + entry.amount, 0);
   const receiptsExpected = estimatedEntries.filter((entry) => entry.source === "receipt").reduce((sum, entry) => sum + entry.amount, 0);
-  const totalExpected = spending.reduce((sum, entry) => sum + entry.amount, 0);
+  const totalExpected = shownSpending.reduce((sum, entry) => sum + entry.amount, 0);
   const plannedBudget = budgetValue(data, month, (budget) => budget.kind !== "provision");
   const budgetAvailable = plannedBudget - totalExpected;
   const integralExpected = view === "compare"
@@ -2021,6 +2023,10 @@ function Dashboard({
     .slice(0, 4);
   return (
     <>
+      <div className="panel-mode-switch" role="group" aria-label="Leitura do acompanhamento">
+        <button className={panelMode === "registered" ? "on" : ""} onClick={() => setPanelMode("registered")}>Registrados</button>
+        <button className={panelMode === "realized" ? "on" : ""} onClick={() => setPanelMode("realized")}>Realizado por extrato/fatura</button>
+      </div>
       <div className="toolbar dashboard-toolbar">
         <ViewSwitch view={view} setView={setView} />
         <button
@@ -2105,7 +2111,7 @@ function Dashboard({
           details={data.transactions.filter(t=>!t.estimated&&t.amount<0&&Math.abs(realized(t,month,"cash"))>0).map(t=><Row key={t.id} a={t.description} b={t.paymentDate||t.date} c={<SensitiveMoney value={Math.abs(t.amount)} hidden={hideValues} />}/>) }
         />
         <Card
-          label="Acompanhado em tempo real"
+          label={panelMode === "registered" ? "Acompanhado em tempo real" : "Realizado por extrato/fatura"}
           value={<SensitiveMoney value={totalExpected} hidden={hideValues} />}
           hint={
             view === "compare"
@@ -2118,7 +2124,7 @@ function Dashboard({
         <Card
           label="Disponível no orçamento"
           value={<SensitiveMoney value={budgetAvailable} hidden={hideValues} />}
-          hint="Orçado menos confirmado e estimado"
+          hint={panelMode === "registered" ? "Orçado menos confirmado e estimado" : "Orçado menos o realizado em extrato ou fatura"}
           tone={budgetAvailable < 0 ? "bad" : "good"}
           details={<p>Não é saldo bancário: mostra o espaço que resta dentro dos orçamentos planejados.</p>}
         />
@@ -2154,6 +2160,7 @@ function Dashboard({
           month={month}
           view={view}
           hideValues={hideValues}
+          mode={panelMode}
         />
       </div>
         ) : blockId === "budget" ? (
@@ -2170,15 +2177,15 @@ function Dashboard({
             <div className="grid two">
               <div>
                 <h3>Fluxo das parcelas</h3>
-                <BudgetBars data={data} month={month} view="cash" hideValues={hideValues} />
+                <BudgetBars data={data} month={month} view="cash" hideValues={hideValues} mode={panelMode} />
               </div>
               <div>
                 <h3>Compra integral</h3>
-                <BudgetBars data={data} month={month} view="accrual" hideValues={hideValues} />
+                <BudgetBars data={data} month={month} view="accrual" hideValues={hideValues} mode={panelMode} />
               </div>
             </div>
           ) : (
-            <BudgetBars data={data} month={month} view={view} hideValues={hideValues} />
+            <BudgetBars data={data} month={month} view={view} hideValues={hideValues} mode={panelMode} />
           )}
         </div>
       </div>
@@ -2612,14 +2619,23 @@ function CategorySpendingCharts({
   month,
   view,
   hideValues,
+  mode,
 }: {
   data: FamilyData;
   month: string;
   view: CashView;
   hideValues: boolean;
+  mode: "registered" | "realized";
 }) {
-  const cash = spendingByCategory(data, month, "cash");
-  const accrual = spendingByCategory(data, month, "accrual");
+  const resultFor = (cashView: "cash" | "accrual") => {
+    const values = monthlySpending(data, month, cashView).filter((entry) => mode === "registered" || entry.state === "realized");
+    const sums = new Map<string, number>();
+    for (const entry of values) sums.set(entry.categoryId || "", (sums.get(entry.categoryId || "") || 0) + entry.amount);
+    const total = [...sums.values()].reduce((sum, value) => sum + value, 0);
+    return { total, categories: [...sums.entries()].map(([id, amount]) => ({ categoryId: id || undefined, name: data.categories.find((category) => category.id === id)?.name || "Sem categoria", amount, percentage: total ? amount / total * 100 : 0 })).sort((a, b) => b.amount - a.amount) };
+  };
+  const cash = resultFor("cash");
+  const accrual = resultFor("accrual");
   return (
     <section className="panel category-spending-panel">
       <div className="panel-head">
@@ -2677,13 +2693,15 @@ function BudgetBars({
   month,
   view,
   hideValues = false,
+  mode = "registered",
 }: {
   data: FamilyData;
   month: string;
   view: "cash" | "accrual";
   hideValues?: boolean;
+  mode?: "registered" | "realized";
 }) {
-  const spending = monthlySpending(data, month, view);
+  const spending = monthlySpending(data, month, view).filter((entry) => mode === "registered" || entry.state === "realized");
   const sourceLabel: Record<(typeof spending)[number]["source"], string> = {
     transaction: "Lançamento confirmado", voice: "Lançamento por voz", manual: "Lançamento manual", receipt: "Nota de supermercado", payment: "Pagamento confirmado",
   };

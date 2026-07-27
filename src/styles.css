@@ -1226,6 +1226,9 @@ code {
 .audit-entry { display: grid; gap: .12rem; padding: .6rem 0; border-bottom: 1px solid var(--line); }
 .audit-entry:last-child { border-bottom: 0; }
 .audit-entry small { color: var(--muted); }
+.panel-mode-switch { display: flex; width: fit-content; max-width: 100%; margin: 0 auto .65rem; padding: .22rem; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
+.panel-mode-switch button { min-height: 34px; padding: .35rem .65rem; border: 0; background: transparent; font-size: .78rem; }
+.panel-mode-switch button.on { background: var(--green); color: #fff; }
 .budget-detail { border-bottom: 1px solid var(--line); padding: .55rem 0; }
 .budget-detail summary { cursor: pointer; list-style: none; }
 .budget-detail summary::-webkit-details-marker { display: none; }
