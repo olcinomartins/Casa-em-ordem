@@ -22,10 +22,10 @@
 .page-blocks { display: flex; flex-direction: column; min-width: 0; }
 .page-organization-toolbar { display: flex; justify-content: flex-start; margin: 0 0 1rem; }
 .page-order-button {
-  width: 38px;
-  min-width: 38px;
-  min-height: 38px;
-  padding: .35rem;
+  width: 46px;
+  min-width: 46px;
+  min-height: 46px;
+  padding: .45rem;
   display: grid;
   place-items: center;
 }
@@ -755,6 +755,10 @@ th {
 .payment-grid-grouped { align-items: start; }
 .payment-group-title { grid-column: 1 / -1; margin: .4rem 0 -.1rem; font-size: .88rem; color: #52665b; }
 .reconciliation-help { grid-column: 1 / -1; color: #64746b; font-size: .75rem; }
+.choice-dialog { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; padding: 1rem; background: #14271c66; }
+.choice-dialog > div { width: min(430px, 100%); padding: 1rem; border-radius: 16px; background: #fff; box-shadow: 0 18px 55px #0004; }
+.choice-dialog h3 { margin-bottom: .4rem; }
+.choice-dialog p { color: #64746b; }
 .payment {
   border: 1px solid #e4e3da;
   border-radius: 12px;
@@ -1777,20 +1781,20 @@ button.attention-item { justify-content: initial; }
   .shopping-notes { grid-column: 1 / -1; }
   .shopping-list-item,
   .shopping-suggestion {
-    grid-template-columns: minmax(0, 1fr) 32px;
+    grid-template-columns: minmax(0, 1fr) 28px;
     align-items: start;
     gap: .45rem;
     padding: .65rem;
   }
   .shopping-item-actions {
     display: grid;
-    grid-template-columns: 32px;
-    grid-template-rows: repeat(3, 32px);
-    width: 32px;
+    grid-template-columns: 28px;
+    grid-template-rows: repeat(3, 28px);
+    width: 28px;
     gap: .3rem;
   }
-  .shopping-item-actions button { width: 32px; min-width: 32px; min-height: 32px; padding: .2rem; white-space: normal; }
-  .shopping-item-actions .danger-button { width: 32px; min-height: 32px; padding: .2rem; }
+  .shopping-item-actions button { width: 28px; min-width: 28px; min-height: 28px; padding: .15rem; white-space: normal; }
+  .shopping-item-actions .danger-button { width: 28px; min-height: 28px; padding: .15rem; }
   .shopping-item-actions .danger-button span { display: none; }
   .shopping-suggestion-actions,
   .shopping-suggestion-actions > button,
@@ -1805,38 +1809,38 @@ button.attention-item { justify-content: initial; }
   }
   .budget-item > .actions {
     display: grid;
-    grid-template-columns: repeat(2, 34px);
+    grid-template-columns: 28px;
     gap: .3rem;
     width: auto;
   }
   .budget-item > .actions button {
-    width: 34px;
-    min-width: 34px;
-    min-height: 34px;
+    width: 28px;
+    min-width: 28px;
+    min-height: 28px;
     padding: .3rem;
   }
   .account-row {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 68px;
+    grid-template-columns: minmax(0, 1fr) 28px;
     gap: .45rem;
     align-items: start;
   }
   .account-row > .actions {
     display: grid;
-    grid-template-columns: repeat(2, 32px);
-    width: 68px;
+    grid-template-columns: 28px;
+    width: 28px;
     gap: .3rem;
   }
-  .account-row > .actions button { width: 32px; min-width: 32px; min-height: 32px; padding: .25rem; }
+  .account-row > .actions button { width: 28px; min-width: 28px; min-height: 28px; padding: .2rem; }
   .goal-actions {
     display: grid;
-    grid-template-columns: repeat(2, 34px);
+    grid-template-columns: 28px;
     gap: .3rem;
     width: max-content;
   }
-  .goal-actions button { width: 34px; min-width: 34px; min-height: 34px; padding: .3rem; }
-  .category-details > .actions { gap: .35rem; }
-  .category-details > .actions .icon-button { width: 34px; min-width: 34px; min-height: 34px; padding: .3rem; }
+  .goal-actions button { width: 28px; min-width: 28px; min-height: 28px; padding: .2rem; }
+  .category-details > .actions { gap: .35rem; display: grid; grid-template-columns: 28px; }
+  .category-details > .actions .icon-button { width: 28px; min-width: 28px; min-height: 28px; padding: .2rem; }
   .account-form-actions {
     width: 100%;
     display: grid;

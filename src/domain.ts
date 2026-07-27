@@ -108,6 +108,8 @@ export interface Obligation extends Audit {
   planned: number;
   dueDate: string;
   recurrence: "none" | "monthly" | "quarterly" | "semiannual" | "yearly";
+  /** Ocorrências isoladas dispensadas sem cancelar a recorrência. */
+  skippedDates?: string[];
   tolerance: number;
   accountId?: string;
   pattern?: string;

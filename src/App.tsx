@@ -720,6 +720,15 @@ export default function App() {
               onChange={(e) => setMonth(e.target.value)}
             />
             <button
+              className="page-order-button"
+              title={organizingPage ? "Concluir ajuste da ordem" : "Ajustar ordem dos blocos"}
+              aria-label={organizingPage ? "Concluir ajuste da ordem" : "Ajustar ordem dos blocos"}
+              aria-expanded={organizingPage}
+              onClick={() => setOrganizingPage((current) => !current)}
+            >
+              <ArrowDownUp size={18} />
+            </button>
+            <button
               className="privacy-toggle"
               onClick={toggleValues}
               title={hideValues ? "Mostrar valores" : "Esconder valores"}
@@ -809,17 +818,6 @@ export default function App() {
             </div>
           </div>
         )}
-        <div className="page-organization-toolbar">
-          <button
-            className="page-order-button"
-            title={organizingPage ? "Concluir ajuste da ordem" : "Ajustar ordem dos blocos"}
-            aria-label={organizingPage ? "Concluir ajuste da ordem" : "Ajustar ordem dos blocos"}
-            aria-expanded={organizingPage}
-            onClick={() => setOrganizingPage((current) => !current)}
-          >
-            <ArrowDownUp size={18} />
-          </button>
-        </div>
         {organizingPage && (
           <section className="panel page-organizer">
             <div className="panel-head">
@@ -4180,6 +4178,8 @@ function useHoldToSort(
   };
   const start = (event: React.PointerEvent<HTMLElement>, id: string) => {
     if ((event.target as HTMLElement).closest("button, input, select, textarea, a")) return;
+    // Impede a seleção de texto/callout do Safari e reserva o toque longo para ordenar.
+    event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
     pointer.current = { x: event.clientX, y: event.clientY };
     pressOrigin.current = pointer.current;
@@ -4187,7 +4187,7 @@ function useHoldToSort(
       activeId.current = id;
       setDraggingId(id);
       frame.current = requestAnimationFrame(autoScroll);
-    }, 280);
+    }, 180);
   };
   const drag = (event: React.PointerEvent<HTMLElement>) => {
     pointer.current = { x: event.clientX, y: event.clientY };
@@ -4458,16 +4458,23 @@ function Payments({
     const step = obligation.recurrence === "monthly" ? 1 : obligation.recurrence === "quarterly" ? 3 : obligation.recurrence === "semiannual" ? 6 : obligation.recurrence === "yearly" ? 12 : 0;
     const date = new Date(`${obligation.dueDate}T12:00:00`);
     const today = new Date(); today.setHours(0, 0, 0, 0);
-    while (step && date < today) date.setMonth(date.getMonth() + step);
+    while (step && (date < today || obligation.skippedDates?.includes(dateOnly(date)))) date.setMonth(date.getMonth() + step);
     return dateOnly(date);
   };
   const paymentGroup = (obligation: Obligation) => {
-    const due = nextDueDate(obligation).slice(0, 7);
-    const current = monthOf(dateOnly(new Date()));
-    const next = new Date(); next.setMonth(next.getMonth() + 1);
-    return due === current ? "No mês" : due === monthOf(dateOnly(next)) ? "Próximo mês" : "Próximos meses";
+    const dueText = nextDueDate(obligation);
+    const due = new Date(`${dueText}T12:00:00`);
+    const todayText = dateOnly(new Date());
+    const today = new Date(`${todayText}T12:00:00`);
+    const days = Math.round((due.getTime() - today.getTime()) / 86_400_000);
+    if (days < 0) return "Vencidos";
+    if (days === 0) return "Vence hoje";
+    if (days <= 7) return "Vence nos próximos 7 dias";
+    if (dueText.slice(0, 7) === todayText.slice(0, 7)) return "Vence este mês";
+    return "Vence nos próximos meses";
   };
   const [editingId, setEditingId] = useState<string>();
+  const [deleting, setDeleting] = useState<Obligation>();
   const dueDateForDay = (baseMonth: string, rawDay: FormDataEntryValue | null) => {
     const day = Math.max(1, Math.min(31, Number(rawDay) || 10));
     const [year, monthNumber] = baseMonth.split("-").map(Number);
@@ -4520,11 +4527,23 @@ function Payments({
     });
     setEditingId(undefined);
   };
-  const remove = (id: string) => {
-    if (confirm("Excluir este compromisso?"))
-      mutate((d) => {
-        d.obligations = d.obligations.filter((o) => o.id !== id);
-      });
+  const remove = (obligation: Obligation) => {
+    if (obligation.recurrence === "none") {
+      if (confirm("Excluir este pagamento?")) mutate((d) => { d.obligations = d.obligations.filter((item) => item.id !== obligation.id); });
+      return;
+    }
+    setDeleting(obligation);
+  };
+  const deleteOccurrence = () => {
+    if (!deleting) return;
+    const due = nextDueDate(deleting);
+    mutate((d) => { const item = d.obligations.find((entry) => entry.id === deleting.id); if (item) item.skippedDates = [...(item.skippedDates || []), due]; });
+    setDeleting(undefined);
+  };
+  const deleteRecurring = () => {
+    if (!deleting) return;
+    mutate((d) => { d.obligations = d.obligations.filter((item) => item.id !== deleting.id); });
+    setDeleting(undefined);
   };
   return (
     <section className="panel">
@@ -4612,7 +4631,7 @@ function Payments({
                     className="danger-button icon-button"
                     title="Excluir pagamento"
                     aria-label={`Excluir ${o.name}`}
-                    onClick={() => remove(o.id)}
+                    onClick={() => remove(o)}
                   >
                     <Trash2 size={18} />
                   </button>
@@ -4637,6 +4656,7 @@ function Payments({
             </Fragment>;
           })}
       </div>
+      {deleting && <div className="choice-dialog" role="dialog" aria-modal="true" aria-label="Excluir pagamento recorrente"><div><h3>Excluir {deleting.name}</h3><p>Escolha se vale somente para o próximo pagamento ou para toda a recorrência.</p><div className="actions"><button onClick={deleteOccurrence}>Apenas esta ocorrência</button><button className="danger-button" onClick={deleteRecurring}>Esta e próximas</button><button onClick={()=>setDeleting(undefined)}>Cancelar</button></div></div></div>}
       <details className="completed-block"><summary>Pagamentos confirmados ({data.obligations.filter(o=>["Paga","Confirmada","Dispensada"].includes(o.status)).length})</summary>{data.obligations.filter(o=>["Paga","Confirmada","Dispensada"].includes(o.status)).sort((a,b)=>b.dueDate.localeCompare(a.dueDate)).map(o=><div className="confirmed-row" key={o.id}><div><b>{o.name}</b><small>{o.dueDate} · <SensitiveMoney value={o.paidAmount??o.planned} hidden={hideValues} /> · {o.status}</small></div><button onClick={()=>mutate(d=>{const item=d.obligations.find(x=>x.id===o.id);if(item){item.status="A pagar";item.paidAt=undefined;item.paidAmount=undefined;item.reconciledTransactionId=undefined;d.transactions=d.transactions.filter(transaction=>transaction.obligationId!==o.id||!transaction.provisional);for(const transaction of d.transactions)if(transaction.obligationId===o.id)transaction.obligationId=undefined}})}>Desconfirmar</button></div>)}</details>
       {!data.obligations.length && <Empty />}
     </section>
@@ -4847,6 +4867,7 @@ function Tasks({
   onCreateDone: () => void;
 }) {
   const [editingTaskId, setEditingTaskId] = useState<string>();
+  const [deletingTask, setDeletingTask] = useState<Task>();
   const migratedResponsibilities = useRef(false);
   useEffect(() => {
     if (migratedResponsibilities.current) return;
@@ -4968,19 +4989,10 @@ function Tasks({
       if (confirm("Excluir esta responsabilidade?")) mutate((d) => { d.tasks = d.tasks.filter((item) => item.id !== id); });
       return;
     }
-    const choice = prompt("Digite ‘esta’ para excluir somente esta ocorrência ou ‘próximas’ para excluir esta e as próximas recorrências.", "esta");
-    if (!choice) return;
-    const normalized = normalize(choice);
-    if (normalized.startsWith("proxim")) {
-      mutate((d) => {
-        const current = d.tasks.find((item) => item.id === id);
-        const series = current?.seriesId || id;
-        d.tasks = d.tasks.filter((item) => (item.seriesId || item.id) !== series);
-      });
-    } else if (normalized.startsWith("esta")) {
-      mutate((d) => { d.tasks = d.tasks.filter((item) => item.id !== id); });
-    }
+    setDeletingTask(task);
   };
+  const deleteTaskOccurrence = () => { if (!deletingTask) return; mutate((d) => { d.tasks = d.tasks.filter((item) => item.id !== deletingTask.id); }); setDeletingTask(undefined); };
+  const deleteTaskSeries = () => { if (!deletingTask) return; mutate((d) => { const series = deletingTask.seriesId || deletingTask.id; d.tasks = d.tasks.filter((item) => (item.seriesId || item.id) !== series); }); setDeletingTask(undefined); };
   const active = data.tasks
     .filter((t) => t.status !== "Concluída")
     .slice()
@@ -5128,6 +5140,7 @@ function Tasks({
         {renderTasks(active.filter((t) => t.assignee !== currentMember && t.assignee !== "Ambos"))}
       </div>
       <details className="completed-block"><summary>Concluídas ({completedOccurrences.length})</summary>{completedOccurrences.map(item=><div className="confirmed-row" key={`${item.task.id}-${item.completedAt}`}><div><b>{item.task.title}</b><small>{new Date(item.completedAt).toLocaleString("pt-BR")} · {item.task.assignee}</small></div><button onClick={()=>undoCompletion(item.task.id,item.index,item.completedAt)}>Desfazer conclusão</button></div>)}</details>
+      {deletingTask && <div className="choice-dialog" role="dialog" aria-modal="true" aria-label="Excluir responsabilidade recorrente"><div><h3>Excluir {deletingTask.title}</h3><p>Escolha o alcance da exclusão.</p><div className="actions"><button onClick={deleteTaskOccurrence}>Apenas esta ocorrência</button><button className="danger-button" onClick={deleteTaskSeries}>Esta e próximas</button><button onClick={()=>setDeletingTask(undefined)}>Cancelar</button></div></div></div>}
     </section>
   );
 }
