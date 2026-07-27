@@ -177,6 +177,7 @@ const pageBlocks: Record<Page, ReadonlyArray<[string, string]>> = {
     ["categories-section", "Categorias"],
     ["budgets-section", "Orçamentos"],
     ["goals-section", "Metas e reservas"],
+    ["audit-section", "Auditoria da base"],
   ],
   importar: [
     ["quick-transactions", "Transações e revisão"],
@@ -953,6 +954,9 @@ export default function App() {
                 creating={false}
                 onCreateDone={() => setCreateIntent(undefined)}
               />
+            </Collapsible>
+            <Collapsible id="audit-section" title="Auditoria da base">
+              <AuditTrail data={data} />
             </Collapsible>
           </>
         )}
@@ -4172,6 +4176,33 @@ function useHoldToSort(
     }
     frame.current = requestAnimationFrame(autoScroll);
   };
+  const finish = () => {
+    if (pressTimer.current) window.clearTimeout(pressTimer.current);
+    pressTimer.current = undefined;
+    if (frame.current) cancelAnimationFrame(frame.current);
+    frame.current = undefined;
+    activeId.current = undefined;
+    pointer.current = undefined;
+    pressOrigin.current = undefined;
+    document.body.classList.remove("sorting-active");
+    setDraggingId(undefined);
+  };
+  useEffect(() => {
+    const onMove = (event: PointerEvent) => {
+      if (!activeId.current) return;
+      event.preventDefault();
+      pointer.current = { x: event.clientX, y: event.clientY };
+      moveAtPointer(event.clientX, event.clientY);
+    };
+    window.addEventListener("pointermove", onMove, { passive: false });
+    window.addEventListener("pointerup", finish);
+    window.addEventListener("pointercancel", finish);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", finish);
+      window.removeEventListener("pointercancel", finish);
+    };
+  });
   const start = (event: React.PointerEvent<HTMLElement>, id: string) => {
     if ((event.target as HTMLElement).closest("button, input, select, textarea, a")) return;
     // Impede a seleção de texto/callout do Safari e reserva o toque longo para ordenar.
@@ -4181,6 +4212,7 @@ function useHoldToSort(
     pressOrigin.current = pointer.current;
     pressTimer.current = window.setTimeout(() => {
       activeId.current = id;
+      document.body.classList.add("sorting-active");
       setDraggingId(id);
       frame.current = requestAnimationFrame(autoScroll);
     }, 180);
@@ -4197,17 +4229,7 @@ function useHoldToSort(
     }
     moveAtPointer(event.clientX, event.clientY);
   };
-  const end = () => {
-    if (pressTimer.current) window.clearTimeout(pressTimer.current);
-    pressTimer.current = undefined;
-    if (frame.current) cancelAnimationFrame(frame.current);
-    frame.current = undefined;
-    activeId.current = undefined;
-    pointer.current = undefined;
-    pressOrigin.current = undefined;
-    setDraggingId(undefined);
-  };
-  return { draggingId, start, drag, end };
+  return { draggingId, start, drag, end: finish };
 }
 
 function Budgets({
@@ -4312,7 +4334,7 @@ function Budgets({
     </form>
   );
   const renderBudget = (item: Budget) => (
-    <div className={`budget-entry sortable-item${budgetSort.draggingId === item.id ? " is-dragging" : ""}`} key={item.id} data-sort-budget data-sort-id={item.id} onPointerDown={(event) => budgetSort.start(event, item.id)} onPointerMove={budgetSort.drag} onPointerUp={budgetSort.end} onPointerCancel={budgetSort.end}>
+    <div className={`budget-entry sortable-item${budgetSort.draggingId === item.id ? " is-dragging" : ""}`} key={item.id} data-sort-budget data-sort-id={item.id} onContextMenu={(event) => event.preventDefault()} onPointerDown={(event) => budgetSort.start(event, item.id)} onPointerMove={budgetSort.drag} onPointerUp={budgetSort.end} onPointerCancel={budgetSort.end}>
       <div className="budget-item">
         <div>
           <b>{label(item)}</b>
@@ -4801,7 +4823,7 @@ function Goals({
               .map((g) => {
                 const total = g.movements.reduce((s, m) => s + m.amount, 0);
                 return (
-                  <article className={`sortable-item${goalSort.draggingId === g.id ? " is-dragging" : ""}`} key={g.id} data-sort-goal data-sort-id={g.id} onPointerDown={(event) => goalSort.start(event, g.id)} onPointerMove={goalSort.drag} onPointerUp={goalSort.end} onPointerCancel={goalSort.end}>
+                  <article className={`sortable-item${goalSort.draggingId === g.id ? " is-dragging" : ""}`} key={g.id} data-sort-goal data-sort-id={g.id} onContextMenu={(event) => event.preventDefault()} onPointerDown={(event) => goalSort.start(event, g.id)} onPointerMove={goalSort.drag} onPointerUp={goalSort.end} onPointerCancel={goalSort.end}>
                     <div className="goal-top">
                       <div>
                         <small>
@@ -5358,7 +5380,7 @@ function Config({
               <p className="empty">Nenhuma conta ou cartão cadastrado.</p>
             )}
             {data.accounts.map((account) => (
-              <div className={`account-entry sortable-item${accountSort.draggingId === account.id ? " is-dragging" : ""}`} key={account.id} data-sort-account data-sort-id={account.id} onPointerDown={(event) => accountSort.start(event, account.id)} onPointerMove={accountSort.drag} onPointerUp={accountSort.end} onPointerCancel={accountSort.end}>
+              <div className={`account-entry sortable-item${accountSort.draggingId === account.id ? " is-dragging" : ""}`} key={account.id} data-sort-account data-sort-id={account.id} onContextMenu={(event) => event.preventDefault()} onPointerDown={(event) => accountSort.start(event, account.id)} onPointerMove={accountSort.drag} onPointerUp={accountSort.end} onPointerCancel={accountSort.end}>
                 <div className="row editable-row account-row">
                   <div>
                     <b>{account.name}</b>
@@ -5533,7 +5555,7 @@ function CategoryEditor({
       />
       {data.categories.map((c) => (
         <details className={`category-details sortable-item${categorySort.draggingId === c.id ? " is-dragging" : ""}`} key={c.id} data-sort-category data-sort-id={c.id}>
-          <summary onPointerDown={(event) => categorySort.start(event, c.id)} onPointerMove={categorySort.drag} onPointerUp={categorySort.end} onPointerCancel={categorySort.end}><b>{c.name}</b><span className="actions category-actions" onPointerDown={(event)=>event.stopPropagation()} onClick={(event)=>event.stopPropagation()}>
+          <summary onContextMenu={(event) => event.preventDefault()} onPointerDown={(event) => categorySort.start(event, c.id)} onPointerMove={categorySort.drag} onPointerUp={categorySort.end} onPointerCancel={categorySort.end}><b>{c.name}</b><span className="actions category-actions" onPointerDown={(event)=>event.stopPropagation()} onClick={(event)=>event.stopPropagation()}>
             <button className="icon-button" title="Renomear categoria" aria-label={`Renomear ${c.name}`} onClick={() => rename(c.id, c.name)}><Pencil size={16}/></button>
             <button className="icon-button" title="Adicionar subcategoria" aria-label={`Adicionar subcategoria a ${c.name}`} onClick={() => addSub(c.id)}><Plus size={15}/></button>
             <button
@@ -6038,4 +6060,38 @@ function Badge({ text, kind }: { text: string; kind?: string }) {
 }
 function Empty() {
   return <div className="empty">Nenhum registro por aqui ainda.</div>;
+}
+
+function AuditTrail({ data }: { data: FamilyData }) {
+  const entries = [...(data.auditLog || [])].sort((a, b) =>
+    b.at.localeCompare(a.at),
+  );
+  const exportTrail = () =>
+    download(
+      "auditoria-casa-em-ordem.json",
+      JSON.stringify(entries, null, 2),
+      "application/json",
+    );
+  return (
+    <section className="panel audit-trail">
+      <div className="section-heading">
+        <div>
+          <h2>Trilha de auditoria</h2>
+          <p>As ultimas alterações ficam salvas junto da base compartilhada.</p>
+        </div>
+        <button className="icon-button" aria-label="Exportar auditoria" title="Exportar auditoria" onClick={exportTrail}>
+          <Download size={16} />
+        </button>
+      </div>
+      <div className="audit-list">
+        {entries.slice(0, 100).map((entry) => (
+          <div className="audit-entry" key={entry.id}>
+            <b>{entry.action}</b>
+            <small>{new Date(entry.at).toLocaleString("pt-BR")} · {entry.by}</small>
+          </div>
+        ))}
+        {!entries.length && <Empty />}
+      </div>
+    </section>
+  );
 }

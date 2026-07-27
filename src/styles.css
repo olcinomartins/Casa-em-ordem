@@ -1205,15 +1205,27 @@ code {
   border-radius: 12px;
 }
 .sortable-item {
-  touch-action: pan-y;
+  touch-action: manipulation;
   -webkit-user-select: none;
   user-select: none;
   -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
 }
 .sortable-item input,
 .sortable-item textarea,
 .sortable-item select { -webkit-user-select: text; user-select: text; }
 .sortable-item.is-dragging { opacity: .72; user-select: none; }
+.sorting-active,
+.sorting-active * {
+  -webkit-user-select: none !important;
+  user-select: none !important;
+  -webkit-touch-callout: none !important;
+}
+.audit-trail { margin-top: 0; }
+.audit-list { display: grid; gap: .35rem; }
+.audit-entry { display: grid; gap: .12rem; padding: .6rem 0; border-bottom: 1px solid var(--line); }
+.audit-entry:last-child { border-bottom: 0; }
+.audit-entry small { color: var(--muted); }
 .budget-item small {
   display: block;
   color: #718078;
