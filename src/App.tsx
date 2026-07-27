@@ -875,8 +875,8 @@ export default function App() {
         {page === "visao" && (
           <section className="page-analysis-controls" aria-label="Leitura do painel e análises">
             <div className="panel-mode-switch" role="group" aria-label="Origem dos gastos">
-              <button className={panelMode === "registered" ? "on" : ""} onClick={() => setPanelMode("registered")}>Registrados</button>
-              <button className={panelMode === "realized" ? "on" : ""} onClick={() => setPanelMode("realized")}>Realizado por extrato/fatura</button>
+              <button className={panelMode === "registered" ? "on" : ""} onClick={() => setPanelMode("registered")}>Registros no app</button>
+              <button className={panelMode === "realized" ? "on" : ""} onClick={() => setPanelMode("realized")}>Extratos e faturas</button>
             </div>
             <ViewSwitch view={view} setView={setView} />
           </section>
@@ -1999,7 +1999,9 @@ function Dashboard({
     month,
     view === "accrual" ? "accrual" : "cash",
   );
-  const shownSpending = panelMode === "registered" ? spending : spending.filter((entry) => entry.state === "realized");
+  const shownSpending = panelMode === "registered"
+    ? spending.filter((entry) => entry.source !== "transaction")
+    : spending.filter((entry) => entry.source === "transaction");
   const realizedExpenses = spending.filter((entry) => entry.state === "realized").reduce((sum, entry) => sum + entry.amount, 0);
   const estimatedEntries = spending.filter((entry) => entry.state === "estimated");
   const expectedBeforeClosing = estimatedEntries.filter((entry) => entry.source === "payment").reduce((sum, entry) => sum + entry.amount, 0);
@@ -2634,7 +2636,9 @@ function CategorySpendingCharts({
   mode: "registered" | "realized";
 }) {
   const resultFor = (cashView: "cash" | "accrual") => {
-    const values = monthlySpending(data, month, cashView).filter((entry) => mode === "registered" || entry.state === "realized");
+    const values = monthlySpending(data, month, cashView).filter((entry) =>
+      mode === "registered" ? entry.source !== "transaction" : entry.source === "transaction",
+    );
     const sums = new Map<string, number>();
     for (const entry of values) sums.set(entry.categoryId || "", (sums.get(entry.categoryId || "") || 0) + entry.amount);
     const total = [...sums.values()].reduce((sum, value) => sum + value, 0);
@@ -2707,7 +2711,9 @@ function BudgetBars({
   hideValues?: boolean;
   mode?: "registered" | "realized";
 }) {
-  const spending = monthlySpending(data, month, view).filter((entry) => mode === "registered" || entry.state === "realized");
+  const spending = monthlySpending(data, month, view).filter((entry) =>
+    mode === "registered" ? entry.source !== "transaction" : entry.source === "transaction",
+  );
   const sourceLabel: Record<(typeof spending)[number]["source"], string> = {
     transaction: "Lançamento confirmado", voice: "Lançamento por voz", manual: "Lançamento manual", receipt: "Nota de supermercado", payment: "Pagamento confirmado",
   };
@@ -5690,7 +5696,9 @@ function Analytics({
   }, [start, end, mode, report, accountId]);
   const months = available.filter((month) => month >= start && month <= end);
   const belongs = (t: Transaction, kind: "budget" | "reserve" | "final") =>
-    (panelMode === "registered" || !t.estimated) &&
+    (panelMode === "registered"
+      ? Boolean(t.estimated || t.provisional || t.obligationId || !t.batchId)
+      : Boolean(!t.estimated && t.batchId && !t.provisional && !t.obligationId)) &&
     (accountId === "all" || t.accountId === accountId) &&
     (kind === "final"
       ? t.movement !== "transfer" && !t.transfer
