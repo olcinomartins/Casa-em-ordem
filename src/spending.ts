@@ -130,6 +130,21 @@ const transactionDate = (transaction: Transaction, view: "cash" | "accrual") =>
     ? transaction.paymentDate || transaction.date
     : transaction.purchaseDate || transaction.date;
 
+/** Retorna a ocorrência da recorrência que cai no mês consultado. */
+const occurrenceInMonth = (obligation: Obligation, month: string) => {
+  const months = obligation.recurrence === "monthly" ? 1
+    : obligation.recurrence === "quarterly" ? 3
+    : obligation.recurrence === "semiannual" ? 6
+    : obligation.recurrence === "yearly" ? 12 : 0;
+  const date = new Date(`${obligation.dueDate}T12:00:00`);
+  if (!Number.isFinite(date.getTime())) return undefined;
+  if (!months) return monthOf(obligation.dueDate) === month ? obligation.dueDate : undefined;
+  while (monthOf(date.toISOString().slice(0, 10)) < month) date.setMonth(date.getMonth() + months);
+  const occurrence = date.toISOString().slice(0, 10);
+  if (monthOf(occurrence) !== month || obligation.skippedDates?.includes(occurrence)) return undefined;
+  return occurrence;
+};
+
 /**
  * Consolida fatos e estimativas do mês. Estimativas conciliadas permanecem no
  * histórico para auditoria, mas deixam de compor o total assim que o fato chega.
@@ -245,41 +260,40 @@ export function monthlySpending(
 
   for (const obligation of data.obligations) {
     const amount = obligation.paidAmount ?? obligation.planned;
-    const actualForObligation = actualTransactions.find(
-      (transaction) => transaction.obligationId === obligation.id,
+    const occurrenceDate = occurrenceInMonth(obligation, month);
+    const actualForObligation = actualTransactions.find((transaction) =>
+      transaction.obligationId === obligation.id &&
+      monthOf(transaction.paymentDate || transaction.purchaseDate || transaction.date) === month,
     );
     if (obligation.status === "Dispensada" || actualForObligation) continue;
 
     if (obligation.status === "Paga") {
       if (monthOf(obligation.paidAt || obligation.dueDate) !== month || amount <= 0)
-        continue;
-      entries.push({
-        id: `paid:${obligation.id}`,
-        date: obligation.paidAt || obligation.dueDate,
-        description: obligation.name,
-        amount: Math.abs(amount),
-        categoryId: categoryForObligation(data, obligation),
-        state: "realized",
-        source: "payment",
-      });
+        // Pagamento já concluído em outro mês: a recorrência volta a ser previsão neste mês.
+        if (!occurrenceDate || amount <= 0) continue;
+        else {
+          entries.push({ id: `obligation:${obligation.id}:${occurrenceDate}`, date: occurrenceDate, description: obligation.name, amount: Math.abs(amount), categoryId: categoryForObligation(data, obligation), state: "estimated", source: "payment" });
+          continue;
+        }
+      entries.push({ id: `paid:${obligation.id}`, date: obligation.paidAt || obligation.dueDate, description: obligation.name, amount: Math.abs(amount), categoryId: categoryForObligation(data, obligation), state: "realized", source: "payment" });
       continue;
     }
 
     if (
       obligation.reconciledTransactionId ||
-      monthOf(obligation.dueDate) !== month ||
+      !occurrenceDate ||
       amount <= 0
     ) continue;
     const estimate: Matchable = {
       amount,
-      date: obligation.dueDate,
+      date: occurrenceDate,
       description: obligation.pattern || obligation.name,
       accountId: obligation.accountId,
     };
     if (legacyActualMatch("payment", estimate, 35, 5)) continue;
     entries.push({
-      id: `obligation:${obligation.id}`,
-      date: obligation.dueDate,
+      id: `obligation:${obligation.id}:${occurrenceDate}`,
+      date: occurrenceDate,
       description: obligation.name,
       amount: Math.abs(amount),
       categoryId: categoryForObligation(data, obligation),
