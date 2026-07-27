@@ -1624,6 +1624,12 @@ button.attention-item { justify-content: initial; }
   .dashboard-blocks { grid-template-columns: minmax(0, 1fr); }
   .dashboard-block.wide { grid-column: 1; }
 }
+@media (min-width: 1001px) {
+  .dashboard-blocks { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .dashboard-block.wide { grid-column: 1 / -1; }
+  .dashboard-block.compact { min-height: 100%; }
+  .payment-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 @media (max-width: 720px) {
   /* O Safari só amplia a página ao focar controles com fonte menor que 16px. */
   input, select, textarea { font-size: 16px; }
