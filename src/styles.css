@@ -988,10 +988,7 @@ th {
 .goal-section {
   margin-top: 1.5rem;
 }
-.goal-actions {
-  margin-top: 0.8rem;
-  flex-wrap: wrap;
-}
+.goal-actions { margin: 0; flex-wrap: nowrap; }
 .sub-item {
   display: inline-flex;
 }
@@ -1040,6 +1037,10 @@ th {
 .goal-top h3 {
   margin: 0.15rem 0 0.8rem;
 }
+.goal-side { display: flex; align-items: flex-start; gap: .45rem; flex: 0 0 auto; }
+.goal-side > strong { min-width: 38px; text-align: right; }
+.goal-side .goal-actions { display: grid; grid-template-columns: 28px; gap: .25rem; }
+.goal-side .goal-actions .icon-button { width: 28px; min-width: 28px; min-height: 28px; padding: .15rem; }
 .goal-top small,
 .goal-foot {
   color: #718078;

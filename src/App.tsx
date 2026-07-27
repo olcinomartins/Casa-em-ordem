@@ -4812,30 +4812,22 @@ function Goals({
                           {g.deadline}
                         </small>
                       </div>
-                      <strong>
+                      <div className="goal-side"><strong>
                         {Math.max(
                           0,
                           Math.round((total / (g.target || 1)) * 100),
                         )}
                         %
-                      </strong>
+                      </strong><div className="actions goal-actions">
+                        <button className="icon-button" title="Editar meta" aria-label={`Editar ${g.name}`} onClick={() => edit(g.id)}><Pencil size={16} /></button>
+                        <button className="danger-button icon-button" title="Excluir meta" aria-label={`Excluir ${g.name}`} onClick={() => remove(g.id)}><Trash2 size={16} /></button>
+                      </div></div>
                     </div>
                     <progress value={total} max={g.target || 1} />
                     <div className="goal-foot">
                       <span>
                         {money(total)} de {money(g.target)}
                       </span>
-                    </div>
-                    <div className="actions goal-actions">
-                      <button className="icon-button" title="Editar meta" aria-label={`Editar ${g.name}`} onClick={() => edit(g.id)}><Pencil size={18} /></button>
-                      <button
-                        className="danger-button icon-button"
-                        title="Excluir meta"
-                        aria-label={`Excluir ${g.name}`}
-                        onClick={() => remove(g.id)}
-                      >
-                        <Trash2 size={18} />
-                      </button>
                     </div>
                   </article>
                 );
