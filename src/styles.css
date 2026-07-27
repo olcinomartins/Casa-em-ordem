@@ -1226,6 +1226,17 @@ code {
 .audit-entry { display: grid; gap: .12rem; padding: .6rem 0; border-bottom: 1px solid var(--line); }
 .audit-entry:last-child { border-bottom: 0; }
 .audit-entry small { color: var(--muted); }
+.budget-detail { border-bottom: 1px solid var(--line); padding: .55rem 0; }
+.budget-detail summary { cursor: pointer; list-style: none; }
+.budget-detail summary::-webkit-details-marker { display: none; }
+.budget-detail summary em { display: block; margin-top: .25rem; color: var(--muted); font-size: .74rem; font-style: normal; }
+.budget-detail-content { display: grid; gap: .35rem; padding: .65rem 0 .15rem; }
+.budget-detail-content > b { margin-top: .25rem; font-size: .82rem; }
+.goal-edit-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .55rem; margin-top: .7rem; padding: .75rem; border: 1px solid var(--line); border-radius: 12px; background: #f8faf7; }
+.goal-edit-form label { display: grid; gap: .2rem; font-size: .8rem; }
+.goal-edit-form .check { display: flex; align-items: center; gap: .4rem; }
+.goal-edit-form .actions { grid-column: 1 / -1; justify-content: flex-end; }
+@media (max-width: 520px) { .goal-edit-form { grid-template-columns: 1fr; } }
 .budget-item small {
   display: block;
   color: #718078;

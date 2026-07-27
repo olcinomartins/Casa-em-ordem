@@ -2684,6 +2684,9 @@ function BudgetBars({
   hideValues?: boolean;
 }) {
   const spending = monthlySpending(data, month, view);
+  const sourceLabel: Record<(typeof spending)[number]["source"], string> = {
+    transaction: "Lançamento confirmado", voice: "Lançamento por voz", manual: "Lançamento manual", receipt: "Nota de supermercado", payment: "Pagamento confirmado",
+  };
   const rows = data.categories
     .filter((c) => c.nature === "expense")
     .map((c) => {
@@ -2694,7 +2697,9 @@ function BudgetBars({
       const estimated = spending
         .filter((entry) => entry.categoryId === c.id && entry.state === "estimated")
         .reduce((sum, entry) => sum + entry.amount, 0);
-      return { name: c.name, planned, actual, estimated, tracked: actual + estimated };
+      const plannedItems = data.budgets.filter((item) => item.categoryId === c.id && budgetApplies(item, month));
+      const entries = spending.filter((entry) => entry.categoryId === c.id);
+      return { name: c.name, planned, actual, estimated, tracked: actual + estimated, plannedItems, entries };
     })
     .filter((x) => x.planned || x.tracked)
     .sort((a, b) => b.tracked - a.tracked)
@@ -2702,7 +2707,8 @@ function BudgetBars({
   return rows.length ? (
     <div className="bars">
       {rows.map((r) => (
-        <div key={r.name}>
+        <details className="budget-detail" key={r.name}>
+          <summary>
           <label>
             <span>{r.name}</span>
             <span>
@@ -2717,7 +2723,17 @@ function BudgetBars({
             aria-label={hideValues ? "valor oculto" : `${r.name}: ${money(r.tracked)} de ${money(r.planned)}`}
             aria-valuetext={hideValues ? "valor oculto" : `${money(r.tracked)} de ${money(r.planned)}`}
           />
-        </div>
+          <em>Toque para ver os valores considerados</em>
+          </summary>
+          <div className="budget-detail-content">
+            <b>Planejado</b>
+            {r.plannedItems.map((item) => <Row key={item.id} a={item.reason || "Orçamento"} b={item.subcategory || "Categoria"} c={<SensitiveMoney value={item.amount} hidden={hideValues} />} />)}
+            {!r.plannedItems.length && <small>Nenhum orçamento específico nesta categoria.</small>}
+            <b>Acompanhado no mês</b>
+            {r.entries.map((entry) => <Row key={entry.id} a={entry.description} b={`${sourceLabel[entry.source]} · ${entry.state === "estimated" ? "Estimado" : "Confirmado"}`} c={<SensitiveMoney value={entry.amount} hidden={hideValues} />} />)}
+            {!r.entries.length && <small>Nenhum lançamento considerado ainda.</small>}
+          </div>
+        </details>
       ))}
     </div>
   ) : (
@@ -4692,6 +4708,7 @@ function Goals({
   creating: boolean;
   onCreateDone: () => void;
 }) {
+  const [editingId, setEditingId] = useState<string>();
   const provisionPool = data.goals.find((goal) => goal.provisionPool);
   const provisionMonthly = data.budgets
     .filter((budget) => budget.kind === "provision")
@@ -4725,37 +4742,28 @@ function Goals({
       }),
     );
   };
-  const edit = (id: string) => {
-    const g = data.goals.find((x) => x.id === id)!;
-    const name = prompt("Nome:", g.name);
-    if (!name) return;
-    const target = prompt("Valor-alvo:", money(g.target));
-    if (target === null) return;
-    const minimum = prompt("Aporte mensal:", money(g.minimum));
-    if (minimum === null) return;
-    const startDate = prompt(
-      "Data inicial (AAAA-MM-DD):",
-      g.startDate || dateOnly(new Date()),
-    );
-    if (!startDate || !/^\d{4}-\d{2}-\d{2}$/.test(startDate))
-      return alert("Use a data inicial no formato AAAA-MM-DD.");
-    const deadline = prompt("Prazo final (AAAA-MM-DD):", g.deadline);
-    if (
-      !deadline ||
-      !/^\d{4}-\d{2}-\d{2}$/.test(deadline) ||
-      deadline < startDate
-    )
-      return alert("A data final precisa ser válida e posterior ao início.");
+  const saveEdit = (id: string, form: FormData) => {
+    const name = String(form.get("name") || "").trim();
+    const target = parseCurrency(form.get("target"));
+    const startDate = String(form.get("startDate") || "");
+    const deadline = String(form.get("deadline") || "");
+    if (!name || target <= 0 || !startDate || !deadline || deadline < startDate)
+      return alert("Preencha nome, valor-alvo e datas válidas.");
     mutate((d) => {
       const item = d.goals.find((x) => x.id === id)!;
       item.name = name;
-      item.target = parseCurrency(target);
-      item.minimum = parseCurrency(minimum);
+      item.kind = String(form.get("kind") || "desire") as Goal["kind"];
+      item.target = target;
+      item.minimum = parseCurrency(form.get("minimum"));
       item.startDate = startDate;
       item.deadline = deadline;
+      item.priority = Math.max(1, Number(form.get("priority")) || item.priority);
+      item.emergency = form.get("emergency") === "on";
+      item.active = form.get("active") === "on";
       item.updatedAt = now();
       item.version++;
     });
+    setEditingId(undefined);
   };
   const remove = (id: string) => {
     if (confirm("Excluir esta meta e seu histórico de aportes?"))
@@ -4843,7 +4851,7 @@ function Goals({
                         )}
                         %
                       </strong><div className="actions goal-actions">
-                        <button className="icon-button" title="Editar meta" aria-label={`Editar ${g.name}`} onClick={() => edit(g.id)}><Pencil size={16} /></button>
+                        <button className="icon-button" title="Editar meta" aria-label={`Editar ${g.name}`} onClick={() => setEditingId(editingId === g.id ? undefined : g.id)}><Pencil size={16} /></button>
                         <button className="danger-button icon-button" title="Excluir meta" aria-label={`Excluir ${g.name}`} onClick={() => remove(g.id)}><Trash2 size={16} /></button>
                       </div></div>
                     </div>
@@ -4853,6 +4861,20 @@ function Goals({
                         {money(total)} de {money(g.target)}
                       </span>
                     </div>
+                    {editingId === g.id && (
+                      <form className="goal-edit-form" onPointerDown={(event) => event.stopPropagation()} onSubmit={(event) => { event.preventDefault(); saveEdit(g.id, new FormData(event.currentTarget)); }}>
+                        <label>Nome<input name="name" defaultValue={g.name} required /></label>
+                        <label>Tipo<select name="kind" defaultValue={g.kind || "desire"}><option value="desire">Meta de desejo</option><option value="provision">Provisão para despesa</option></select></label>
+                        <label>Valor-alvo<MoneyInput name="target" defaultValue={g.target} required /></label>
+                        <label>Aporte mensal<MoneyInput name="minimum" defaultValue={g.minimum} /></label>
+                        <label>Data inicial<input name="startDate" type="date" defaultValue={g.startDate} required /></label>
+                        <label>Data final<input name="deadline" type="date" defaultValue={g.deadline} required /></label>
+                        <label>Prioridade<input name="priority" type="number" min="1" defaultValue={g.priority} /></label>
+                        <label className="check"><input name="active" type="checkbox" defaultChecked={g.active} /> Meta ativa</label>
+                        <label className="check"><input name="emergency" type="checkbox" defaultChecked={g.emergency} /> Reserva de emergência</label>
+                        <div className="actions"><button type="button" onClick={() => setEditingId(undefined)}>Cancelar</button><button type="submit">Salvar meta</button></div>
+                      </form>
+                    )}
                   </article>
                 );
               })}
