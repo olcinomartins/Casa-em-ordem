@@ -1666,7 +1666,7 @@ function QuickActions({
               <ImportPage data={data} mutate={mutate} setMessage={setMessage} hideValues={false} creating onCreateDone={close}/>
             ) : mode === "receipt" ? (
               <div className="quick-receipt-form">
-                <input ref={receiptFileRef} hidden type="file" accept="image/*" onChange={(event)=>readQuickReceipt(event.target.files?.[0])}/>
+                <input ref={receiptFileRef} hidden type="file" accept="image/*" onChange={(event)=>{ const file=event.target.files?.[0]; event.currentTarget.value=""; void readQuickReceipt(file); }}/>
                 <button className="primary quick-expense-save" disabled={receiptBusy} onClick={()=>receiptFileRef.current?.click()}><Camera size={18}/>{receiptBusy ? "Lendo nota…" : "Fotografar ou escolher nota"}</button>
                 {receiptDraft && <>
                   <div className="quick-expense-form">
