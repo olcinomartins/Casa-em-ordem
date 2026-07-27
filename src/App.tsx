@@ -1067,24 +1067,16 @@ function NotificationBell({
             <div className="notification-warning">OneDrive sem confirmação.</div>
           )}
           {summary.overduePayments.length > 0 && (
-            <button onClick={() => onNavigate("rotinas", "quick-payments")}>
-              {summary.overduePayments.length} pagamento(s) vencido(s)
-            </button>
+            <div className="notification-item"><button onClick={() => onNavigate("rotinas", "quick-payments")}>{summary.overduePayments.length} pagamento(s) vencido(s)</button><small>{summary.overduePayments.map(item=>`${item.name} (${item.dueDate})`).join(" · ")}</small></div>
           )}
           {summary.upcomingPayments.length > 0 && (
-            <button onClick={() => onNavigate("rotinas", "quick-payments")}>
-              {summary.upcomingPayments.length} pagamento(s) próximo(s)
-            </button>
+            <div className="notification-item"><button onClick={() => onNavigate("rotinas", "quick-payments")}>{summary.upcomingPayments.length} pagamento(s) próximo(s)</button><small>{summary.upcomingPayments.map(item=>`${item.name} (${item.dueDate})`).join(" · ")}</small></div>
           )}
           {summary.budgetOverruns.length > 0 && (
-            <button onClick={() => onNavigate("planejamento", "budgets-section")}>
-              {summary.budgetOverruns.length} orçamento(s) excedido(s)
-            </button>
+            <div className="notification-item"><button onClick={() => onNavigate("planejamento", "budgets-section")}>{summary.budgetOverruns.length} orçamento(s) excedido(s)</button><small>{summary.budgetOverruns.map(item=>item.name).join(" · ")}</small></div>
           )}
           {summary.pendingTransactions.length > 0 && (
-            <button onClick={() => onNavigate("importar", "quick-transactions")}>
-              {summary.pendingTransactions.length} lançamento(s) para revisar
-            </button>
+            <div className="notification-item"><button onClick={() => onNavigate("importar", "quick-transactions")}>{summary.pendingTransactions.length} lançamento(s) para revisar</button><small>{summary.pendingTransactions.map(item=>item.description).join(" · ")}</small></div>
           )}
           {!count && <p className="empty">Nenhuma notificação.</p>}
         </div>
@@ -1941,6 +1933,7 @@ function Dashboard({
   currentMember: Exclude<Member, "Ambos">;
 }) {
   const orderKey = dashboardOrderStorageKey(currentMember);
+  const hiddenKey = `${orderKey}:hidden`;
   const [blockOrder, setBlockOrder] = useState<DashboardBlockId[]>(() => {
     try {
       return normalizeDashboardOrder(localStorage.getItem(orderKey));
@@ -1949,6 +1942,9 @@ function Dashboard({
     }
   });
   const [organizing, setOrganizing] = useState(false);
+  const [hiddenBlocks, setHiddenBlocks] = useState<DashboardBlockId[]>(() => {
+    try { const stored = JSON.parse(localStorage.getItem(hiddenKey) || "[]"); return Array.isArray(stored) ? stored.filter((id): id is DashboardBlockId => dashboardBlockIds.includes(id)) : []; } catch { return []; }
+  });
   useEffect(() => {
     try {
       localStorage.setItem(orderKey, JSON.stringify(blockOrder));
@@ -1956,6 +1952,7 @@ function Dashboard({
       // A ordem é opcional e nunca deve bloquear o painel financeiro.
     }
   }, [blockOrder, orderKey]);
+  useEffect(() => { try { localStorage.setItem(hiddenKey, JSON.stringify(hiddenBlocks)); } catch { /* preferência opcional */ } }, [hiddenBlocks, hiddenKey]);
   const calc = (v: "cash" | "accrual") =>
     data.transactions.reduce(
       (sum, transaction) =>
@@ -1991,6 +1988,8 @@ function Dashboard({
   const manualExpected = estimatedEntries.filter((entry) => entry.source === "manual").reduce((sum, entry) => sum + entry.amount, 0);
   const receiptsExpected = estimatedEntries.filter((entry) => entry.source === "receipt").reduce((sum, entry) => sum + entry.amount, 0);
   const totalExpected = spending.reduce((sum, entry) => sum + entry.amount, 0);
+  const plannedBudget = budgetValue(data, month, (budget) => budget.kind !== "provision");
+  const budgetAvailable = plannedBudget - totalExpected;
   const integralExpected = view === "compare"
     ? monthlySpending(data, month, "accrual").reduce(
         (sum, entry) => sum + entry.amount,
@@ -2052,6 +2051,7 @@ function Dashboard({
                   </small>
                 </span>
                 <div className="actions">
+                  <button aria-label={`${hiddenBlocks.includes(blockId) ? "Mostrar" : "Ocultar"} ${dashboardBlockLabels[blockId]}`} onClick={() => setHiddenBlocks((current) => current.includes(blockId) ? current.filter((id)=>id!==blockId) : [...current, blockId])}>{hiddenBlocks.includes(blockId) ? "Mostrar" : "Ocultar"}</button>
                   <button
                     disabled={index === 0}
                     aria-label={`Subir ${dashboardBlockLabels[blockId]}`}
@@ -2081,7 +2081,7 @@ function Dashboard({
         </section>
       )}
       <div className="dashboard-blocks" role="list" aria-label="Blocos do painel">
-      {blockOrder.map((blockId, index) =>
+      {blockOrder.filter((blockId) => !hiddenBlocks.includes(blockId)).map((blockId, index) =>
         blockId === "summary" ? (
       <div
         key={blockId}
@@ -2092,41 +2092,35 @@ function Dashboard({
       >
       <section className="cards">
         <Card
-          label="Renda familiar"
-          value={<SensitiveMoney value={income} hidden={hideValues} />}
-          hint="Entradas líquidas no mês"
+          label="Orçamento do mês"
+          value={<SensitiveMoney value={plannedBudget} hidden={hideValues} />}
+          hint="Limites planejados nas categorias"
           tone="good"
           details={data.transactions.filter(t=>!t.estimated&&t.amount<0&&Math.abs(realized(t,month,"cash"))>0).map(t=><Row key={t.id} a={t.description} b={t.paymentDate||t.date} c={<SensitiveMoney value={Math.abs(t.amount)} hidden={hideValues} />}/>) }
         />
         <Card
-          label="Despesas no fluxo"
-          value={<SensitiveMoney value={expenses("cash")} hidden={hideValues} />}
+          label="Acompanhado em tempo real"
+          value={<SensitiveMoney value={totalExpected} hidden={hideValues} />}
           hint={
             view === "compare"
               ? <>Integral: <SensitiveMoney value={expenses("accrual")} hidden={hideValues} /></>
-              : "Conforme pagamentos"
+              : <><SensitiveMoney value={realizedExpenses} hidden={hideValues} /> confirmado · <SensitiveMoney value={voiceExpected + manualExpected + receiptsExpected + expectedBeforeClosing} hidden={hideValues} /> estimado</>
           }
           tone="bad"
           details={data.transactions.filter(t=>!t.estimated&&t.amount>0&&Math.abs(realized(t,month,"cash"))>0).map(t=><Row key={t.id} a={t.description} b={t.paymentDate||t.date} c={<SensitiveMoney value={t.amount} hidden={hideValues} />}/>) }
         />
         <Card
-          label="Resultado de caixa"
-          value={<SensitiveMoney value={income - expenses("cash")} hidden={hideValues} />}
-          hint="Antes dos aportes"
-          tone={income - expenses("cash") < 0 ? "bad" : "good"}
-          details={<p>Entradas <SensitiveMoney value={income} hidden={hideValues} /> menos despesas realizadas <SensitiveMoney value={expenses("cash")} hidden={hideValues} />.</p>}
+          label="Disponível no orçamento"
+          value={<SensitiveMoney value={budgetAvailable} hidden={hideValues} />}
+          hint="Orçado menos confirmado e estimado"
+          tone={budgetAvailable < 0 ? "bad" : "good"}
+          details={<p>Não é saldo bancário: mostra o espaço que resta dentro dos orçamentos planejados.</p>}
         />
         <Card
-          label={
-            view === "compare"
-              ? "Gastos acompanhados — fluxo"
-              : "Gastos acompanhados em tempo real"
-          }
-          value={<SensitiveMoney value={totalExpected} hidden={hideValues} />}
+          label="Prévia aguardando conciliação"
+          value={<SensitiveMoney value={voiceExpected + manualExpected + receiptsExpected + expectedBeforeClosing} hidden={hideValues} />}
           hint={
-            view === "compare"
-              ? <>Compra integral acompanhada: <SensitiveMoney value={integralExpected || 0} hidden={hideValues} /></>
-              : <><SensitiveMoney value={realizedExpenses} hidden={hideValues} /> realizado · <SensitiveMoney value={voiceExpected + manualExpected + receiptsExpected + expectedBeforeClosing} hidden={hideValues} /> ainda previsto</>
+            <>Notas, voz, lançamentos rápidos e pagamentos ainda sem fatura/extrato.</>
           }
           tone="warning"
           details={<>
@@ -4943,6 +4937,18 @@ function Tasks({
         history: [],
       }),
     );
+  const nextOccurrence = (t: Task): Task | undefined => {
+    if (t.repeat === "none") return undefined;
+    const dt = new Date(t.due);
+    if (t.repeat === "daily") dt.setDate(dt.getDate() + 1);
+    if (t.repeat === "weekly" && t.weekdays?.length) {
+      do { dt.setDate(dt.getDate() + 1); } while (!t.weekdays.includes(dt.getDay()));
+    } else if (t.repeat === "weekly") dt.setDate(dt.getDate() + 7);
+    if (t.repeat === "monthly") dt.setMonth(dt.getMonth() + 1);
+    if (t.repeat === "yearly") dt.setFullYear(dt.getFullYear() + 1);
+    if (t.repeatUntil && dateOnly(dt) > t.repeatUntil) return undefined;
+    return { ...audit(), seriesId: t.seriesId || t.id, title: t.title, assignee: t.assignee, due: dt.toISOString(), priority: t.priority, status: "Pendente", repeat: t.repeat, repeatUntil: t.repeatUntil, shift: t.shift, weekdays: t.weekdays, checklist: t.checklist, history: [] };
+  };
   const done = (id: string) =>
     mutate((d) => {
       const t = d.tasks.find((x) => x.id === id)!;
@@ -4950,22 +4956,8 @@ function Tasks({
       t.status = "Concluída";
       t.updatedAt = now();
       t.version++;
-      if (t.repeat !== "none") {
-        const dt = new Date(t.due);
-        if (t.repeat === "daily") dt.setDate(dt.getDate() + 1);
-        if (t.repeat === "weekly" && t.weekdays?.length) {
-          do {
-            dt.setDate(dt.getDate() + 1);
-          } while (!t.weekdays.includes(dt.getDay()));
-        } else if (t.repeat === "weekly") dt.setDate(dt.getDate() + 7);
-        if (t.repeat === "monthly") dt.setMonth(dt.getMonth() + 1);
-        if (t.repeat === "yearly") dt.setFullYear(dt.getFullYear() + 1);
-        d.tasks.push({
-          ...audit(), seriesId: t.seriesId || t.id, title: t.title, assignee: t.assignee, due: dt.toISOString(),
-          priority: t.priority, status: "Pendente", repeat: t.repeat,
-          shift: t.shift, weekdays: t.weekdays, checklist: t.checklist, history: [],
-        });
-      }
+      const next = nextOccurrence(t);
+      if (next && !d.tasks.some((item) => (item.seriesId || item.id) === next.seriesId && item.status === "Pendente" && item.due === next.due)) d.tasks.push(next);
     });
   const saveEdit = (id: string, form: FormData) => {
     mutate((d) => {
@@ -4991,7 +4983,7 @@ function Tasks({
     }
     setDeletingTask(task);
   };
-  const deleteTaskOccurrence = () => { if (!deletingTask) return; mutate((d) => { d.tasks = d.tasks.filter((item) => item.id !== deletingTask.id); }); setDeletingTask(undefined); };
+  const deleteTaskOccurrence = () => { if (!deletingTask) return; mutate((d) => { const current=d.tasks.find((item)=>item.id===deletingTask.id); const next=current && nextOccurrence(current); if (next && !d.tasks.some((item)=>(item.seriesId||item.id)===next.seriesId && item.status==="Pendente" && item.due===next.due)) d.tasks.push(next); d.tasks = d.tasks.filter((item) => item.id !== deletingTask.id); }); setDeletingTask(undefined); };
   const deleteTaskSeries = () => { if (!deletingTask) return; mutate((d) => { const series = deletingTask.seriesId || deletingTask.id; d.tasks = d.tasks.filter((item) => (item.seriesId || item.id) !== series); }); setDeletingTask(undefined); };
   const active = data.tasks
     .filter((t) => t.status !== "Concluída")
@@ -5547,19 +5539,18 @@ function CategoryEditor({
       />
       {data.categories.map((c) => (
         <details className={`category-details sortable-item${categorySort.draggingId === c.id ? " is-dragging" : ""}`} key={c.id} data-sort-category data-sort-id={c.id}>
-          <summary onPointerDown={(event) => categorySort.start(event, c.id)} onPointerMove={categorySort.drag} onPointerUp={categorySort.end} onPointerCancel={categorySort.end}>{c.name}</summary>
-          <div className="actions">
-            <button className="icon-button" title="Renomear categoria" aria-label={`Renomear ${c.name}`} onClick={() => rename(c.id, c.name)}><Pencil size={18}/></button>
-            <button className="icon-button" title="Adicionar subcategoria" aria-label={`Adicionar subcategoria a ${c.name}`} onClick={() => addSub(c.id)}><Plus size={16}/></button>
+          <summary onPointerDown={(event) => categorySort.start(event, c.id)} onPointerMove={categorySort.drag} onPointerUp={categorySort.end} onPointerCancel={categorySort.end}><b>{c.name}</b><span className="actions category-actions" onPointerDown={(event)=>event.stopPropagation()} onClick={(event)=>event.stopPropagation()}>
+            <button className="icon-button" title="Renomear categoria" aria-label={`Renomear ${c.name}`} onClick={() => rename(c.id, c.name)}><Pencil size={16}/></button>
+            <button className="icon-button" title="Adicionar subcategoria" aria-label={`Adicionar subcategoria a ${c.name}`} onClick={() => addSub(c.id)}><Plus size={15}/></button>
             <button
               className="danger-button icon-button"
               title="Excluir categoria"
               aria-label={`Excluir ${c.name}`}
               onClick={() => removeCategory(c.id)}
             >
-              <Trash2 size={18} />
+              <Trash2 size={16} />
             </button>
-          </div>
+          </span></summary>
           <div className="subcategories">
             {c.subcategories.map((s) => (
               <span className="sub-item" key={s}>

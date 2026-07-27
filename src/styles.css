@@ -64,6 +64,9 @@
 .notification-head { display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
 .notification-head button { padding: .45rem; }
 .notification-popover > button { width: 100%; text-align: left; justify-content: flex-start; }
+.notification-item { padding: .45rem 0; border-bottom: 1px solid var(--line); }
+.notification-item button { width: 100%; text-align: left; justify-content: flex-start; }
+.notification-item small { display: block; margin: .3rem .15rem 0; color: #64746b; font-size: .75rem; line-height: 1.35; }
 .notification-warning { padding: .7rem; border-radius: 10px; background: #fff0ed; color: var(--red); }
 .icon-button {
   width: 42px;
@@ -314,6 +317,10 @@ nav button.active {
 .quick-action-grid .quick-action-primary small { color: #c4d4cc; }
 .category-details > summary { list-style: none; cursor: pointer; }
 .category-details > summary::-webkit-details-marker { display: none; }
+.category-details > summary { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: .45rem; }
+.category-details > summary::after { display: none; }
+.category-actions { display: grid; grid-template-columns: repeat(3, 28px) !important; gap: .25rem !important; }
+.category-actions .icon-button { width: 28px !important; min-width: 28px !important; min-height: 28px !important; padding: .15rem !important; }
 .quick-import-link { width: 100%; margin-top: .7rem; }
 .quick-expense-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; }
 .quick-expense-form > .muted,
@@ -788,6 +795,23 @@ th {
   min-width: 32px;
   min-height: 32px;
   padding: .25rem;
+}
+.payment > .icon-button {
+  width: 28px;
+  min-width: 28px;
+  min-height: 28px;
+  padding: .15rem;
+}
+.payment-actions {
+  grid-template-columns: 28px;
+  grid-template-rows: repeat(2, 28px);
+  width: 28px;
+}
+.payment-actions .icon-button {
+  width: 28px;
+  min-width: 28px;
+  min-height: 28px;
+  padding: .15rem;
 }
 .danger-button {
   color: var(--red);
