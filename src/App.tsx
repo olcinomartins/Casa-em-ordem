@@ -2732,7 +2732,8 @@ function BudgetBars({
       return { name: c.name, planned, actual, estimated, tracked: actual + estimated, plannedItems, entries };
     })
     .filter((x) => x.planned || x.tracked)
-    .sort((a, b) => b.tracked - a.tracked)
+    // No painel a referência principal é o limite orçado (valor após a barra).
+    .sort((a, b) => b.planned - a.planned || b.tracked - a.tracked || a.name.localeCompare(b.name, "pt-BR"))
     .slice(0, 8);
   return rows.length ? (
     <div className="bars">
