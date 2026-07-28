@@ -86,6 +86,9 @@ export interface Budget extends Audit {
   member?: Exclude<Member, "Ambos">;
   amount: number;
   reason?: string;
+  /** Manual é informado pelo casal; automática é calculada a partir de um pagamento futuro. */
+  provisionSource?: "manual" | "automatic";
+  obligationId?: string;
 }
 export type ObligationStatus =
   | "Prevista"

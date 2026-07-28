@@ -218,6 +218,36 @@ const sameFamilyContent = (left: FamilyData, right: FamilyData) =>
   JSON.stringify({ ...right, lastSavedAt: "" });
 
 const provisionPoolName = "Caixa unificado de provisões";
+const recurrenceMonths = (recurrence: Obligation["recurrence"]) => recurrence === "monthly" ? 1 : recurrence === "quarterly" ? 3 : recurrence === "semiannual" ? 6 : recurrence === "yearly" ? 12 : 0;
+const nextObligationDate = (obligation: Obligation, reference = new Date()) => {
+  const date = new Date(`${obligation.dueDate}T12:00:00`);
+  const step = recurrenceMonths(obligation.recurrence);
+  const today = new Date(reference); today.setHours(0, 0, 0, 0);
+  while (step && (date < today || obligation.skippedDates?.includes(dateOnly(date)))) date.setMonth(date.getMonth() + step);
+  return dateOnly(date);
+};
+const monthDistance = (from: string, to: string) => {
+  const [fromYear, fromMonth] = from.slice(0, 7).split("-").map(Number);
+  const [toYear, toMonth] = to.slice(0, 7).split("-").map(Number);
+  return Math.max(1, (toYear - fromYear) * 12 + toMonth - fromMonth);
+};
+/** Cria provisões somente para pagamentos que não ocorrem mensalmente. */
+const syncAutomaticProvisions = (data: FamilyData, by: Member = "Ambos") => {
+  const currentMonth = dateOnly(new Date()).slice(0, 7);
+  const eligible = data.obligations.filter((item) => item.recurrence !== "monthly" && item.status !== "Dispensada" && !(item.recurrence === "none" && ["Paga", "Confirmada"].includes(item.status)));
+  const eligibleIds = new Set(eligible.map((item) => item.id));
+  data.budgets = data.budgets.filter((item) => item.provisionSource !== "automatic" || (item.obligationId && eligibleIds.has(item.obligationId)));
+  for (const obligation of eligible) {
+    const dueDate = nextObligationDate(obligation);
+    const months = monthDistance(currentMonth, dueDate.slice(0, 7));
+    const end = new Date(`${currentMonth}-01T12:00:00`); end.setMonth(end.getMonth() + months - 1);
+    const values = { month: currentMonth, startMonth: currentMonth, endMonth: dateOnly(end).slice(0, 7), kind: "provision" as const, categoryId: obligation.categoryId, subcategory: obligation.subcategory, amount: obligation.planned / months, reason: `Provisão automática — ${obligation.name}`, provisionSource: "automatic" as const, obligationId: obligation.id };
+    const existing = data.budgets.find((item) => item.provisionSource === "automatic" && item.obligationId === obligation.id)
+      || data.budgets.find((item) => item.kind === "provision" && !item.provisionSource && item.categoryId === obligation.categoryId && normalize(item.reason || "").startsWith("PROVISAO PARA") && normalize(`${item.reason || ""} ${item.subcategory || ""}`).includes(normalize(obligation.name)));
+    if (existing) Object.assign(existing, values, { updatedAt: now(), version: existing.version + 1 });
+    else data.budgets.push({ ...audit(by), ...values });
+  }
+};
 const syncProvisionPool = (data: FamilyData, by: Member = "Ambos") => {
   const monthlyTotal = data.budgets
     .filter((item) => item.kind === "provision")
@@ -260,6 +290,7 @@ export default function App() {
   const [data, setData] = useState<FamilyData>();
   const dataRef = useRef<FamilyData>();
   const localMutationGeneration = useRef(0);
+  const automaticProvisionChecked = useRef(false);
   const refreshGeneration = useRef(0);
   const allowAccountGeneration = useRef(0);
   const connectionGeneration = useRef(0);
@@ -489,6 +520,8 @@ export default function App() {
       if (!old) return old;
       const draft = structuredClone(old);
       fn(draft);
+      syncAutomaticProvisions(draft, currentMember);
+      syncProvisionPool(draft, currentMember);
       (draft.auditLog ??= []).push({ id: uid(), at: now(), by: currentMember, action: "Alteração registrada no aplicativo" });
       if (draft.auditLog.length > 500) draft.auditLog.splice(0, draft.auditLog.length - 500);
       draft.lastSavedAt = now();
@@ -496,6 +529,17 @@ export default function App() {
       return draft;
     });
   };
+  useEffect(() => {
+    if (!authenticated || !data || automaticProvisionChecked.current) return;
+    automaticProvisionChecked.current = true;
+    const check = structuredClone(data);
+    syncAutomaticProvisions(check, currentMember);
+    syncProvisionPool(check, currentMember);
+    if (JSON.stringify(check.budgets) !== JSON.stringify(data.budgets)) {
+      mutate(() => undefined);
+      setMessage("Provisões automáticas atualizadas pelos pagamentos não mensais.");
+    }
+  }, [authenticated, data]);
   const undoQuickExpense = (transactionId: string) => {
     if (!data?.transactions.some((item) => item.id === transactionId)) {
       setQuickExpenseNotice(undefined);
@@ -4360,6 +4404,8 @@ function Budgets({
           "Orçamento");
   const regularBudgets = data.budgets.filter((item) => item.kind !== "provision").sort((a, b) => b.amount - a.amount);
   const provisions = data.budgets.filter((item) => item.kind === "provision").sort((a, b) => b.amount - a.amount);
+  const manualProvisions = provisions.filter((item) => item.provisionSource !== "automatic");
+  const automaticProvisions = provisions.filter((item) => item.provisionSource === "automatic");
   const provisionPool = data.goals.find((item) => item.provisionPool);
   const provisionTotal = provisions.reduce((sum, item) => sum + item.amount, 0);
   const provisionBalance = provisionPool?.movements.reduce(
@@ -4410,7 +4456,13 @@ function Budgets({
             <h2>Provisões mensais</h2>
             <p><strong>{money(provisionBalance)}</strong> reservado · {money(provisionTotal)} por mês.</p>
             <small>Use “Aporte/Retirada em meta” e selecione o Caixa unificado de provisões.</small>
-            <div className="provision-list">{provisions.map(renderBudget)}</div>
+            <h3>Provisões manuais</h3>
+            <div className="provision-list">{manualProvisions.map(renderBudget)}</div>
+            {!manualProvisions.length && <small>Nenhuma provisão manual.</small>}
+            <h3>Provisões automáticas</h3>
+            <small>Calculadas pelos pagamentos não mensais até o próximo vencimento.</small>
+            <div className="provision-list">{automaticProvisions.map(renderBudget)}</div>
+            {!automaticProvisions.length && <small>Nenhum pagamento não mensal para provisionar.</small>}
             {!provisions.length && <Empty />}
           </section>
         </div>
@@ -4473,6 +4525,7 @@ function UnifiedPlanForm({
         month: startDate.slice(0, 7), startMonth: startDate.slice(0, 7),
         endMonth: endDate ? endDate.slice(0, 7) : undefined,
         kind: type, categoryId: resolvedCategoryId, subcategory,
+        provisionSource: type === "provision" ? "manual" : undefined,
       });
       syncProvisionPool(draft);
     });
