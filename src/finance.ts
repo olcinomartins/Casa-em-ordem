@@ -8,6 +8,7 @@ import {
   now,
   Member,
   CashView,
+  personalExpenseCategoryName,
 } from "./domain";
 export async function hashText(s: string) {
   const b = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
@@ -151,11 +152,14 @@ export function personalBalance(
   }
   return months.reduce((balance, month) => {
     const budget = budgetValue(data, month, (item) => item.member === member);
-    const scope = `Pessoal — ${member}`;
+    const personalCategory = data.categories.find(
+      (category) => normalize(category.name) === normalize(personalExpenseCategoryName(member)),
+    )?.id;
+    const legacyScope = `Pessoal — ${member}`;
     const spent = data.transactions
       .filter(
         (t) =>
-          t.scope === scope &&
+          (t.categoryId === personalCategory || t.scope === legacyScope) &&
           isExpenseTransaction(t) &&
           (!t.estimated || !t.reconciledTransactionId),
       )

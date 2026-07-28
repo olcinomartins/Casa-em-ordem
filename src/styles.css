@@ -1236,10 +1236,12 @@ code {
 .page-analysis-controls { display: grid; gap: .55rem; justify-items: center; margin: 0 auto .8rem; }
 .page-analysis-controls .panel-mode-switch { margin: 0; }
 .page-analysis-controls .segmented { max-width: 100%; overflow-x: auto; }
-.budget-detail { border-bottom: 1px solid var(--line); padding: .55rem 0; }
+.budget-detail { border-bottom: 1px solid var(--line); padding: .36rem 0; }
 .budget-detail summary { cursor: pointer; list-style: none; }
 .budget-detail summary::-webkit-details-marker { display: none; }
-.budget-detail summary em { display: block; margin-top: .25rem; color: var(--muted); font-size: .74rem; font-style: normal; }
+.budget-detail summary label { margin-bottom: .1rem; }
+.budget-detail summary small { display: block; font-size: .74rem; line-height: 1.15; }
+.budget-detail summary progress { margin: .22rem 0 0; height: .42rem; }
 .budget-detail-content { display: grid; gap: .35rem; padding: .65rem 0 .15rem; }
 .budget-detail-content > b { margin-top: .25rem; font-size: .82rem; }
 .goal-edit-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .55rem; margin-top: .7rem; padding: .75rem; border: 1px solid var(--line); border-radius: 12px; background: #f8faf7; }

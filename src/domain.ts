@@ -212,6 +212,8 @@ export interface FamilyData {
 }
 export const uid = () => crypto.randomUUID();
 export const now = () => new Date().toISOString();
+export const personalExpenseCategoryName = (member: Exclude<Member, "Ambos">) =>
+  member === "Olcino" ? "Compras pessoais Olcino" : "Compras pessoais Mariana";
 export const audit = (who: Member = "Ambos"): Audit => ({
   id: uid(),
   createdAt: now(),

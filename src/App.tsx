@@ -56,6 +56,7 @@ import {
   monthOf,
   normalize,
   now,
+  personalExpenseCategoryName,
   uid,
 } from "./domain";
 import {
@@ -217,6 +218,30 @@ const sameFamilyContent = (left: FamilyData, right: FamilyData) =>
   JSON.stringify({ ...left, lastSavedAt: "" }) ===
   JSON.stringify({ ...right, lastSavedAt: "" });
 
+/** Migra o antigo escopo pessoal para categorias normais de despesa. */
+const syncPersonalExpenseCategories = (data: FamilyData, by: Member = "Ambos") => {
+  const categories = new Map<Exclude<Member, "Ambos">, Category>();
+  (["Olcino", "Mari"] as const).forEach((member) => {
+    const name = personalExpenseCategoryName(member);
+    let category = data.categories.find((item) => normalize(item.name) === normalize(name));
+    if (!category) {
+      category = { ...audit(by), name, nature: "expense", subcategories: [] };
+      data.categories.push(category);
+    }
+    categories.set(member, category);
+  });
+  for (const transaction of data.transactions) {
+    const member = transaction.scope === "Pessoal — Olcino" ? "Olcino" : transaction.scope === "Pessoal — Mari" ? "Mari" : undefined;
+    if (!member) continue;
+    transaction.categoryId = categories.get(member)?.id;
+    transaction.subcategory = undefined;
+    transaction.scope = "Familiar";
+    transaction.updatedAt = now();
+    transaction.updatedBy = by;
+    transaction.version += 1;
+  }
+};
+
 const provisionPoolName = "Caixa unificado de provisões";
 const recurrenceMonths = (recurrence: Obligation["recurrence"]) => recurrence === "monthly" ? 1 : recurrence === "quarterly" ? 3 : recurrence === "semiannual" ? 6 : recurrence === "yearly" ? 12 : 0;
 const nextObligationDate = (obligation: Obligation, reference = new Date()) => {
@@ -291,6 +316,7 @@ export default function App() {
   const dataRef = useRef<FamilyData>();
   const localMutationGeneration = useRef(0);
   const automaticProvisionChecked = useRef(false);
+  const personalCategoryMigrationChecked = useRef(false);
   const refreshGeneration = useRef(0);
   const allowAccountGeneration = useRef(0);
   const connectionGeneration = useRef(0);
@@ -361,6 +387,16 @@ export default function App() {
   useEffect(() => {
     if (authenticated && data) saveLocal(data);
   }, [authenticated, data]);
+  useEffect(() => {
+    if (!authenticated || !data || personalCategoryMigrationChecked.current) return;
+    personalCategoryMigrationChecked.current = true;
+    const check = structuredClone(data);
+    syncPersonalExpenseCategories(check, currentMember);
+    if (JSON.stringify(check.categories) !== JSON.stringify(data.categories) || JSON.stringify(check.transactions) !== JSON.stringify(data.transactions)) {
+      mutate((draft) => syncPersonalExpenseCategories(draft, currentMember));
+      setMessage("Compras pessoais foram organizadas como categorias de despesa.");
+    }
+  }, [authenticated, data, currentMember]);
   const autosaveReady = useRef(false);
   const skipNextAutosave = useRef(false);
   const autosaveGeneration = useRef(0);
@@ -1828,15 +1864,6 @@ function QuickActions({
                   </label>
                 </div>
                 <label>
-                  Escopo
-                  <select name="scope" defaultValue="Familiar">
-                    <option value="Familiar">Familiar</option>
-                    <option value="Pessoal — Olcino">Pessoal — Olcino</option>
-                    <option value="Pessoal — Mari">Pessoal — Mari</option>
-                    <option value="Fora do orçamento">Fora do orçamento</option>
-                  </select>
-                </label>
-                <label>
                   Categoria
                   <select
                     required
@@ -2807,7 +2834,6 @@ function BudgetBars({
             aria-label={hideValues ? "valor oculto" : `${r.name}: ${money(r.tracked)} de ${money(r.planned)}`}
             aria-valuetext={hideValues ? "valor oculto" : `${money(r.tracked)} de ${money(r.planned)}`}
           />
-          <em>Toque para ver os valores considerados</em>
           </summary>
           <div className="budget-detail-content">
             <b>Planejado</b>
@@ -4243,18 +4269,6 @@ function Transactions({
                 ?.subcategories.map((s) => (
                   <option key={s}>{s}</option>
                 ))}
-            </select>
-            <select
-              value={t.scope}
-              onChange={(e) =>
-                update(t.id, { scope: e.target.value as Transaction["scope"] })
-              }
-            >
-              <option>Familiar</option>
-              <option>Pessoal — Olcino</option>
-              <option>Pessoal — Mari</option>
-              <option>Transferência interna</option>
-              <option>Fora do orçamento</option>
             </select>
             {t.classification!=="confirmed"?<button title="Confirmar e aprender" className="icon" onClick={()=>update(t.id,{classification:"confirmed"},true)}><CheckCircle2/></button>:<button title="Desconfirmar" onClick={()=>update(t.id,{classification:"suggested"})}>Desconfirmar</button>}
             <button
