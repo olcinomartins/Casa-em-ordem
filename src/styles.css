@@ -1241,8 +1241,14 @@ code {
 .budget-detail summary::-webkit-details-marker { display: none; }
 .budget-detail summary label { margin-bottom: .1rem; }
 .budget-detail summary small { display: block; font-size: .74rem; line-height: 1.15; }
-.budget-detail summary progress { margin: .22rem 0 0; height: .42rem; }
-.budget-detail-content { display: grid; gap: .35rem; padding: .65rem 0 .15rem; }
+.budget-progress-stack { position: relative; height: .42rem; margin: .22rem 0 0; overflow: hidden; border-radius: 999px; background: var(--line); }
+.budget-progress-stack progress { appearance: none; position: absolute; inset: 0; width: 100%; height: .42rem; border: 0; background: transparent; }
+.budget-progress-stack progress::-webkit-progress-bar { background: transparent; }
+.budget-progress-committed::-webkit-progress-value { background: color-mix(in srgb, var(--gold) 38%, transparent); }
+.budget-progress-realized::-webkit-progress-value { background: var(--green); }
+.budget-progress-committed::-moz-progress-bar { background: color-mix(in srgb, var(--gold) 38%, transparent); }
+.budget-progress-realized::-moz-progress-bar { background: var(--green); }
+.budget-detail-content { display: grid; gap: .35rem; padding: .65rem .55rem .25rem; margin-top: .35rem; border-radius: 10px; background: #f4f6f1; }
 .budget-detail-content > b { margin-top: .25rem; font-size: .82rem; }
 .goal-edit-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .55rem; margin-top: .7rem; padding: .75rem; border: 1px solid var(--line); border-radius: 12px; background: #f8faf7; }
 .goal-edit-form label { display: grid; gap: .2rem; font-size: .8rem; }

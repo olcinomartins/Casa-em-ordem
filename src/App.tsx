@@ -1746,7 +1746,7 @@ function QuickActions({
                 <label>Conta ou cartão<select name="accountId"><option value="">Não definido</option>{activeAccounts.map(account=><option key={account.id} value={account.id}>{accountDisplayName(account)}</option>)}</select></label>
                 <label>Subcategoria<input name="subcategory" placeholder="Opcional"/></label>
                 <label>Tolerância<MoneyInput name="tolerance" placeholder="R$ 0,00"/></label>
-                <label>Padrão para conciliação<input name="pattern" placeholder="Ex.: nome que vem na fatura"/></label>
+                <label>Texto para conciliação (opcional)<input name="pattern" placeholder="Ex.: nome que vem na fatura"/></label>
                 <button className="primary quick-expense-save">Salvar pagamento</button>
               </form>
             ) : mode === "import" ? (
@@ -2259,7 +2259,7 @@ function Dashboard({
         aria-setsize={blockOrder.length}
       >
         <div className="panel">
-          <h2>Orçado × acompanhado em tempo real</h2>
+          <h2>Orçado X Realizado</h2>
           {view === "compare" ? (
             <div className="grid two">
               <div>
@@ -2790,8 +2790,12 @@ function BudgetBars({
   hideValues?: boolean;
   mode?: "registered" | "realized";
 }) {
-  const spending = monthlySpending(data, month, view).filter((entry) =>
+  const allSpending = monthlySpending(data, month, view);
+  const spending = allSpending.filter((entry) =>
     mode === "registered" ? entry.source !== "transaction" && !(entry.source === "payment" && entry.state === "estimated") : entry.source === "transaction",
+  );
+  const scheduledPayments = allSpending.filter(
+    (entry) => entry.source === "payment" && entry.state === "estimated",
   );
   const sourceLabel: Record<(typeof spending)[number]["source"], string> = {
     transaction: "Lançamento confirmado", voice: "Lançamento por voz", manual: "Lançamento manual", receipt: "Nota de supermercado", payment: "Pagamento confirmado",
@@ -2808,9 +2812,11 @@ function BudgetBars({
         .reduce((sum, entry) => sum + entry.amount, 0);
       const plannedItems = data.budgets.filter((item) => item.categoryId === c.id && budgetApplies(item, month));
       const entries = spending.filter((entry) => entry.categoryId === c.id);
-      return { name: c.name, planned, actual, estimated, tracked: actual + estimated, plannedItems, entries };
+      const scheduledEntries = scheduledPayments.filter((entry) => entry.categoryId === c.id);
+      const scheduled = scheduledEntries.reduce((sum, entry) => sum + entry.amount, 0);
+      return { name: c.name, planned, actual, estimated, tracked: actual + estimated, scheduled, committed: actual + estimated + scheduled, plannedItems, entries, scheduledEntries };
     })
-    .filter((x) => x.planned || x.tracked)
+    .filter((x) => x.planned || x.tracked || x.scheduled)
     // No painel a referência principal é o limite orçado (valor após a barra).
     .sort((a, b) => b.planned - a.planned || b.tracked - a.tracked || a.name.localeCompare(b.name, "pt-BR"))
     .slice(0, 8);
@@ -2826,13 +2832,11 @@ function BudgetBars({
               <SensitiveMoney value={r.planned} hidden={hideValues} />
             </span>
           </label>
-          <small>{mode === "registered" ? <><SensitiveMoney value={r.actual} hidden={hideValues} /> realizado no app</> : <><SensitiveMoney value={r.actual} hidden={hideValues} /> realizado em extrato/fatura</>}</small>
-          <progress
-            value={r.tracked}
-            max={r.planned || r.tracked || 1}
-            aria-label={hideValues ? "valor oculto" : `${r.name}: ${money(r.tracked)} de ${money(r.planned)}`}
-            aria-valuetext={hideValues ? "valor oculto" : `${money(r.tracked)} de ${money(r.planned)}`}
-          />
+          <small>{mode === "registered" ? <><SensitiveMoney value={r.actual} hidden={hideValues} /> realizado no app</> : <><SensitiveMoney value={r.actual} hidden={hideValues} /> realizado em extrato/fatura</>}{r.scheduled > 0 && <> · <SensitiveMoney value={r.scheduled} hidden={hideValues} /> agendado</>}</small>
+          <div className="budget-progress-stack" aria-label={hideValues ? "valor oculto" : `${r.name}: ${money(r.tracked)} realizado e ${money(r.scheduled)} agendado de ${money(r.planned)}`}>
+            <progress className="budget-progress-committed" value={r.committed} max={r.planned || r.committed || 1} />
+            <progress className="budget-progress-realized" value={r.tracked} max={r.planned || r.committed || 1} />
+          </div>
           </summary>
           <div className="budget-detail-content">
             <b>Planejado</b>
@@ -2841,7 +2845,8 @@ function BudgetBars({
             <b>Acompanhado no mês</b>
             {r.entries.map((entry) => <Row key={entry.id} a={entry.description} b={`${sourceLabel[entry.source]} · ${mode === "registered" ? "Realizado no app" : entry.state === "estimated" ? "Estimado" : "Realizado"}`} c={<SensitiveMoney value={entry.amount} hidden={hideValues} />} />)}
             {!r.entries.length && <small>Nenhum lançamento considerado ainda.</small>}
-            {r.planned > r.tracked && <><b>Ainda sem lançamento ou previsão</b><Row a="Espaço restante do orçamento" b="Não é incluído como gasto estimado" c={<SensitiveMoney value={r.planned - r.tracked} hidden={hideValues} />} /></>}
+            {r.scheduledEntries.length > 0 && <><b>Pagamentos agendados</b>{r.scheduledEntries.map((entry) => <Row key={entry.id} a={entry.description} b="Compromisso a pagar" c={<SensitiveMoney value={entry.amount} hidden={hideValues} />} />)}</>}
+            {r.planned > r.committed && <><b>Espaço restante</b><Row a="Após registros e pagamentos agendados" b="Não é gasto realizado" c={<SensitiveMoney value={r.planned - r.committed} hidden={hideValues} />} /></>}
           </div>
         </details>
       ))}
@@ -4740,7 +4745,7 @@ function Payments({
             ["planned", "Valor planejado", "number"],
             ["dueDay", "Dia do pagamento (ex.: 10)", "number"],
             ["tolerance", "Tolerância", "number"],
-            ["pattern", "Padrão para conciliação", "text"],
+            ["pattern", "Texto para conciliação (opcional)", "text"],
             ["subcategory", "Subcategoria", "text"],
           ]}
           extras={
@@ -4822,7 +4827,7 @@ function Payments({
                     <select name="accountId" defaultValue={o.accountId || ""}><option value="">Conta do pagamento</option>{data.accounts.filter(account=>account.active).map(account=><option key={account.id} value={account.id}>{accountDisplayName(account)}</option>)}</select>
                     <select name="categoryId" defaultValue={o.categoryId || ""}><option value="">Categoria da despesa</option>{data.categories.filter(category=>category.nature==="expense").map(category=><option key={category.id} value={category.id}>{category.name}</option>)}</select>
                     <input name="subcategory" defaultValue={o.subcategory || ""} placeholder="Subcategoria" />
-                    <label>Padrão para conciliação<input name="pattern" defaultValue={o.pattern || ""} placeholder="Ex.: nome que vem na fatura" /></label>
+                    <label>Texto para conciliação (opcional)<input name="pattern" defaultValue={o.pattern || ""} placeholder="Ex.: nome que vem na fatura" /></label>
                     <small className="reconciliation-help">Opcional: identifica o lançamento correspondente na fatura/extrato para conciliar este pagamento automaticamente.</small>
                     <div className="actions"><button className="primary" type="submit">Salvar alterações</button><button type="button" onClick={()=>setEditingId(undefined)}>Cancelar</button></div>
                   </form>
