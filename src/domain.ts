@@ -59,6 +59,8 @@ export interface Transaction extends Audit {
   notes?: string;
   estimated?: boolean;
   estimateOrigin?: "voice" | "manual";
+  /** Vincula a prévia criada por uma nota ao documento detalhado do mercado. */
+  receiptId?: string;
   obligationId?: string;
   provisional?: boolean;
   reconciledTransactionId?: string;
@@ -204,6 +206,8 @@ export interface FamilyData {
   auditLog?: Array<{ id: string; at: string; by: Member; action: string }>;
   /** Evita recriar as tarefas guiadas caso o casal as exclua depois. */
   setupTasksInitialized?: boolean;
+  /** Evita que a migração legada de responsabilidades recrie itens excluídos. */
+  responsibilitiesMigrated?: boolean;
   lastSavedAt: string;
 }
 export const uid = () => crypto.randomUUID();

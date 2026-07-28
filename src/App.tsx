@@ -1457,7 +1457,7 @@ function QuickActions({
     const account = data.accounts.find((item) => item.id === accountId) || data.accounts.find((item) => item.active);
     if (!account) return showDialogError("Selecione ou cadastre a conta/cartão usado na compra.");
     const categoryId = data.categories.find((category) => normalize(category.name) === "ALIMENTAÇÃO")?.id || data.categories.find((category) => category.nature === "expense")?.id;
-    const transaction: Transaction = { ...audit(currentMember), date: receipt.date, competence: monthOf(receipt.date), purchaseDate: receipt.date, paymentDate: receipt.date, description: receipt.store, normalized: normalize(receipt.store), amount: total, accountId: account.id, operator: account.operator, scope: "Familiar", categoryId, classification: "suggested", dedupeKey: "", transfer: false, movement: "expense_income", sourceKind: account.kind === "card" ? "card" : "statement", estimated: true, estimateOrigin: "manual", notes: "Estimativa criada pela nota de supermercado." };
+    const transaction: Transaction = { ...audit(currentMember), date: receipt.date, competence: monthOf(receipt.date), purchaseDate: receipt.date, paymentDate: receipt.date, description: receipt.store, normalized: normalize(receipt.store), amount: total, accountId: account.id, operator: account.operator, scope: "Familiar", categoryId, classification: "suggested", dedupeKey: "", transfer: false, movement: "expense_income", sourceKind: account.kind === "card" ? "card" : "statement", estimated: true, estimateOrigin: "manual", receiptId: receipt.id, notes: "Estimativa criada pela nota de supermercado." };
     transaction.dedupeKey = await dedupeKey(transaction);
     mutate((family) => { (family.receipts ??= []).push(receipt); family.transactions.push(transaction); });
     setReceiptDraft(undefined);
@@ -1827,6 +1827,15 @@ function QuickActions({
                     </select>
                   </label>
                 </div>
+                <label>
+                  Escopo
+                  <select name="scope" defaultValue="Familiar">
+                    <option value="Familiar">Familiar</option>
+                    <option value="Pessoal — Olcino">Pessoal — Olcino</option>
+                    <option value="Pessoal — Mari">Pessoal — Mari</option>
+                    <option value="Fora do orçamento">Fora do orçamento</option>
+                  </select>
+                </label>
                 <label>
                   Categoria
                   <select
@@ -4107,7 +4116,31 @@ function Transactions({
   const update = (id: string, patch: Partial<Transaction>, learn = false) =>
     mutate((d) => {
       const t = d.transactions.find((x) => x.id === id)!;
+      const previous = {
+        date: t.purchaseDate || t.date,
+        description: t.description,
+        amount: t.amount,
+      };
       Object.assign(t, patch, { updatedAt: now(), version: t.version + 1 });
+      // Uma nota possui uma prévia de lançamento para conciliação. Ao editar a
+      // prévia, mantenha a nota que alimenta o painel com o mesmo valor e categoria.
+      const linkedReceipt = t.receiptId
+        ? d.receipts?.find((receipt) => receipt.id === t.receiptId)
+        : d.receipts?.find(
+            (receipt) =>
+              receipt.reconciledTransactionId == null &&
+              receipt.date === previous.date &&
+              Math.abs(receipt.total - Math.abs(previous.amount)) < 0.02 &&
+              normalize(receipt.store) === normalize(previous.description),
+          );
+      if (linkedReceipt) {
+        if (patch.amount !== undefined) linkedReceipt.total = Math.abs(t.amount);
+        if (patch.categoryId !== undefined) linkedReceipt.categoryId = t.categoryId;
+        linkedReceipt.updatedAt = now();
+        linkedReceipt.updatedBy = t.updatedBy;
+        linkedReceipt.version += 1;
+        t.receiptId = linkedReceipt.id;
+      }
       if (learn) upsertRule(d, t);
     });
   const remove = (id: string) => {
@@ -5006,15 +5039,9 @@ function Tasks({
     if (migratedResponsibilities.current) return;
     migratedResponsibilities.current = true;
     mutate((d) => {
+      if (d.responsibilitiesMigrated) return;
       const existing = new Set(d.tasks.map((t) => normalize(t.title)));
-      const source = d.chores?.length
-        ? d.chores
-        : initialChores.map((title) => ({
-            title,
-            assignee: "Ambos" as Member,
-            frequency: "weekly" as const,
-            completionHistory: [],
-          }));
+      const source = d.chores?.length ? d.chores : [];
       for (const chore of source) {
         if (existing.has(normalize(chore.title))) continue;
         d.tasks.push({
@@ -5037,6 +5064,7 @@ function Tasks({
         });
       }
       d.chores = [];
+      d.responsibilitiesMigrated = true;
       if (!d.setupTasksInitialized) {
         const start = new Date();
         [...setupTasks, ...bonusSetupTasks].forEach((title, index) => {
