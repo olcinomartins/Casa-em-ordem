@@ -573,7 +573,6 @@ export default function App() {
     syncProvisionPool(check, currentMember);
     if (JSON.stringify(check.budgets) !== JSON.stringify(data.budgets)) {
       mutate(() => undefined);
-      setMessage("Provisões automáticas atualizadas pelos pagamentos não mensais.");
     }
   }, [authenticated, data]);
   const undoQuickExpense = (transactionId: string) => {
