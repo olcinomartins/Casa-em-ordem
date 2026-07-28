@@ -2746,7 +2746,7 @@ function BudgetBars({
               <SensitiveMoney value={r.planned} hidden={hideValues} />
             </span>
           </label>
-          <small>{mode === "registered" ? <><SensitiveMoney value={r.actual} hidden={hideValues} /> realizado no app</> : <><SensitiveMoney value={r.actual} hidden={hideValues} /> realizado · <SensitiveMoney value={r.estimated} hidden={hideValues} /> estimado</>}</small>
+          <small>{mode === "registered" ? <><SensitiveMoney value={r.actual} hidden={hideValues} /> realizado no app</> : <><SensitiveMoney value={r.actual} hidden={hideValues} /> realizado em extrato/fatura</>}</small>
           <progress
             value={r.tracked}
             max={r.planned || r.tracked || 1}
@@ -4357,8 +4357,8 @@ function Budgets({
         ? data.categories.find((c) => c.id === item.categoryId)?.name
         : data.accounts.find((a) => a.id === item.accountId)?.name ||
           "Orçamento");
-  const regularBudgets = data.budgets.filter((item) => item.kind !== "provision");
-  const provisions = data.budgets.filter((item) => item.kind === "provision");
+  const regularBudgets = data.budgets.filter((item) => item.kind !== "provision").sort((a, b) => b.amount - a.amount);
+  const provisions = data.budgets.filter((item) => item.kind === "provision").sort((a, b) => b.amount - a.amount);
   const provisionPool = data.goals.find((item) => item.provisionPool);
   const provisionTotal = provisions.reduce((sum, item) => sum + item.amount, 0);
   const provisionBalance = provisionPool?.movements.reduce(
@@ -4575,20 +4575,25 @@ function Payments({
   const saveEdit = (id: string, form: FormData) => {
     const current = data.obligations.find((o) => o.id === id)!;
     const dueDate = String(form.get("dueDate") || current.dueDate);
+    const applyTo = String(form.get("applyTo") || "future");
     mutate((d) => {
       const o = d.obligations.find((x) => x.id === id)!;
-      o.name = String(form.get("name") || o.name).trim();
-      o.planned = parseCurrency(form.get("planned"));
-      o.dueDate = dueDate;
-      o.kind = String(form.get("kind")) as Obligation["kind"];
-      o.recurrence = String(form.get("repeat")) as Obligation["recurrence"];
-      o.tolerance = parseCurrency(form.get("tolerance"));
-      o.accountId = String(form.get("accountId") || "") || undefined;
-      o.categoryId = String(form.get("categoryId") || "") || undefined;
-      o.subcategory = String(form.get("subcategory") || "") || undefined;
-      o.pattern = String(form.get("pattern") || "") || undefined;
-      o.updatedAt = now();
-      o.version++;
+      const changes = {
+        name: String(form.get("name") || o.name).trim(), planned: parseCurrency(form.get("planned")), dueDate,
+        kind: String(form.get("kind")) as Obligation["kind"], recurrence: String(form.get("repeat")) as Obligation["recurrence"],
+        tolerance: parseCurrency(form.get("tolerance")), accountId: String(form.get("accountId") || "") || undefined,
+        categoryId: String(form.get("categoryId") || "") || undefined, subcategory: String(form.get("subcategory") || "") || undefined,
+        pattern: String(form.get("pattern") || "") || undefined,
+      };
+      if (applyTo === "single" && o.recurrence !== "none") {
+        const occurrence = nextDueDate(current);
+        o.skippedDates = [...new Set([...(o.skippedDates || []), occurrence])];
+        d.obligations.push({ ...o, ...changes, ...audit(), dueDate, recurrence: "none", skippedDates: undefined, status: "A pagar", paidAt: undefined, paidAmount: undefined, reconciledTransactionId: undefined });
+      } else {
+        Object.assign(o, changes);
+        o.updatedAt = now();
+        o.version++;
+      }
     });
     setEditingId(undefined);
   };
@@ -4709,6 +4714,7 @@ function Payments({
                     <label>Data do próximo pagamento<input name="dueDate" type="date" required defaultValue={o.dueDate} /></label>
                     <select name="kind" defaultValue={o.kind}><option>Manual</option><option>Débito automático</option><option>Recorrência no cartão</option><option>Assinatura</option><option>Parcela</option><option>Variável</option><option>Eventual</option></select>
                     <select name="repeat" defaultValue={o.recurrence}><option value="none">Sem repetição</option><option value="monthly">Mensal</option><option value="quarterly">Trimestral</option><option value="semiannual">Semestral</option><option value="yearly">Anual</option></select>
+                    {o.recurrence !== "none" && <label>Aplicar esta edição<select name="applyTo" defaultValue="future"><option value="single">Somente este pagamento</option><option value="future">Este e os próximos</option></select></label>}
                     <select name="accountId" defaultValue={o.accountId || ""}><option value="">Conta do pagamento</option>{data.accounts.filter(account=>account.active).map(account=><option key={account.id} value={account.id}>{accountDisplayName(account)}</option>)}</select>
                     <select name="categoryId" defaultValue={o.categoryId || ""}><option value="">Categoria da despesa</option>{data.categories.filter(category=>category.nature==="expense").map(category=><option key={category.id} value={category.id}>{category.name}</option>)}</select>
                     <input name="subcategory" defaultValue={o.subcategory || ""} placeholder="Subcategoria" />
