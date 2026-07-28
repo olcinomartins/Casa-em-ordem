@@ -1196,6 +1196,10 @@ code {
 }
 .budget-entry { border-bottom: 1px solid #eee; }
 .budget-entry:last-child { border-bottom: 0; }
+.budget-category-group { border-bottom: 1px solid var(--line); padding: .25rem 0; }
+.budget-category-group:last-child { border-bottom: 0; }
+.budget-category-group > summary { display: flex; align-items: center; justify-content: space-between; gap: .7rem; padding: .55rem 0; cursor: pointer; font-weight: 700; }
+.budget-category-group > summary strong { font-size: .85rem; white-space: nowrap; }
 .budget-entry .budget-item { border-bottom: 0; }
 .budget-inline-editor {
   margin: 0 0 .7rem;

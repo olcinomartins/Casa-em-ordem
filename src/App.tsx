@@ -4403,6 +4403,10 @@ function Budgets({
         : data.accounts.find((a) => a.id === item.accountId)?.name ||
           "Orçamento");
   const regularBudgets = data.budgets.filter((item) => item.kind !== "provision").sort((a, b) => b.amount - a.amount);
+  const budgetGroups = [...regularBudgets.reduce((groups, item) => {
+    const name = item.categoryId ? data.categories.find((category) => category.id === item.categoryId)?.name || "Sem categoria" : item.member ? `Pessoal — ${item.member}` : "Sem categoria";
+    const current = groups.get(name) || []; current.push(item); groups.set(name, current); return groups;
+  }, new Map<string, Budget[]>()).entries()].sort(([, left], [, right]) => right[0].amount - left[0].amount || (left[0].reason || "").localeCompare(right[0].reason || "", "pt-BR"));
   const provisions = data.budgets.filter((item) => item.kind === "provision").sort((a, b) => b.amount - a.amount);
   const manualProvisions = provisions.filter((item) => item.provisionSource !== "automatic");
   const automaticProvisions = provisions.filter((item) => item.provisionSource === "automatic");
@@ -4449,7 +4453,7 @@ function Budgets({
         <div>
           <section className="panel">
             <h2>Orçamentos cadastrados</h2>
-            {regularBudgets.map(renderBudget)}
+            {budgetGroups.map(([category, items]) => <details className="budget-category-group" key={category} open><summary><span>{category}</span><strong>{money(items.reduce((sum, item) => sum + item.amount, 0))}</strong></summary>{items.map(renderBudget)}</details>)}
             {!regularBudgets.length && <Empty />}
           </section>
           <section className="panel provision-summary">
@@ -4808,6 +4812,8 @@ function Goals({
     (sum, movement) => sum + movement.amount,
     0,
   ) || 0;
+  const currentProvisionMonth = dateOnly(new Date()).slice(0, 7);
+  const provisionContributedThisMonth = provisionPool?.movements.filter((movement) => monthOf(movement.date) === currentProvisionMonth).reduce((sum, movement) => sum + Math.max(0, movement.amount), 0) || 0;
   const add = (fd: FormData) => {
     const target = parseCurrency(fd.get("target")),
       minimum = parseCurrency(fd.get("minimum"));
@@ -4889,6 +4895,8 @@ function Goals({
       <section className="provision-pool">
         <h2>Caixa unificado de provisões</h2>
         <p><strong>{money(provisionBalance)}</strong> reservado · {money(provisionMonthly)} por mês planejados.</p>
+        <p><strong>{money(provisionContributedThisMonth)}</strong> aportado neste mês de <strong>{money(provisionMonthly)}</strong> planejados.</p>
+        <progress value={provisionContributedThisMonth} max={provisionMonthly || 1} />
         <small>Para aportar ou retirar, use o botão + e escolha Aporte/Retirada em meta.</small>
       </section>
       {creating && (
@@ -4921,6 +4929,7 @@ function Goals({
               .sort((a, b) => a.priority - b.priority)
               .map((g) => {
                 const total = g.movements.reduce((s, m) => s + m.amount, 0);
+                const monthlyContribution = g.movements.filter((movement) => monthOf(movement.date) === currentProvisionMonth).reduce((sum, movement) => sum + Math.max(0, movement.amount), 0);
                 return (
                   <article className={`sortable-item${goalSort.draggingId === g.id ? " is-dragging" : ""}`} key={g.id} data-sort-goal data-sort-id={g.id} onContextMenu={(event) => event.preventDefault()} onPointerDown={(event) => goalSort.start(event, g.id)} onPointerMove={goalSort.drag} onPointerUp={goalSort.end} onPointerCancel={goalSort.end}>
                     <div className="goal-top">
@@ -4952,6 +4961,7 @@ function Goals({
                         {money(total)} de {money(g.target)}
                       </span>
                     </div>
+                    {g.minimum > 0 && <div className="goal-monthly-progress"><small>Aporte deste mês: {money(monthlyContribution)} de {money(g.minimum)}</small><progress value={monthlyContribution} max={g.minimum} /></div>}
                     {editingId === g.id && (
                       <form className="goal-edit-form" onPointerDown={(event) => event.stopPropagation()} onSubmit={(event) => { event.preventDefault(); saveEdit(g.id, new FormData(event.currentTarget)); }}>
                         <label>Nome<input name="name" defaultValue={g.name} required /></label>
@@ -5107,13 +5117,13 @@ function Tasks({
     const task = data.tasks.find((item) => item.id === id);
     if (!task) return;
     if (task.repeat === "none") {
-      if (confirm("Excluir esta responsabilidade?")) mutate((d) => { d.tasks = d.tasks.filter((item) => item.id !== id); });
+      if (confirm("Excluir esta responsabilidade?")) mutate((d) => { d.tasks = d.tasks.filter((item) => item.id !== id); d.chores = (d.chores || []).filter((chore) => normalize(chore.title) !== normalize(task.title)); });
       return;
     }
     setDeletingTask(task);
   };
   const deleteTaskOccurrence = () => { if (!deletingTask) return; mutate((d) => { const current=d.tasks.find((item)=>item.id===deletingTask.id); const next=current && nextOccurrence(current); if (next && !d.tasks.some((item)=>(item.seriesId||item.id)===next.seriesId && item.status==="Pendente" && item.due===next.due)) d.tasks.push(next); d.tasks = d.tasks.filter((item) => item.id !== deletingTask.id); }); setDeletingTask(undefined); };
-  const deleteTaskSeries = () => { if (!deletingTask) return; mutate((d) => { const series = deletingTask.seriesId || deletingTask.id; d.tasks = d.tasks.filter((item) => (item.seriesId || item.id) !== series); }); setDeletingTask(undefined); };
+  const deleteTaskSeries = () => { if (!deletingTask) return; mutate((d) => { const series = deletingTask.seriesId || deletingTask.id; d.tasks = d.tasks.filter((item) => (item.seriesId || item.id) !== series); d.chores = (d.chores || []).filter((chore) => normalize(chore.title) !== normalize(deletingTask.title)); }); setDeletingTask(undefined); };
   const active = data.tasks
     .filter((t) => t.status !== "Concluída")
     .slice()
