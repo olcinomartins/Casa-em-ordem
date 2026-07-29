@@ -25,7 +25,6 @@ let etag: string | undefined;
 let knownMissing = false;
 const scopes = ["Files.ReadWrite", "User.Read"];
 const rememberedAccountKey = "casa-em-ordem-microsoft-account";
-const ownPath = "/me/drive/root:/Casa em ordem/CasaEmOrdem-familia.json:/content";
 const familyShareUrl = "https://1drv.ms/u/c/f55991dc870e2ff6/IQDzSgFJjs81SZM-o0Azn3oDAVCzNszRi85T6rrUrVVjMzs?e=QUS2Jl";
 export interface CloudLocation {
   driveId: string;
@@ -59,9 +58,8 @@ const cloudLocationKey = (location = getCloudLocation()) =>
   location ? `${location.driveId}\u0000${location.itemId}` : "__own_drive__";
 const contentPathFor = (location = getCloudLocation()) => {
   const x = location;
-  return x
-    ? `/drives/${encodeURIComponent(x.driveId)}/items/${encodeURIComponent(x.itemId)}/content`
-    : ownPath;
+  if (!x) throw new Error("A base familiar compartilhada ainda não foi localizada.");
+  return `/drives/${encodeURIComponent(x.driveId)}/items/${encodeURIComponent(x.itemId)}/content`;
 };
 const contentPath = () => contentPathFor();
 const metadataPath = () => contentPath().replace(/\/content$/, "");
@@ -103,6 +101,7 @@ let pendingSnapshot:
   | undefined;
 let drainingSaves = false;
 let activeDrain: Promise<void> | undefined;
+let canonicalLocationResolved = false;
 const saveWaiters: Array<{
   generation: number;
   resolve: () => void;
@@ -211,21 +210,32 @@ export async function loadCloud(
   const readGeneration = ++requestedReadGeneration;
   const generationAtStart = writeGeneration;
   const t = await token();
+  // A URL compartilhada é a fonte canônica da família. Não reutilizamos um
+  // drive/item salvo por um navegador antigo, pois ele pode apontar para uma
+  // cópia particular e causar divergência entre computador e celular.
+  if (!canonicalLocationResolved) {
+    const encoded = btoa(familyShareUrl)
+      .replace(/=/g, "")
+      .replace(/\//g, "_")
+      .replace(/\+/g, "-");
+    const meta = await fetch(
+      `https://graph.microsoft.com/v1.0/shares/u!${encoded}/driveItem`,
+      { headers: { Authorization: `Bearer ${t}` } },
+    );
+    if (!meta.ok)
+      throw new Error(
+        "Não foi possível acessar a base compartilhada da família. Confirme o compartilhamento do arquivo no OneDrive.",
+      );
+    const item = await meta.json();
+    const driveId = item.parentReference?.driveId;
+    if (!driveId || !item.id)
+      throw new Error("O OneDrive não informou a localização da base familiar compartilhada.");
+    setCloudLocation({ driveId, itemId: item.id });
+    canonicalLocationResolved = true;
+  }
   let r = await fetch(`https://graph.microsoft.com/v1.0${contentPath()}`, {
     headers: { Authorization: `Bearer ${t}` },
   });
-  if (r.status === 404 && !getCloudLocation()) {
-    const encoded = btoa(familyShareUrl).replace(/=/g, "").replace(/\//g, "_").replace(/\+/g, "-");
-    const meta = await fetch(`https://graph.microsoft.com/v1.0/shares/u!${encoded}/driveItem`, {headers:{Authorization:`Bearer ${t}`}});
-    if (meta.ok) {
-      const item = await meta.json();
-      const driveId = item.parentReference?.driveId;
-      if (driveId && item.id) {
-        setCloudLocation({driveId,itemId:item.id});
-        r = await fetch(`https://graph.microsoft.com/v1.0${contentPath()}`, {headers:{Authorization:`Bearer ${t}`}});
-      }
-    }
-  }
   if (r.status === 404) {
     if (
       shouldAdopt() &&
