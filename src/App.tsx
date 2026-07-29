@@ -4173,14 +4173,28 @@ function Transactions({
       confirm(
         "Excluir este lançamento? Esta ação será registrada apenas após salvar.",
       )
-    )
+      )
       mutate((d) => {
+        const removed = d.transactions.filter((t) => t.id === id);
         d.transactions = d.transactions.filter((t) => t.id !== id);
+        for (const transaction of removed) {
+          if (!transaction.obligationId) continue;
+          const stillLinked = d.transactions.some((item) => item.obligationId === transaction.obligationId);
+          const obligation = d.obligations.find((item) => item.id === transaction.obligationId);
+          if (!stillLinked && obligation && ["Paga", "Confirmada"].includes(obligation.status)) {
+            obligation.status = "A pagar";
+            obligation.paidAt = undefined;
+            obligation.paidAmount = undefined;
+            obligation.reconciledTransactionId = undefined;
+            obligation.updatedAt = now();
+            obligation.version++;
+          }
+        }
       });
   };
   const selectedRows=rows.filter(row=>selected.has(row.id));
   const remember=()=>{undoTransactions.current=structuredClone(data.transactions)};
-  const bulkApply=(action:"confirm"|"category"|"delete")=>{if(!selectedRows.length)return;const total=selectedRows.reduce((sum,row)=>sum+Math.abs(row.amount),0);if(!confirm(`${action==="delete"?"Excluir":"Alterar"} ${selectedRows.length} lançamento(s)${hideValues?"":`, total ${money(total)}`}?`))return;remember();mutate(d=>{if(action==="delete")d.transactions=d.transactions.filter(row=>!selected.has(row.id));else d.transactions.filter(row=>selected.has(row.id)).forEach(row=>{if(action==="confirm")row.classification="confirmed";if(action==="category"){const category=d.categories.find(c=>c.id===bulkCategory);row.categoryId=bulkCategory;row.subcategory=category?.subcategories[0];row.classification="confirmed"}row.updatedAt=now();row.version++})});setSelected(new Set())};
+  const bulkApply=(action:"confirm"|"category"|"delete")=>{if(!selectedRows.length)return;const total=selectedRows.reduce((sum,row)=>sum+Math.abs(row.amount),0);if(!confirm(`${action==="delete"?"Excluir":"Alterar"} ${selectedRows.length} lançamento(s)${hideValues?"":`, total ${money(total)}`}?`))return;remember();mutate(d=>{if(action==="delete"){const removed=d.transactions.filter(row=>selected.has(row.id));d.transactions=d.transactions.filter(row=>!selected.has(row.id));for(const transaction of removed){if(!transaction.obligationId)continue;const stillLinked=d.transactions.some(row=>row.obligationId===transaction.obligationId);const obligation=d.obligations.find(item=>item.id===transaction.obligationId);if(!stillLinked&&obligation&&["Paga","Confirmada"].includes(obligation.status)){obligation.status="A pagar";obligation.paidAt=undefined;obligation.paidAmount=undefined;obligation.reconciledTransactionId=undefined;obligation.updatedAt=now();obligation.version++}}}else d.transactions.filter(row=>selected.has(row.id)).forEach(row=>{if(action==="confirm")row.classification="confirmed";if(action==="category"){const category=d.categories.find(c=>c.id===bulkCategory);row.categoryId=bulkCategory;row.subcategory=category?.subcategories[0];row.classification="confirmed"}row.updatedAt=now();row.version++})});setSelected(new Set())};
   const undoBulk=()=>{if(!undoTransactions.current)return;const snapshot=undoTransactions.current;mutate(d=>{d.transactions=snapshot});undoTransactions.current=undefined};
   return (
     <section className="panel">
