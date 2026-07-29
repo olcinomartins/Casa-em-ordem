@@ -1252,8 +1252,9 @@ code {
 .budget-detail-content > b { margin-top: .25rem; font-size: .82rem; }
 .budget-detail-section { display: grid; gap: .28rem; padding: .48rem; border-radius: 8px; }
 .budget-detail-section > b { font-size: .82rem; }
-.planned-section { background: color-mix(in srgb, var(--gold) 18%, white); }
+.planned-section { background: var(--line); }
 .tracked-section { background: color-mix(in srgb, var(--green) 12%, white); }
+.scheduled-section { background: color-mix(in srgb, var(--gold) 18%, white); }
 .goal-edit-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .55rem; margin-top: .7rem; padding: .75rem; border: 1px solid var(--line); border-radius: 12px; background: #f8faf7; }
 .goal-edit-form label { display: grid; gap: .2rem; font-size: .8rem; }
 .goal-edit-form .check { display: flex; align-items: center; gap: .4rem; }

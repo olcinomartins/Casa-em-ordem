@@ -2854,7 +2854,7 @@ function BudgetBars({
           <div className="budget-detail-content">
             <div className="budget-detail-section planned-section"><b>Planejado</b>{r.plannedItems.map((item) => <Row key={item.id} a={item.reason || "Orçamento"} b={item.subcategory || "Categoria"} c={<SensitiveMoney value={item.amount} hidden={hideValues} />} />)}{!r.plannedItems.length && <small>Nenhum orçamento específico nesta categoria.</small>}</div>
             <div className="budget-detail-section tracked-section"><b>Acompanhado no mês</b>{r.entries.map((entry) => <Row key={entry.id} a={entry.description} b={`${sourceLabel[entry.source]} · ${mode === "registered" ? "Realizado no app" : entry.state === "estimated" ? "Estimado" : "Realizado"}`} c={<SensitiveMoney value={entry.amount} hidden={hideValues} />} />)}{!r.entries.length && <small>Nenhum lançamento considerado ainda.</small>}</div>
-            {r.scheduledEntries.length > 0 && <><b>Pagamentos agendados</b>{r.scheduledEntries.map((entry) => <Row key={entry.id} a={entry.description} b="Compromisso a pagar" c={<SensitiveMoney value={entry.amount} hidden={hideValues} />} />)}</>}
+            {r.scheduledEntries.length > 0 && <div className="budget-detail-section scheduled-section"><b>Pagamentos agendados</b>{r.scheduledEntries.map((entry) => <Row key={entry.id} a={entry.description} b="Compromisso a pagar" c={<SensitiveMoney value={entry.amount} hidden={hideValues} />} />)}</div>}
             {r.planned > r.committed && <><b>Espaço restante</b><Row a="Após registros e pagamentos agendados" b="Não é gasto realizado" c={<SensitiveMoney value={r.planned - r.committed} hidden={hideValues} />} /></>}
           </div>
         </details>
