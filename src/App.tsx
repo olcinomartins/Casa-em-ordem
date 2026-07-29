@@ -470,10 +470,15 @@ export default function App() {
     };
     window.addEventListener("focus", refresh);
     document.addEventListener("visibilitychange", refresh);
+    // Mantém os aparelhos abertos alinhados mesmo quando o usuário não troca
+    // de aba. A base compartilhada continua sendo a fonte de verdade; o
+    // cache local serve somente para abrir mais rápido e para recuperação.
+    const refreshTimer = window.setInterval(refresh, 30_000);
     return () => {
       refreshGeneration.current += 1;
       window.removeEventListener("focus", refresh);
       document.removeEventListener("visibilitychange", refresh);
+      window.clearInterval(refreshTimer);
     };
   }, [authenticated, cloud]);
   const allowAccount = async (account: { username: string }) => {
