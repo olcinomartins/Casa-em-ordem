@@ -177,7 +177,8 @@ const pageBlocks: Record<Page, ReadonlyArray<[string, string]>> = {
     ["accounts-section", "Contas e cartões"],
     ["categories-section", "Categorias"],
     ["budgets-section", "Orçamentos"],
-    ["goals-section", "Metas e reservas"],
+    ["provisions-section", "Provisões"],
+    ["goals-section", "Metas"],
     ["audit-section", "Auditoria da base"],
   ],
   importar: [
@@ -1030,18 +1031,31 @@ export default function App() {
                 setMessage={setMessage}
               />
             </Collapsible>
-            <Collapsible id="budgets-section" title="Orçamentos, provisões e metas">
+            <Collapsible id="budgets-section" title="Orçamentos">
               <Budgets
                 data={data}
                 month={month}
                 mutate={mutate}
-                creating={createIntent === "budget" || createIntent === "goal"}
+                kind="budget"
+                creating={createIntent === "budget"}
                 onCreateDone={() => setCreateIntent(undefined)}
               />
+            </Collapsible>
+            <Collapsible id="provisions-section" title="Provisões">
+              <Budgets
+                data={data}
+                month={month}
+                mutate={mutate}
+                kind="provision"
+                creating={false}
+                onCreateDone={() => setCreateIntent(undefined)}
+              />
+            </Collapsible>
+            <Collapsible id="goals-section" title="Metas">
               <Goals
                 data={data}
                 mutate={mutate}
-                creating={false}
+                creating={createIntent === "goal"}
                 onCreateDone={() => setCreateIntent(undefined)}
               />
             </Collapsible>
@@ -4388,12 +4402,14 @@ function Budgets({
   data,
   month,
   mutate,
+  kind,
   creating,
   onCreateDone,
 }: {
   data: FamilyData;
   month: string;
   mutate: (f: (d: FamilyData) => void) => void;
+  kind: "budget" | "provision";
   creating: boolean;
   onCreateDone: () => void;
 }) {
@@ -4508,15 +4524,14 @@ function Budgets({
   );
   return (
     <>
-      {creating && <UnifiedPlanForm data={data} mutate={mutate} onDone={onCreateDone} />}
+      {creating && kind === "budget" && <UnifiedPlanForm data={data} mutate={mutate} onDone={onCreateDone} />}
       <section className="grid">
         <div>
-          <section className="panel">
+          {kind === "budget" ? <section className="panel">
             <h2>Orçamentos cadastrados</h2>
             {budgetGroups.map(([category, items]) => <details className="budget-category-group" key={category} open><summary><span>{category}</span><strong>{money(items.reduce((sum, item) => sum + item.amount, 0))}</strong></summary>{items.map(renderBudget)}</details>)}
             {!regularBudgets.length && <Empty />}
-          </section>
-          <section className="panel provision-summary">
+          </section> : <section className="panel provision-summary">
             <h2>Provisões mensais</h2>
             <p><strong>{money(provisionBalance)}</strong> reservado · {money(provisionTotal)} por mês.</p>
             <small>Use “Aporte/Retirada em meta” e selecione o Caixa unificado de provisões.</small>
@@ -4529,6 +4544,7 @@ function Budgets({
             {!automaticProvisions.length && <small>Nenhum pagamento não mensal para provisionar.</small>}
             {!provisions.length && <Empty />}
           </section>
+          }
         </div>
       </section>
     </>
@@ -4864,16 +4880,7 @@ function Goals({
   onCreateDone: () => void;
 }) {
   const [editingId, setEditingId] = useState<string>();
-  const provisionPool = data.goals.find((goal) => goal.provisionPool);
-  const provisionMonthly = data.budgets
-    .filter((budget) => budget.kind === "provision")
-    .reduce((sum, budget) => sum + budget.amount, 0);
-  const provisionBalance = provisionPool?.movements.reduce(
-    (sum, movement) => sum + movement.amount,
-    0,
-  ) || 0;
   const currentProvisionMonth = dateOnly(new Date()).slice(0, 7);
-  const provisionContributedThisMonth = provisionPool?.movements.filter((movement) => monthOf(movement.date) === currentProvisionMonth).reduce((sum, movement) => sum + Math.max(0, movement.amount), 0) || 0;
   const add = (fd: FormData) => {
     const target = parseCurrency(fd.get("target")),
       minimum = parseCurrency(fd.get("minimum"));
@@ -4952,13 +4959,6 @@ function Goals({
           </p>
         </div>
       </div>
-      <section className="provision-pool">
-        <h2>Caixa unificado de provisões</h2>
-        <p><strong>{money(provisionBalance)}</strong> reservado · {money(provisionMonthly)} por mês planejados.</p>
-        <p><strong>{money(provisionContributedThisMonth)}</strong> aportado neste mês de <strong>{money(provisionMonthly)}</strong> planejados.</p>
-        <progress value={provisionContributedThisMonth} max={provisionMonthly || 1} />
-        <small>Para aportar ou retirar, use o botão + e escolha Aporte/Retirada em meta.</small>
-      </section>
       {creating && (
         <QuickForm
           onSubmit={(fd) => {
