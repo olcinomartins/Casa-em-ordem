@@ -488,7 +488,6 @@ export default function App() {
       await signOut();
       throw new Error(`O e-mail ${email} não está autorizado.`);
     }
-    const localWasPending = hasLocalPending();
     const result = await Promise.all([
       loadCloud(() => attempt === allowAccountGeneration.current),
       loadLocalIfPresent(),
@@ -505,8 +504,7 @@ export default function App() {
       );
     const hasDivergentCache = Boolean(
       cached &&
-        !sameFamilyContent(cached, remote) &&
-        (localWasPending || cached.lastSavedAt > remote.lastSavedAt),
+        !sameFamilyContent(cached, remote),
     );
     if (hasDivergentCache) {
       await saveLocalRecovery(cached!);
@@ -849,14 +847,37 @@ export default function App() {
           <section className="recovery-banner" role="alert">
             <div>
               <b>Cópia local preservada</b>
-              <p>
-                Ela não foi enviada sobre o OneDrive. Baixe o arquivo para
-                conferir antes de descartá-la.
-              </p>
+              <p>Este aparelho possui dados diferentes da base compartilhada.</p>
             </div>
             <div className="actions">
               <button onClick={() => exportJson(localRecovery)}>
                 <Download size={17} /> Baixar cópia local
+              </button>
+              <button
+                className="primary"
+                onClick={async () => {
+                  if (!confirm("Usar os dados deste aparelho como a nova base compartilhada? Isso substituirá a base atual do OneDrive para os dois.")) return;
+                  try {
+                    const restored = { ...structuredClone(localRecovery), lastSavedAt: now() };
+                    localMutationGeneration.current += 1;
+                    skipNextAutosave.current = true;
+                    markLocalPending(restored.lastSavedAt);
+                    setCloud("syncing");
+                    await saveCloud(restored);
+                    await saveLocal(restored);
+                    await clearLocalRecovery();
+                    setLocalRecovery(undefined);
+                    setData(restored);
+                    clearLocalPending();
+                    setCloud("connected");
+                    setMessage("A cópia deste aparelho passou a ser a base compartilhada.");
+                  } catch (error) {
+                    setCloud("local");
+                    setMessage(`Não foi possível restaurar esta cópia: ${(error as Error).message}`);
+                  }
+                }}
+              >
+                Usar esta cópia
               </button>
               <button
                 onClick={async () => {
