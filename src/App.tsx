@@ -1264,7 +1264,6 @@ function QuickActions({
   const [planCategoryId, setPlanCategoryId] = useState("");
   const [categoryTouched, setCategoryTouched] = useState(false);
   const [description, setDescription] = useState("");
-  const [operator, setOperator] = useState<Member>(currentMember);
   const [accountId, setAccountId] = useState(
     () =>
       data.accounts.find(
@@ -1293,9 +1292,11 @@ function QuickActions({
   const applyCategorySuggestion = (
     nextDescription: string,
     nextAccountId = accountId,
-    nextOperator = operator,
   ) => {
     if (categoryTouched || !nextDescription.trim() || !nextAccountId) return;
+    const nextOperator =
+      data.accounts.find((account) => account.id === nextAccountId)?.operator ||
+      currentMember;
     const rule = suggest(
       nextDescription,
       nextAccountId,
@@ -1549,10 +1550,6 @@ function QuickActions({
     const cleanDescription = String(form.get("description") || "").trim() || (categoryId === "__new__" ? newCategoryName.trim() : data.categories.find((category) => category.id === categoryId)?.name) || "Lançamento manual";
     const date = String(form.get("date") || dateOnly(new Date()));
     const selectedAccountId = String(form.get("accountId") || "");
-    const selectedOperator = String(
-      form.get("operator") || currentMember,
-    ) as Member;
-    const scope = String(form.get("scope") || "Familiar") as Transaction["scope"];
     const account = data.accounts.find((item) => item.id === selectedAccountId);
     if (!amount || !date || !account || !categoryId || (categoryId === "__new__" && !newCategoryName.trim())) {
       showDialogError(
@@ -1574,8 +1571,11 @@ function QuickActions({
         normalized: normalize(cleanDescription),
         amount: transactionKind === "income" ? -amount : amount,
         accountId: selectedAccountId,
-        operator: selectedOperator,
-        scope,
+        // O responsável operacional vem da conta/cartão escolhido. A
+        // classificação pessoal ou familiar é dada pela categoria, não por
+        // mais um campo no lançamento.
+        operator: account.operator,
+        scope: "Familiar",
         categoryId: resolvedCategoryId,
         subcategory: resolvedSubcategory,
         installment: Number(form.get("installment") || 1),
@@ -1880,26 +1880,6 @@ function QuickActions({
                       defaultValue={dateOnly(new Date())}
                     />
                   </label>
-                  <label>
-                    Responsável
-                    <select
-                      name="operator"
-                      value={operator}
-                      onChange={(event) => {
-                        const nextOperator = event.target.value as Member;
-                        setOperator(nextOperator);
-                        applyCategorySuggestion(
-                          description,
-                          accountId,
-                          nextOperator,
-                        );
-                      }}
-                    >
-                      <option>Olcino</option>
-                      <option>Mari</option>
-                      <option>Ambos</option>
-                    </select>
-                  </label>
                 </div>
                 <label>
                   Categoria
@@ -1950,11 +1930,9 @@ function QuickActions({
                     onChange={(event) => {
                       const nextAccountId = event.target.value;
                       setAccountId(nextAccountId);
-                      setOperator(data.accounts.find((account)=>account.id===nextAccountId)?.operator || currentMember);
                       applyCategorySuggestion(
                         description,
                         nextAccountId,
-                        operator,
                       );
                     }}
                   >
@@ -3791,8 +3769,10 @@ function VoiceExpense({
       normalized: normalize(draft.descricao),
       amount,
       accountId: account.id,
-      operator: (["Olcino","Mari","Ambos"].includes(draft.responsavelSugerido||"")?draft.responsavelSugerido:currentMember) as Member,
-      scope: (["Familiar","Pessoal — Olcino","Pessoal — Mari","Transferência interna","Fora do orçamento"].includes(draft.escopoSugerido||"")?draft.escopoSugerido:"Familiar") as Transaction["scope"],
+      // Igual ao lançamento manual: conta/cartão define a operação e a
+      // categoria define se o gasto é pessoal ou familiar.
+      operator: account.operator,
+      scope: "Familiar" as Transaction["scope"],
       categoryId: category?.id,
       subcategory: draft.subcategoriaSugerida,
       classification: "confirmed" as const,
@@ -3843,7 +3823,7 @@ function VoiceExpense({
         <b>Inclua na gravação:</b>
         <span>1. Valor</span><span>2. Compra ou estabelecimento</span>
         <span>3. Categoria</span><span>4. Conta ou cartão</span>
-        <span>5. Quem gastou</span><span>6. Data</span>
+        <span>5. Data</span>
       </div>
       {recording && (
         <div className="voice-live">
@@ -3893,8 +3873,6 @@ function VoiceExpense({
           <select value={draft.categoriaSugerida||""} onChange={e=>setDraft({...draft,categoriaSugerida:e.target.value,subcategoriaSugerida:data.categories.find(c=>c.name===e.target.value)?.subcategories[0]})}><option value="">Selecione a categoria</option>{data.categories.map(category=><option key={category.id} value={category.name}>{category.name}</option>)}</select>
           <select value={draft.subcategoriaSugerida||""} onChange={e=>setDraft({...draft,subcategoriaSugerida:e.target.value})}><option value="">Selecione a subcategoria</option>{data.categories.find(category=>category.name===draft.categoriaSugerida)?.subcategories.map(subcategory=><option key={subcategory}>{subcategory}</option>)}</select>
           <select value={draft.contaOuCartaoSugerido||""} onChange={e=>setDraft({...draft,contaOuCartaoSugerido:e.target.value})}><option value="">Selecione a conta ou cartão</option>{data.accounts.filter(account=>account.active).map(account=><option key={account.id} value={account.name}>{accountDisplayName(account)}</option>)}</select>
-          <select value={draft.responsavelSugerido||currentMember} onChange={e=>setDraft({...draft,responsavelSugerido:e.target.value})}><option>Olcino</option><option>Mari</option><option>Ambos</option></select>
-          <select value={draft.escopoSugerido||"Familiar"} onChange={e=>setDraft({...draft,escopoSugerido:e.target.value})}><option>Familiar</option><option>Pessoal — Olcino</option><option>Pessoal — Mari</option><option>Transferência interna</option><option>Fora do orçamento</option></select>
           <button className="primary" onClick={save}>
             Confirmar estimativa
           </button>
@@ -4139,6 +4117,28 @@ function Transactions({
       t.date <= endDate &&
       (filter === "all" || (filter==="review"?t.classification!=="confirmed":t.classification === filter)),
   );
+  const rowsByCategory = useMemo(() => {
+    const categories = new Map(data.categories.map((category, index) => [category.id, { name: category.name, index }]));
+    const groups = new Map<string, { id: string; name: string; index: number; rows: Transaction[] }>();
+    for (const row of rows) {
+      const category = row.categoryId ? categories.get(row.categoryId) : undefined;
+      const id = row.categoryId || "__unclassified__";
+      const group = groups.get(id) || {
+        id,
+        name: category?.name || "Sem categoria",
+        index: category?.index ?? Number.MAX_SAFE_INTEGER,
+        rows: [],
+      };
+      group.rows.push(row);
+      groups.set(id, group);
+    }
+    return [...groups.values()]
+      .sort((a, b) => a.index - b.index || a.name.localeCompare(b.name))
+      .map((group) => ({
+        ...group,
+        rows: group.rows.sort((a, b) => b.date.localeCompare(a.date) || b.updatedAt.localeCompare(a.updatedAt)),
+      }));
+  }, [rows, data.categories]);
   useEffect(() => {
     if (!focusTransactionId) return;
     const transaction = data.transactions.find(
@@ -4274,7 +4274,13 @@ function Transactions({
       </div>
       <div className="bulk-toolbar"><label><input type="checkbox" checked={rows.length>0&&selectedRows.length===rows.length} onChange={e=>setSelected(e.target.checked?new Set(rows.map(row=>row.id)):new Set())}/> Selecionar todos os filtrados</label><b>{selectedRows.length} selecionado(s) · <SensitiveMoney value={selectedRows.reduce((sum,row)=>sum+Math.abs(row.amount),0)} hidden={hideValues} /></b><button onClick={()=>bulkApply("confirm")}>Confirmar em massa</button><select value={bulkCategory} onChange={e=>setBulkCategory(e.target.value)}><option value="">Categoria em massa</option>{data.categories.map(category=><option key={category.id} value={category.id}>{category.name}</option>)}</select><button disabled={!bulkCategory} onClick={()=>bulkApply("category")}>Aplicar categoria</button><button className="danger-button" onClick={()=>bulkApply("delete")}>Excluir selecionados</button>{undoTransactions.current&&<button onClick={undoBulk}>Desfazer última operação</button>}</div>
       <div className="transaction-list">
-        {rows.map((t) => (
+        {rowsByCategory.map((group) => (
+          <section className="transaction-category-group" key={group.id}>
+            <header>
+              <b>{group.name}</b>
+              <small>{group.rows.length} lançamento(s) · <SensitiveMoney value={group.rows.reduce((sum, row) => sum + Math.abs(row.amount), 0)} hidden={hideValues} /></small>
+            </header>
+        {group.rows.map((t) => (
           <div
             id={`transaction-${t.id}`}
             tabIndex={-1}
@@ -4288,7 +4294,6 @@ function Transactions({
               <small>{t.estimated?`Estimativa ${t.estimateOrigin==="manual"?"manual":"por voz"} · `:""}{t.classification==="confirmed"?"Confirmado":"Em revisão"}</small>
             </div>
             <select value={t.accountId} onChange={e=>update(t.id,{accountId:e.target.value})}>{data.accounts.filter(account=>account.active).map(account=><option key={account.id} value={account.id}>{accountDisplayName(account)}</option>)}</select>
-            <select value={t.operator} onChange={e=>update(t.id,{operator:e.target.value as Member})}><option>Olcino</option><option>Mari</option><option>Ambos</option></select>
             <select
               value={t.categoryId || ""}
               onChange={(e) => {
@@ -4332,6 +4337,8 @@ function Transactions({
               <Trash2 size={19} />
             </button>
           </div>
+        ))}
+          </section>
         ))}
       </div>
       {!rows.length && <Empty />}

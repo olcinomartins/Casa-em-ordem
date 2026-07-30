@@ -709,10 +709,29 @@ th {
 }
 .transaction-list {
   display: grid;
+  gap: .8rem;
+}
+.transaction-category-group {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.transaction-category-group > header {
+  display: flex;
+  justify-content: space-between;
+  gap: .6rem;
+  align-items: baseline;
+  padding: .55rem .7rem;
+  background: #f4f1e7;
+  color: var(--ink);
+}
+.transaction-category-group > header small {
+  color: #66756d;
+  text-align: right;
 }
 .transaction-edit {
   display: grid;
-  grid-template-columns: auto 1.7fr 1fr 1fr 1fr 1fr 1fr auto auto;
+  grid-template-columns: auto 1.7fr 1fr 1fr 1fr 1fr auto auto;
   gap: 0.5rem;
   align-items: center;
   padding: 0.65rem 0;
