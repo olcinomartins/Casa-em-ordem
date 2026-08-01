@@ -1,5 +1,6 @@
 import { PublicClientApplication, AccountInfo } from "@azure/msal-browser";
 import { FamilyData } from "./domain";
+import { mergeFamilySnapshots } from "./familyMerge";
 const clientId = import.meta.env.VITE_MS_CLIENT_ID as string | undefined;
 const redirectUri =
   (import.meta.env.VITE_MS_REDIRECT_URI as string | undefined) ||
@@ -307,22 +308,44 @@ async function saveCloudNow(
   const t = await token();
   writeGeneration += 1;
   writesInFlight += 1;
-  const headers: Record<string, string> = {
-    Authorization: `Bearer ${t}`,
-    "Content-Type": "application/json",
-  };
-  if (baseEtag) headers["If-Match"] = baseEtag;
-  else headers["If-None-Match"] = "*";
   try {
-    const r = await fetch(`https://graph.microsoft.com/v1.0${cloudPath}`, {
-      method: "PUT",
-      headers,
-      body: serializedData,
-    });
-    if (r.status === 412)
-      throw new Error(
-        "A base foi alterada em outro dispositivo. Recarregue antes de salvar.",
+    let content = serializedData;
+    let version = baseEtag;
+    let creating = baseKnownMissing;
+    let r: Response | undefined;
+    // Se outro aparelho salvou entre a leitura e este envio, buscamos a versão
+    // atual, unimos os registros com ids diferentes e tentamos uma vez mais.
+    // Assim, dois lançamentos independentes não se apagam mutuamente.
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const headers: Record<string, string> = {
+        Authorization: `Bearer ${t}`,
+        "Content-Type": "application/json",
+      };
+      if (version) headers["If-Match"] = version;
+      else if (creating) headers["If-None-Match"] = "*";
+      r = await fetch(`https://graph.microsoft.com/v1.0${cloudPath}`, {
+        method: "PUT",
+        headers,
+        body: content,
+      });
+      if (r.status !== 412) break;
+      const latest = await fetch(`https://graph.microsoft.com/v1.0${cloudPath}`, {
+        headers: { Authorization: `Bearer ${t}` },
+      });
+      if (!latest.ok)
+        throw new Error("A base mudou em outro aparelho e não pôde ser recarregada para conciliação.");
+      const latestEtag = latest.headers.get("ETag");
+      if (!latestEtag)
+        throw new Error("O OneDrive não informou a versão necessária para conciliar as alterações.");
+      content = JSON.stringify(
+        mergeFamilySnapshots(await latest.json(), JSON.parse(content)),
       );
+      version = latestEtag;
+      creating = false;
+    }
+    if (!r) throw new Error("Não foi possível iniciar o salvamento no OneDrive.");
+    if (r.status === 412)
+      throw new Error("A base continua sendo alterada em outro aparelho. Aguarde alguns segundos e tente novamente.");
     if (!r.ok) throw new Error(`Falha ao salvar no OneDrive (${r.status}).`);
     const item = await r.json();
     const savedEtag =

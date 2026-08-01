@@ -1,4 +1,5 @@
 export type Member = "Olcino" | "Mari" | "Ambos";
+import type { SharedLayout } from "./sharedLayout";
 export type Scope =
   | "Familiar"
   | "Pessoal — Olcino"
@@ -208,6 +209,8 @@ export interface FamilyData {
   setupTasksInitialized?: boolean;
   /** Evita que a migração legada de responsabilidades recrie itens excluídos. */
   responsibilitiesMigrated?: boolean;
+  /** Organização escolhida pelo casal, compartilhada entre todos os aparelhos. */
+  sharedLayout?: SharedLayout;
   lastSavedAt: string;
 }
 export const uid = () => crypto.randomUUID();

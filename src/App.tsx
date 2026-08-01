@@ -124,6 +124,7 @@ import {
   saveUiPreferences,
   UI_PREFERENCES_STORAGE_KEY,
 } from "./uiPreferences";
+import { SharedLayout } from "./sharedLayout";
 import {
   dashboardBlockIds,
   dashboardOrderStorageKey,
@@ -358,18 +359,19 @@ export default function App() {
     "local",
   );
   useEffect(() => {
+    const sharedOrders = data?.sharedLayout?.pageOrders;
     setPageOrders(
       Object.fromEntries(
         (Object.keys(pageBlocks) as Page[]).map((pageId) => [
           pageId,
           normalizePageOrder(
             pageId,
-            localStorage.getItem(pageOrderKey(pageId, currentMember)),
+            sharedOrders?.[pageId] ?? localStorage.getItem(pageOrderKey(pageId, currentMember)),
           ),
         ]),
       ) as Record<Page, string[]>,
     );
-  }, [currentMember]);
+  }, [currentMember, data?.sharedLayout?.updatedAt]);
   useEffect(() => {
     if (!quickExpenseNotice) return;
     const timer = window.setTimeout(
@@ -415,8 +417,18 @@ export default function App() {
     const timer = window.setTimeout(() => {
       if (generation !== autosaveGeneration.current) return;
       saveCloud(data)
-        .then(() => {
+        .then(async () => {
+          // O salvamento pode ter conciliado inclusões feitas por outro
+          // aparelho. Leia a versão recém-confirmada para que quem acabou de
+          // registrar também veja todos os dados, sem esperar o próximo ciclo.
+          const consolidated = await loadCloud(
+            () => generation === autosaveGeneration.current,
+          );
           if (generation === autosaveGeneration.current) {
+            if (consolidated && !sameFamilyContent(consolidated, dataRef.current!)) {
+              skipNextAutosave.current = true;
+              setData(consolidated);
+            }
             clearLocalPending();
             setCloud("connected");
           }
@@ -665,17 +677,34 @@ export default function App() {
     goToQuickAction(targetPage, sectionId);
   };
   const movePageSection = (id: string, direction: "up" | "down") => {
-    setPageOrders((current) => {
-      const order = [...current[page]];
-      const index = order.indexOf(id);
-      const target = direction === "up" ? index - 1 : index + 1;
-      if (index < 0 || target < 0 || target >= order.length) return current;
-      [order[index], order[target]] = [order[target], order[index]];
-      localStorage.setItem(
-        pageOrderKey(page, currentMember),
-        JSON.stringify(order),
-      );
-      return { ...current, [page]: order };
+    const order = [...pageOrders[page]];
+    const index = order.indexOf(id);
+    const target = direction === "up" ? index - 1 : index + 1;
+    if (index < 0 || target < 0 || target >= order.length) return;
+    [order[index], order[target]] = [order[target], order[index]];
+    setPageOrders((current) => ({ ...current, [page]: order }));
+    localStorage.setItem(pageOrderKey(page, currentMember), JSON.stringify(order));
+    mutate((draft) => {
+      draft.sharedLayout = {
+        updatedAt: now(),
+        pageOrders: { ...(draft.sharedLayout?.pageOrders ?? {}), [page]: order },
+        dashboardOrder: draft.sharedLayout?.dashboardOrder,
+        hiddenDashboardBlocks: draft.sharedLayout?.hiddenDashboardBlocks,
+      };
+    });
+  };
+  const updateSharedDashboardLayout = (
+    dashboardOrder: string[],
+    hiddenDashboardBlocks: string[],
+  ) => {
+    mutate((draft) => {
+      const layout: SharedLayout = {
+        updatedAt: now(),
+        pageOrders: draft.sharedLayout?.pageOrders ?? {},
+        dashboardOrder,
+        hiddenDashboardBlocks,
+      };
+      draft.sharedLayout = layout;
     });
   };
   useEffect(() => {
@@ -993,6 +1022,7 @@ export default function App() {
             <Collapsible id="dashboard-panel" title="Painel">
               <Dashboard
                 data={data}
+                updateSharedLayout={updateSharedDashboardLayout}
                 month={month}
                 view={view}
                 panelMode={panelMode}
@@ -2033,6 +2063,7 @@ const dashboardBlockLabels: Record<DashboardBlockId, string> = {
 
 function Dashboard({
   data,
+  updateSharedLayout,
   month,
   view,
   panelMode,
@@ -2040,6 +2071,7 @@ function Dashboard({
   currentMember,
 }: {
   data: FamilyData;
+  updateSharedLayout: (order: string[], hidden: string[]) => void;
   month: string;
   view: CashView;
   panelMode: "registered" | "realized";
@@ -2050,15 +2082,22 @@ function Dashboard({
   const hiddenKey = `${orderKey}:hidden`;
   const [blockOrder, setBlockOrder] = useState<DashboardBlockId[]>(() => {
     try {
-      return normalizeDashboardOrder(localStorage.getItem(orderKey));
+      return normalizeDashboardOrder(data.sharedLayout?.dashboardOrder ?? localStorage.getItem(orderKey));
     } catch {
       return [...dashboardBlockIds];
     }
   });
   const [organizing, setOrganizing] = useState(false);
   const [hiddenBlocks, setHiddenBlocks] = useState<DashboardBlockId[]>(() => {
-    try { const stored = JSON.parse(localStorage.getItem(hiddenKey) || "[]"); return Array.isArray(stored) ? stored.filter((id): id is DashboardBlockId => dashboardBlockIds.includes(id)) : []; } catch { return []; }
+    try { const stored = data.sharedLayout?.hiddenDashboardBlocks ?? JSON.parse(localStorage.getItem(hiddenKey) || "[]"); return Array.isArray(stored) ? stored.filter((id): id is DashboardBlockId => dashboardBlockIds.includes(id)) : []; } catch { return []; }
   });
+  useEffect(() => {
+    if (!data.sharedLayout) return;
+    if (data.sharedLayout.dashboardOrder)
+      setBlockOrder(normalizeDashboardOrder(data.sharedLayout.dashboardOrder));
+    if (data.sharedLayout.hiddenDashboardBlocks)
+      setHiddenBlocks(data.sharedLayout.hiddenDashboardBlocks.filter((id): id is DashboardBlockId => dashboardBlockIds.includes(id as DashboardBlockId)));
+  }, [data.sharedLayout?.updatedAt]);
   useEffect(() => {
     try {
       localStorage.setItem(orderKey, JSON.stringify(blockOrder));
@@ -2153,7 +2192,7 @@ function Dashboard({
                 {currentMember}.
               </p>
             </div>
-            <button onClick={() => setBlockOrder([...dashboardBlockIds])}>
+            <button onClick={() => { const next = [...dashboardBlockIds]; setBlockOrder(next); updateSharedLayout(next, hiddenBlocks); }}>
               Restaurar padrão
             </button>
           </div>
@@ -2167,26 +2206,18 @@ function Dashboard({
                   </small>
                 </span>
                 <div className="actions">
-                  <button aria-label={`${hiddenBlocks.includes(blockId) ? "Mostrar" : "Ocultar"} ${dashboardBlockLabels[blockId]}`} onClick={() => setHiddenBlocks((current) => current.includes(blockId) ? current.filter((id)=>id!==blockId) : [...current, blockId])}>{hiddenBlocks.includes(blockId) ? "Mostrar" : "Ocultar"}</button>
+                  <button aria-label={`${hiddenBlocks.includes(blockId) ? "Mostrar" : "Ocultar"} ${dashboardBlockLabels[blockId]}`} onClick={() => { const next = hiddenBlocks.includes(blockId) ? hiddenBlocks.filter((id)=>id!==blockId) : [...hiddenBlocks, blockId]; setHiddenBlocks(next); updateSharedLayout(blockOrder, next); }}>{hiddenBlocks.includes(blockId) ? "Mostrar" : "Ocultar"}</button>
                   <button
                     disabled={index === 0}
                     aria-label={`Subir ${dashboardBlockLabels[blockId]}`}
-                    onClick={() =>
-                      setBlockOrder((current) =>
-                        moveDashboardBlock(current, blockId, "up"),
-                      )
-                    }
+                    onClick={() => { const next = moveDashboardBlock(blockOrder, blockId, "up"); setBlockOrder(next); updateSharedLayout(next, hiddenBlocks); }}
                   >
                     ↑
                   </button>
                   <button
                     disabled={index === blockOrder.length - 1}
                     aria-label={`Descer ${dashboardBlockLabels[blockId]}`}
-                    onClick={() =>
-                      setBlockOrder((current) =>
-                        moveDashboardBlock(current, blockId, "down"),
-                      )
-                    }
+                    onClick={() => { const next = moveDashboardBlock(blockOrder, blockId, "down"); setBlockOrder(next); updateSharedLayout(next, hiddenBlocks); }}
                   >
                     ↓
                   </button>
