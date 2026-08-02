@@ -217,13 +217,13 @@ export function monthlySpending(
       amount: receipt.total,
       date: receipt.date,
       description: receipt.store,
-      detail: receipt.store,
     };
     if (legacyActualMatch("receipt", matchable, 7, 5)) continue;
     entries.push({
       id: receipt.id,
       date: receipt.date,
       description: receipt.store,
+      detail: receipt.store,
       amount: Math.abs(receipt.total),
       categoryId: receipt.categoryId || foodCategory || otherCategory,
       state: "estimated",
