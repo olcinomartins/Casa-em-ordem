@@ -32,4 +32,20 @@ describe("planCheck", () => {
     delete family.budgets[1].direction;
     expect(planCheck(family, "2026-08").manualBudget).toBe(2_000);
   });
+
+  it("não soma duas vezes um orçamento já representado por pagamento", () => {
+    const family = data();
+    const categoryId = "saude";
+    family.budgets = [
+      { ...audit(), month: "2026-08", kind: "budget", direction: "expense", categoryId, reason: "Plano de saúde – Mari", amount: 800 },
+    ];
+    family.obligations = [
+      { ...audit(), name: "PlanoDeSaudeMari", kind: "Manual", planned: 800, dueDate: "2026-08-10", recurrence: "monthly", tolerance: 0, status: "A pagar", categoryId },
+    ];
+    expect(planCheck(family, "2026-08")).toMatchObject({
+      manualBudget: 0,
+      monthlyPayments: 800,
+      margin: -1_800,
+    });
+  });
 });

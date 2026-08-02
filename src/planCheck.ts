@@ -1,4 +1,4 @@
-import { Budget, FamilyData, Goal, Obligation } from "./domain";
+import { Budget, FamilyData, Goal, Obligation, normalize } from "./domain";
 import { budgetApplies } from "./finance";
 
 const cardKinds = new Set<Obligation["kind"]>([
@@ -17,13 +17,18 @@ const monthlyPayment = (item: Obligation) =>
   item.recurrence === "monthly" &&
   item.status !== "Dispensada";
 
+const compact = (value: string) => normalize(value).replace(/\s/g, "");
+
 const legacyPaymentBudget = (budget: Budget, payments: Obligation[]) =>
   payments.some(
-    (payment) =>
-      Boolean(payment.categoryId && budget.categoryId) &&
-      payment.categoryId === budget.categoryId &&
-      (payment.name.trim().toLocaleLowerCase("pt-BR") === (budget.reason || "").trim().toLocaleLowerCase("pt-BR") ||
-        Boolean(payment.subcategory && budget.subcategory) && payment.subcategory === budget.subcategory),
+    (payment) => {
+      const sameCategory = Boolean(payment.categoryId && budget.categoryId) && payment.categoryId === budget.categoryId;
+      const paymentName = compact(payment.name);
+      const budgetName = compact(budget.reason || "");
+      const sameName = Boolean(paymentName && budgetName) && paymentName === budgetName;
+      const sameDescription = Boolean(payment.subcategory && budget.subcategory) && compact(payment.subcategory || "") === compact(budget.subcategory || "");
+      return sameCategory && (sameName || sameDescription);
+    },
   );
 
 /** Valores mensais que precisam caber na entrada familiar prevista. */
