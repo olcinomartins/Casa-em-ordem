@@ -750,6 +750,10 @@ th {
   width: 19px;
 }
 .bulk-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: .55rem; padding: .8rem; margin: .8rem 0; border-radius: 12px; background: #eef3ef; }
+.plan-check { display: grid; gap: .35rem; }
+.plan-check > details { border-top: 1px solid var(--line); padding: .45rem 0; }
+.plan-check > details summary { display: flex; justify-content: space-between; gap: .6rem; cursor: pointer; }
+.plan-check-total { display: flex; justify-content: space-between; padding-top: .55rem; border-top: 2px solid var(--line); }
 .bulk-toolbar label { display: flex; align-items: center; gap: .35rem; }
 .bulk-category { display: grid; gap: .55rem; padding: .8rem; margin-bottom: 1rem; border: 1px solid var(--line); border-radius: 12px; }
 .bulk-category textarea { width: 100%; resize: vertical; }

@@ -71,9 +71,6 @@ import {
 } from "./accounts";
 import {
   loadLocalIfPresent,
-  loadLocalRecovery,
-  saveLocalRecovery,
-  clearLocalRecovery,
   markLocalPending,
   hasLocalPending,
   clearLocalPending,
@@ -83,7 +80,6 @@ import {
   download,
 } from "./storage";
 import {
-  hasCloudVersion,
   isConfigured,
   loadCloud,
   saveCloud,
@@ -119,6 +115,8 @@ import {
 } from "./pdfPasswords";
 import { readVoiceExpense, VoiceTransaction } from "./voice";
 import { ShoppingListManager } from "./ShoppingListManager";
+import { isCardCommitment, planCheck } from "./planCheck";
+import { mergeFamilySnapshots } from "./familyMerge";
 import {
   loadUiPreferences,
   saveUiPreferences,
@@ -317,12 +315,12 @@ export default function App() {
   const [data, setData] = useState<FamilyData>();
   const dataRef = useRef<FamilyData>();
   const localMutationGeneration = useRef(0);
+  const mutationQueue = useRef<Promise<void>>(Promise.resolve());
   const automaticProvisionChecked = useRef(false);
   const personalCategoryMigrationChecked = useRef(false);
   const refreshGeneration = useRef(0);
   const allowAccountGeneration = useRef(0);
   const connectionGeneration = useRef(0);
-  const [localRecovery, setLocalRecovery] = useState<FamilyData>();
   const [authenticated, setAuthenticated] = useState(false);
   const [currentMember, setCurrentMember] = useState<"Olcino" | "Mari">(
     "Olcino",
@@ -493,6 +491,36 @@ export default function App() {
       window.clearInterval(refreshTimer);
     };
   }, [authenticated, cloud]);
+  // Ao trocar de área ou abrir um bloco, adota a versão compartilhada mais
+  // recente. Uma alteração local em andamento impede que esta leitura a
+  // substitua; ela será salva e conciliada pelo autosave normal.
+  useEffect(() => {
+    if (!authenticated || !dataRef.current) return;
+    let cancelled = false;
+    const refresh = async () => {
+      const mutationAtStart = localMutationGeneration.current;
+      try {
+        setCloud("syncing");
+        const remote = await loadCloud(
+          () => !cancelled && mutationAtStart === localMutationGeneration.current,
+        );
+        if (cancelled || mutationAtStart !== localMutationGeneration.current || !remote) return;
+        skipNextAutosave.current = true;
+        dataRef.current = remote;
+        setData(remote);
+        setCloud("connected");
+      } catch {
+        if (!cancelled) setCloud("local");
+      }
+    };
+    void refresh();
+    const onBlockOpen = () => void refresh();
+    window.addEventListener("casa-em-ordem:block-open", onBlockOpen);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("casa-em-ordem:block-open", onBlockOpen);
+    };
+  }, [authenticated, page]);
   const allowAccount = async (account: { username: string }) => {
     const attempt = ++allowAccountGeneration.current;
     const email = account.username.toLowerCase();
@@ -505,34 +533,15 @@ export default function App() {
       await signOut();
       throw new Error(`O e-mail ${email} não está autorizado.`);
     }
-    const result = await Promise.all([
-      loadCloud(() => attempt === allowAccountGeneration.current),
-      loadLocalIfPresent(),
-      loadLocalRecovery(),
-    ]).catch((error) => {
+    const remote = await loadCloud(
+      () => attempt === allowAccountGeneration.current,
+    ).catch((error) => {
       if (attempt !== allowAccountGeneration.current) return undefined;
       throw error;
     });
-    if (!result || attempt !== allowAccountGeneration.current) return;
-    const [remote, cached, previousRecovery] = result;
+    if (attempt !== allowAccountGeneration.current) return;
     if (!remote)
-      throw new Error(
-        "A base familiar do OneDrive não foi encontrada. O aplicativo não abrirá uma cópia local antiga.",
-      );
-    const hasDivergentCache = Boolean(
-      cached &&
-        !sameFamilyContent(cached, remote),
-    );
-    if (hasDivergentCache) {
-      await saveLocalRecovery(cached!);
-      if (attempt !== allowAccountGeneration.current) return;
-      setLocalRecovery(cached);
-      setMessage(
-        "O OneDrive foi carregado sem sobrescrever alterações da outra pessoa. Uma cópia local divergente foi preservada para download.",
-      );
-    } else {
-      setLocalRecovery(previousRecovery);
-    }
+      throw new Error("A base familiar do OneDrive não foi encontrada. O aplicativo não abrirá uma cópia local antiga.");
     // O OneDrive é a fonte oficial. Cache nunca é enviado automaticamente
     // sobre uma versão remota diferente.
     if (attempt !== allowAccountGeneration.current) return;
@@ -566,10 +575,17 @@ export default function App() {
     }
   };
   const mutate = (fn: (draft: FamilyData) => void) => {
-    localMutationGeneration.current += 1;
-    setData((old) => {
-      if (!old) return old;
-      const draft = structuredClone(old);
+    const apply = async () => {
+      try {
+        setCloud("syncing");
+        const remote = await loadCloud();
+        const current = dataRef.current;
+        const baseline = remote && current
+          ? mergeFamilySnapshots(remote, current)
+          : remote || current;
+        if (!baseline) throw new Error("A base compartilhada não está disponível para registrar a alteração.");
+        localMutationGeneration.current += 1;
+        const draft = structuredClone(baseline);
       fn(draft);
       syncAutomaticProvisions(draft, currentMember);
       syncProvisionPool(draft, currentMember);
@@ -577,8 +593,14 @@ export default function App() {
       if (draft.auditLog.length > 500) draft.auditLog.splice(0, draft.auditLog.length - 500);
       draft.lastSavedAt = now();
       markLocalPending(draft.lastSavedAt);
-      return draft;
-    });
+        dataRef.current = draft;
+        setData(draft);
+      } catch (error) {
+        setCloud("local");
+        setMessage(`Não foi possível atualizar a base antes de salvar: ${(error as Error).message}`);
+      }
+    };
+    mutationQueue.current = mutationQueue.current.then(apply, apply);
   };
   useEffect(() => {
     if (!authenticated || !data || automaticProvisionChecked.current) return;
@@ -623,41 +645,16 @@ export default function App() {
       await signIn();
       await waitForCloudIdle();
       if (attempt !== connectionGeneration.current) return;
-      const currentData = dataRef.current;
-      let preservedLocalCopy = false;
-      if (authenticated && currentData && hasCloudVersion()) {
-        // Usa o eTag da última versão aceita. Se outra pessoa alterou a base,
-        // o OneDrive responderá 412 e nada será sobrescrito.
-        await saveCloud(currentData);
-      } else {
-        const localWasPending = hasLocalPending();
-        const remote = await loadCloud(
-          () => attempt === connectionGeneration.current,
-        );
-        if (attempt !== connectionGeneration.current) return;
-        if (remote) {
-          if (
-            currentData &&
-            localWasPending &&
-            !sameFamilyContent(currentData, remote)
-          ) {
-            await saveLocalRecovery(currentData);
-            if (attempt !== connectionGeneration.current) return;
-            setLocalRecovery(currentData);
-            preservedLocalCopy = true;
-          }
-          skipNextAutosave.current = true;
-          setData(remote);
-        } else if (currentData) await saveCloud(currentData);
-      }
+      const remote = await loadCloud(() => attempt === connectionGeneration.current);
+      if (attempt !== connectionGeneration.current) return;
+      if (!remote) throw new Error("A base familiar do OneDrive não foi encontrada.");
+      skipNextAutosave.current = true;
+      dataRef.current = remote;
+      setData(remote);
       if (attempt !== connectionGeneration.current) return;
       clearLocalPending();
       setCloud("connected");
-      setMessage(
-        preservedLocalCopy
-          ? "OneDrive conectado. A cópia local pendente foi preservada para recuperação."
-          : "OneDrive conectado.",
-      );
+      setMessage("OneDrive conectado.");
     } catch (e) {
       if (attempt !== connectionGeneration.current) return;
       setCloud("local");
@@ -877,54 +874,6 @@ export default function App() {
             </button>
           </div>
         )}
-        {localRecovery && (
-          <section className="recovery-banner" role="alert">
-            <div>
-              <b>Cópia local preservada</b>
-              <p>Este aparelho possui dados diferentes da base compartilhada.</p>
-            </div>
-            <div className="actions">
-              <button onClick={() => exportJson(localRecovery)}>
-                <Download size={17} /> Baixar cópia local
-              </button>
-              <button
-                className="primary"
-                onClick={async () => {
-                  if (!confirm("Usar os dados deste aparelho como a nova base compartilhada? Isso substituirá a base atual do OneDrive para os dois.")) return;
-                  try {
-                    const restored = { ...structuredClone(localRecovery), lastSavedAt: now() };
-                    localMutationGeneration.current += 1;
-                    skipNextAutosave.current = true;
-                    markLocalPending(restored.lastSavedAt);
-                    setCloud("syncing");
-                    await saveCloud(restored);
-                    await saveLocal(restored);
-                    await clearLocalRecovery();
-                    setLocalRecovery(undefined);
-                    setData(restored);
-                    clearLocalPending();
-                    setCloud("connected");
-                    setMessage("A cópia deste aparelho passou a ser a base compartilhada.");
-                  } catch (error) {
-                    setCloud("local");
-                    setMessage(`Não foi possível restaurar esta cópia: ${(error as Error).message}`);
-                  }
-                }}
-              >
-                Usar esta cópia
-              </button>
-              <button
-                onClick={async () => {
-                  await clearLocalRecovery();
-                  setLocalRecovery(undefined);
-                  setMessage("Cópia local divergente descartada.");
-                }}
-              >
-                Descartar cópia
-              </button>
-            </div>
-          </section>
-        )}
         {quickExpenseNotice && (
           <div className="action-toast">
             <span
@@ -1087,6 +1036,9 @@ export default function App() {
                 setMessage={setMessage}
               />
             </Collapsible>
+            <Collapsible id="plan-check-section" title="Checagem do planejamento">
+              <PlanCheck data={data} month={month} hideValues={hideValues} />
+            </Collapsible>
             <Collapsible id="budgets-section" title="Orçamentos">
               <Budgets
                 data={data}
@@ -1185,6 +1137,10 @@ function Collapsible({
       className="collapsible"
       style={{ order: id ? pageOrder[id] : undefined }}
       {...(open ? { open: true } : {})}
+      onToggle={(event) => {
+        if (event.currentTarget.open)
+          window.dispatchEvent(new Event("casa-em-ordem:block-open"));
+      }}
     >
       <summary>
         {title}
@@ -1292,6 +1248,8 @@ function QuickActions({
   const [newCategoryName, setNewCategoryName] = useState("");
   const [newSubcategoryName, setNewSubcategoryName] = useState("");
   const [planCategoryId, setPlanCategoryId] = useState("");
+  const [quickPlanType, setQuickPlanType] = useState<"budget" | "provision" | "goal">("budget");
+  const [quickPlanDirection, setQuickPlanDirection] = useState<"income" | "expense">("expense");
   const [categoryTouched, setCategoryTouched] = useState(false);
   const [description, setDescription] = useState("");
   const [accountId, setAccountId] = useState(
@@ -1515,7 +1473,7 @@ function QuickActions({
       let categoryId = selectedCategoryId;
       if (selectedCategoryId === "__new__") {
         const existing = family.categories.find((category) => normalize(category.name) === normalize(newCategoryName));
-        const category = existing || { ...audit(currentMember), name: newCategoryName.trim(), nature: "expense" as const, subcategories: [] };
+        const category = existing || { ...audit(currentMember), name: newCategoryName.trim(), nature: (type === "budget" && quickPlanDirection === "income" ? "income" : "expense") as Category["nature"], subcategories: [] };
         if (!existing) family.categories.push(category);
         categoryId = category.id;
       }
@@ -1523,7 +1481,7 @@ function QuickActions({
       if (subcategory && !category.subcategories.some((item) => normalize(item) === normalize(subcategory))) category.subcategories.push(subcategory);
       if (type === "goal") family.goals.push({ ...audit(currentMember), name, kind: "desire", target: amount, startDate, deadline: endDate, categoryId, subcategory, priority: family.goals.length + 1, minimum: 0, emergency: false, active: true, movements: [] });
       else {
-        family.budgets.push({ ...audit(currentMember), amount, month: startDate.slice(0, 7), startMonth: startDate.slice(0, 7), endMonth: endDate ? endDate.slice(0, 7) : undefined, kind: type, categoryId, subcategory, reason: name });
+        family.budgets.push({ ...audit(currentMember), amount, month: startDate.slice(0, 7), startMonth: startDate.slice(0, 7), endMonth: endDate ? endDate.slice(0, 7) : undefined, kind: type, direction: type === "budget" ? quickPlanDirection : undefined, categoryId, subcategory, reason: name });
         syncProvisionPool(family, currentMember);
       }
     });
@@ -1691,7 +1649,7 @@ function QuickActions({
                                       : mode === "shopping"
                                         ? "Adicionar à lista de compras"
                                         : mode === "category"
-                                          ? "Categoria e subcategoria"
+                                          ? "Categoria e descrição"
                                           : mode === "plan"
                                             ? "Orçamento ou meta"
                                             : mode === "account"
@@ -1755,7 +1713,7 @@ function QuickActions({
             ) : mode === "registration" ? (
               <div className="quick-action-grid">
                 <button onClick={() => setMode("category")}>
-                  <Tags size={22} /><span><b>Categoria/Subcategoria</b><small>Classificação de receitas e despesas</small></span>
+                  <Tags size={22} /><span><b>Categoria/Descrição</b><small>Classificação de receitas e despesas</small></span>
                 </button>
                 <button onClick={() => setMode("plan")}>
                   <Target size={22} /><span><b>Orçamento e meta</b><small>Planejamento e objetivos</small></span>
@@ -1813,7 +1771,7 @@ function QuickActions({
                 <label>Frequência<select name="repeat" defaultValue="monthly"><option value="none">Único</option><option value="monthly">Mensal</option><option value="quarterly">Trimestral</option><option value="semiannual">Semestral</option><option value="yearly">Anual</option></select></label>
                 <label>Tipo<select name="kind" defaultValue="Manual"><option>Manual</option><option>Débito automático</option><option>Recorrência no cartão</option><option>Assinatura</option><option>Parcela</option><option>Variável</option><option>Eventual</option></select></label>
                 <label>Conta ou cartão<select name="accountId"><option value="">Não definido</option>{activeAccounts.map(account=><option key={account.id} value={account.id}>{accountDisplayName(account)}</option>)}</select></label>
-                <label>Subcategoria<input name="subcategory" placeholder="Opcional"/></label>
+                <label>Descrição<input name="subcategory" placeholder="Opcional"/></label>
                 <label>Tolerância<MoneyInput name="tolerance" placeholder="R$ 0,00"/></label>
                 <label>Texto para conciliação (opcional)<input name="pattern" placeholder="Ex.: nome que vem na fatura"/></label>
                 <button className="primary quick-expense-save">Salvar pagamento</button>
@@ -1840,19 +1798,20 @@ function QuickActions({
             ) : mode === "category" ? (
               <form className="quick-expense-form" onSubmit={saveCategoryInline}>
                 <label className="quick-expense-value">Categoria<input name="name" required autoFocus placeholder="Ex.: Alimentação"/></label>
-                <label>Subcategoria<input name="subcategory" placeholder="Ex.: Supermercado"/></label>
+                <label>Descrição<input name="subcategory" placeholder="Ex.: Supermercado"/></label>
                 <label>Tipo<select name="nature"><option value="expense">Despesa</option><option value="income">Receita</option><option value="transfer">Transferência</option><option value="goal">Meta</option></select></label>
                 <button className="primary quick-expense-save">Salvar categoria</button>
               </form>
             ) : mode === "plan" ? (
               <form className="quick-expense-form" onSubmit={savePlanInline}>
-                <label>Tipo<select name="planType"><option value="budget">Orçamento mensal</option><option value="provision">Provisão mensal</option><option value="goal">Meta</option></select></label>
+                <label>Tipo<select name="planType" value={quickPlanType} onChange={(event)=>{ setQuickPlanType(event.target.value as "budget" | "provision" | "goal"); setPlanCategoryId(""); }}><option value="budget">Orçamento mensal</option><option value="provision">Provisão mensal</option><option value="goal">Meta</option></select></label>
+                {quickPlanType === "budget" && <label>Natureza<select name="direction" value={quickPlanDirection} onChange={(event)=>{ setQuickPlanDirection(event.target.value as "income" | "expense"); setPlanCategoryId(""); }}><option value="expense">Saída</option><option value="income">Entrada</option></select></label>}
                 <label className="quick-expense-value">Nome<input name="name" required autoFocus placeholder="Ex.: Reforma ou Alimentação"/></label>
                 <label>Valor<MoneyInput name="amount" required placeholder="R$ 0,00"/></label>
-                <label>Categoria<select name="categoryId" required value={planCategoryId} onChange={(event)=>setPlanCategoryId(event.target.value)}><option value="">Selecione</option>{data.categories.filter(category=>category.nature==="expense").map(category=><option key={category.id} value={category.id}>{category.name}</option>)}<option value="__new__">Criar categoria agora</option></select></label>
+                <label>Categoria<select name="categoryId" required value={planCategoryId} onChange={(event)=>setPlanCategoryId(event.target.value)}><option value="">Selecione</option>{data.categories.filter(category=>category.nature === (quickPlanType === "budget" && quickPlanDirection === "income" ? "income" : "expense")).map(category=><option key={category.id} value={category.id}>{category.name}</option>)}<option value="__new__">Criar categoria agora</option></select></label>
                 {planCategoryId === "__new__" && <label>Nova categoria<input required value={newCategoryName} placeholder="Ex.: Alimentação" onChange={(event)=>setNewCategoryName(event.target.value)}/></label>}
-                <label>Subcategoria<input name="subcategory" placeholder="Opcional"/></label>
-                <label>Nova subcategoria<input value={newSubcategoryName} placeholder="Criar junto" onChange={(event)=>setNewSubcategoryName(event.target.value)}/></label>
+                <label>Descrição<input name="subcategory" placeholder="Opcional"/></label>
+                <label>Nova descrição<input value={newSubcategoryName} placeholder="Criar junto" onChange={(event)=>setNewSubcategoryName(event.target.value)}/></label>
                 <label>Data de início<input name="startDate" type="date" required defaultValue={dateOnly(new Date())}/></label>
                 <label>Data de fim<input name="endDate" type="date"/></label>
                 <button className="primary quick-expense-save">Salvar planejamento</button>
@@ -1937,12 +1896,12 @@ function QuickActions({
                 </label>
                 {categoryId === "__new__" && <label>Nova categoria<input required value={newCategoryName} placeholder="Ex.: Alimentação" onChange={(event) => setNewCategoryName(event.target.value)} /></label>}
                 <label>
-                  Subcategoria
+                  Descrição
                   <select
                     value={subcategory}
                     onChange={(event) => setSubcategory(event.target.value)}
                   >
-                    <option value="">Sem subcategoria</option>
+                    <option value="">Sem descrição</option>
                     {data.categories
                       .find((item) => item.id === categoryId)
                       ?.subcategories.map((item) => (
@@ -1950,7 +1909,7 @@ function QuickActions({
                       ))}
                   </select>
                 </label>
-                <label>Nova subcategoria<input value={newSubcategoryName} placeholder="Criar junto" onChange={(event) => setNewSubcategoryName(event.target.value)} /></label>
+                <label>Nova descrição<input value={newSubcategoryName} placeholder="Criar junto" onChange={(event) => setNewSubcategoryName(event.target.value)} /></label>
                 <label>
                   Conta ou cartão
                   <select
@@ -2866,8 +2825,7 @@ function BudgetBars({
     })
     .filter((x) => x.planned || x.tracked || x.scheduled)
     // No painel a referência principal é o limite orçado (valor após a barra).
-    .sort((a, b) => b.planned - a.planned || b.tracked - a.tracked || a.name.localeCompare(b.name, "pt-BR"))
-    .slice(0, 8);
+    .sort((a, b) => b.planned - a.planned || b.tracked - a.tracked || a.name.localeCompare(b.name, "pt-BR"));
   return rows.length ? (
     <div className="bars">
       {rows.map((r) => (
@@ -2887,10 +2845,10 @@ function BudgetBars({
           </div>
           </summary>
           <div className="budget-detail-content">
-            <div className="budget-detail-section planned-section"><b>Planejado</b>{r.plannedItems.map((item) => <Row key={item.id} a={item.reason || "Orçamento"} b={item.subcategory || "Categoria"} c={<SensitiveMoney value={item.amount} hidden={hideValues} />} />)}{!r.plannedItems.length && <small>Nenhum orçamento específico nesta categoria.</small>}</div>
-            <div className="budget-detail-section tracked-section"><b>Acompanhado no mês</b>{r.entries.map((entry) => <Row key={entry.id} a={entry.description} b={`${sourceLabel[entry.source]} · ${mode === "registered" ? "Realizado no app" : entry.state === "estimated" ? "Estimado" : "Realizado"}`} c={<SensitiveMoney value={entry.amount} hidden={hideValues} />} />)}{!r.entries.length && <small>Nenhum lançamento considerado ainda.</small>}</div>
+            <div className="budget-detail-section tracked-section"><b>Gastos registrados</b>{r.entries.slice().sort((a, b) => a.date.localeCompare(b.date) || a.description.localeCompare(b.description, "pt-BR")).map((entry) => <Row key={entry.id} a={entry.description} b={`${entry.date.slice(8, 10)}/${entry.date.slice(5, 7)} · ${sourceLabel[entry.source]} · ${mode === "registered" ? "Realizado no app" : "Realizado"}`} c={<SensitiveMoney value={entry.amount} hidden={hideValues} />} />)}{!r.entries.length && <small>Nenhum gasto registrado ainda.</small>}</div>
+            <div className="budget-detail-section planned-section"><b>Planejado</b>{r.plannedItems.map((item) => <Row key={item.id} a={item.reason || "Orçamento"} b={item.subcategory || "Descrição"} c={<SensitiveMoney value={item.amount} hidden={hideValues} />} />)}{!r.plannedItems.length && <small>Nenhum orçamento específico nesta categoria.</small>}</div>
             {r.scheduledEntries.length > 0 && <div className="budget-detail-section scheduled-section"><b>Pagamentos agendados</b>{r.scheduledEntries.map((entry) => <Row key={entry.id} a={entry.description} b="Compromisso a pagar" c={<SensitiveMoney value={entry.amount} hidden={hideValues} />} />)}</div>}
-            {r.planned > r.committed && <><b>Espaço restante</b><Row a="Após registros e pagamentos agendados" b="Não é gasto realizado" c={<SensitiveMoney value={r.planned - r.committed} hidden={hideValues} />} /></>}
+            <div className="budget-detail-section remaining-section"><b>Restante</b><Row a="Depois dos registros e pagamentos agendados" b="Valor ainda disponível no orçamento" c={<SensitiveMoney value={Math.max(0, r.planned - r.committed)} hidden={hideValues} />} /></div>
           </div>
         </details>
       ))}
@@ -3902,7 +3860,7 @@ function VoiceExpense({
             <option value="aporte">Aporte</option>
           </select>
           <select value={draft.categoriaSugerida||""} onChange={e=>setDraft({...draft,categoriaSugerida:e.target.value,subcategoriaSugerida:data.categories.find(c=>c.name===e.target.value)?.subcategories[0]})}><option value="">Selecione a categoria</option>{data.categories.map(category=><option key={category.id} value={category.name}>{category.name}</option>)}</select>
-          <select value={draft.subcategoriaSugerida||""} onChange={e=>setDraft({...draft,subcategoriaSugerida:e.target.value})}><option value="">Selecione a subcategoria</option>{data.categories.find(category=>category.name===draft.categoriaSugerida)?.subcategories.map(subcategory=><option key={subcategory}>{subcategory}</option>)}</select>
+          <select value={draft.subcategoriaSugerida||""} onChange={e=>setDraft({...draft,subcategoriaSugerida:e.target.value})}><option value="">Selecione a descrição</option>{data.categories.find(category=>category.name===draft.categoriaSugerida)?.subcategories.map(subcategory=><option key={subcategory}>{subcategory}</option>)}</select>
           <select value={draft.contaOuCartaoSugerido||""} onChange={e=>setDraft({...draft,contaOuCartaoSugerido:e.target.value})}><option value="">Selecione a conta ou cartão</option>{data.accounts.filter(account=>account.active).map(account=><option key={account.id} value={account.name}>{accountDisplayName(account)}</option>)}</select>
           <button className="primary" onClick={save}>
             Confirmar estimativa
@@ -4352,7 +4310,7 @@ function Transactions({
                 })
               }
             >
-              <option value="">Subcategoria</option>
+              <option value="">Descrição</option>
               {data.categories
                 .find((c) => c.id === t.categoryId)
                 ?.subcategories.map((s) => (
@@ -4462,6 +4420,22 @@ function useHoldToSort(
   return { draggingId, start, drag, end: finish };
 }
 
+function PlanCheck({ data, month, hideValues }: { data: FamilyData; month: string; hideValues: boolean }) {
+  const check = planCheck(data, month);
+  const detail = (items: Array<{ id: string; reason?: string; name?: string; amount?: number; planned?: number; minimum?: number }>) =>
+    items.map((item) => <Row key={item.id} a={item.reason || item.name || "Planejamento"} b="" c={<SensitiveMoney value={item.amount ?? item.planned ?? item.minimum ?? 0} hidden={hideValues} />} />);
+  return <section className={`panel plan-check ${check.margin < 0 ? "bad" : "good"}`}>
+    <h2>Checagem do planejamento</h2>
+    <p className="muted">Verifique se o plano mensal cabe nas entradas previstas.</p>
+    <details><summary>Entradas previstas <strong><SensitiveMoney value={check.income} hidden={hideValues} /></strong></summary>{detail(check.incomeItems)}</details>
+    <details><summary>Orçamentos de saída <strong><SensitiveMoney value={check.manualBudget} hidden={hideValues} /></strong></summary>{detail(check.expenseItems)}</details>
+    <details><summary>Pagamentos mensais <strong><SensitiveMoney value={check.monthlyPayments} hidden={hideValues} /></strong></summary>{detail(check.payments)}</details>
+    <details><summary>Provisões mensais <strong><SensitiveMoney value={check.provisions} hidden={hideValues} /></strong></summary>{detail(check.provisionItems)}</details>
+    <details><summary>Aportes em metas <strong><SensitiveMoney value={check.goalContributions} hidden={hideValues} /></strong></summary>{detail(check.goalItems)}</details>
+    <div className="plan-check-total"><b>{check.margin < 0 ? "Insuficiência" : "Margem livre"}</b><strong><SensitiveMoney value={check.margin} hidden={hideValues} /></strong></div>
+  </section>;
+}
+
 function Budgets({
   data,
   month,
@@ -4496,6 +4470,8 @@ function Budgets({
         amount: 0,
       };
       item.amount = amount;
+      item.kind = kind;
+      item.direction = kind === "budget" ? (String(form.get("direction") || item.direction || "expense") as "income" | "expense") : undefined;
       item.month = startMonth;
       item.startMonth = startMonth;
       item.endMonth = endMonth || undefined;
@@ -4565,6 +4541,7 @@ function Budgets({
         <optgroup label="Contas e cartões">{data.accounts.map((account) => <option key={account.id} value={`account:${account.id}`}>{accountDisplayName(account)}</option>)}</optgroup>
       </select>
       <MoneyInput name="amount" required placeholder="Valor mensal" defaultValue={item.amount} />
+      {kind === "budget" && <label>Natureza<select name="direction" defaultValue={item.direction || "expense"}><option value="expense">Saída</option><option value="income">Entrada</option></select></label>}
       <label>Início<input name="startMonth" required type="month" defaultValue={item.startMonth || item.month || month} /></label>
       <label>Fim opcional<input name="endMonth" type="month" defaultValue={item.endMonth || ""} /></label>
       <input name="reason" placeholder="Observação" defaultValue={item.reason} />
@@ -4625,6 +4602,8 @@ function UnifiedPlanForm({
   onDone: () => void;
 }) {
   const [categoryId, setCategoryId] = useState("");
+  const [planType, setPlanType] = useState<"budget" | "provision" | "goal">("budget");
+  const [direction, setDirection] = useState<"income" | "expense">("expense");
   const [newCategoryName, setNewCategoryName] = useState("");
   const [newSubcategory, setNewSubcategory] = useState("");
   const category = data.categories.find((item) => item.id === categoryId);
@@ -4634,6 +4613,7 @@ function UnifiedPlanForm({
     const name = String(form.get("name") || "").trim();
     const amount = parseCurrency(form.get("amount"));
     const type = String(form.get("type") || "budget") as "budget" | "provision" | "goal";
+    const planDirection = String(form.get("direction") || "expense") as "income" | "expense";
     const startDate = String(form.get("startDate") || "");
     const endDate = String(form.get("endDate") || "");
     const selectedSubcategory = String(form.get("subcategory") || "");
@@ -4668,7 +4648,7 @@ function UnifiedPlanForm({
         ...audit(), reason: name, amount,
         month: startDate.slice(0, 7), startMonth: startDate.slice(0, 7),
         endMonth: endDate ? endDate.slice(0, 7) : undefined,
-        kind: type, categoryId: resolvedCategoryId, subcategory,
+        kind: type, direction: type === "budget" ? planDirection : undefined, categoryId: resolvedCategoryId, subcategory,
         provisionSource: type === "provision" ? "manual" : undefined,
       });
       syncProvisionPool(draft);
@@ -4678,16 +4658,17 @@ function UnifiedPlanForm({
   return (
     <section className="panel">
       <h2>Novo planejamento</h2>
-      <form className="budget-form" onSubmit={submit}>
+      <form className="budget-form" onSubmit={submit} onChangeCapture={(event) => { const target = event.target as HTMLSelectElement; if (target.name === "type") { setPlanType(target.value as "budget" | "provision" | "goal"); setCategoryId(""); } }}>
         <label>Nome<input name="name" required autoFocus placeholder="Nome" /></label>
         <label>Valor<MoneyInput name="amount" required placeholder="R$ 0,00" /></label>
-        <label>Categoria<select name="categoryId" value={categoryId} required onChange={(event) => setCategoryId(event.target.value)}><option value="">Selecione</option>{data.categories.filter((item) => item.nature === "expense").map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}<option value="__new__">Criar categoria agora</option></select></label>
+        <label>Categoria<select name="categoryId" value={categoryId} required onChange={(event) => setCategoryId(event.target.value)}><option value="">Selecione</option>{data.categories.filter((item) => item.nature === (planType === "budget" && direction === "income" ? "income" : "expense")).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}<option value="__new__">Criar categoria agora</option></select></label>
         {categoryId === "__new__" && <label>Nova categoria<input value={newCategoryName} required autoFocus placeholder="Ex.: Alimentação" onChange={(event) => setNewCategoryName(event.target.value)} /></label>}
-        <label>Subcategoria<select name="subcategory"><option value="">Sem subcategoria</option>{category?.subcategories.map((item) => <option key={item}>{item}</option>)}</select></label>
-        <label>Nova subcategoria<input value={newSubcategory} placeholder="Criar junto com o planejamento" onChange={(event) => setNewSubcategory(event.target.value)} /></label>
+        <label>Descrição<select name="subcategory"><option value="">Sem descrição</option>{category?.subcategories.map((item) => <option key={item}>{item}</option>)}</select></label>
+        <label>Nova descrição<input value={newSubcategory} placeholder="Criar junto com o planejamento" onChange={(event) => setNewSubcategory(event.target.value)} /></label>
         <label>Data de início<input name="startDate" type="date" required defaultValue={dateOnly(new Date())} /></label>
         <label>Data de fim<input name="endDate" type="date" /></label>
         <label>Tipo<select name="type" defaultValue="budget"><option value="budget">Orçamento mensal</option><option value="provision">Provisão mensal</option><option value="goal">Meta</option></select></label>
+        {planType === "budget" && <label>Natureza<select name="direction" value={direction} onChange={(event) => { setDirection(event.target.value as "income" | "expense"); setCategoryId(""); }}><option value="expense">Saída</option><option value="income">Entrada</option></select></label>}
         <button className="primary" type="submit">Criar</button>
       </form>
       <p className="muted">Sem data de fim, orçamento e provisão se repetem indefinidamente.</p>
@@ -4835,7 +4816,7 @@ function Payments({
             ["dueDay", "Dia do pagamento (ex.: 10)", "number"],
             ["tolerance", "Tolerância", "number"],
             ["pattern", "Texto para conciliação (opcional)", "text"],
-            ["subcategory", "Subcategoria", "text"],
+            ["subcategory", "Descrição", "text"],
           ]}
           extras={
             <>
@@ -4864,7 +4845,7 @@ function Payments({
       <div className="payment-grid payment-grid-grouped">
         {data.obligations
           .slice()
-          .filter(o=>!["Paga","Confirmada","Dispensada"].includes(o.status))
+          .filter(o=>!["Paga","Confirmada","Dispensada"].includes(o.status) && !isCardCommitment(o))
           .sort((a, b) => nextDueDate(a).localeCompare(nextDueDate(b)))
           .map((o, index, items) => {
             const group = paymentGroup(o);
@@ -4915,7 +4896,7 @@ function Payments({
                     {o.recurrence !== "none" && <label>Aplicar esta edição<select name="applyTo" defaultValue="future"><option value="single">Somente este pagamento</option><option value="future">Este e os próximos</option></select></label>}
                     <select name="accountId" defaultValue={o.accountId || ""}><option value="">Conta do pagamento</option>{data.accounts.filter(account=>account.active).map(account=><option key={account.id} value={account.id}>{accountDisplayName(account)}</option>)}</select>
                     <select name="categoryId" defaultValue={o.categoryId || ""}><option value="">Categoria da despesa</option>{data.categories.filter(category=>category.nature==="expense").map(category=><option key={category.id} value={category.id}>{category.name}</option>)}</select>
-                    <input name="subcategory" defaultValue={o.subcategory || ""} placeholder="Subcategoria" />
+                    <input name="subcategory" defaultValue={o.subcategory || ""} placeholder="Descrição" />
                     <label>Texto para conciliação (opcional)<input name="pattern" defaultValue={o.pattern || ""} placeholder="Ex.: nome que vem na fatura" /></label>
                     <small className="reconciliation-help">Opcional: identifica o lançamento correspondente na fatura/extrato para conciliar este pagamento automaticamente.</small>
                     <div className="actions"><button className="primary" type="submit">Salvar alterações</button><button type="button" onClick={()=>setEditingId(undefined)}>Cancelar</button></div>
@@ -4926,6 +4907,7 @@ function Payments({
           })}
       </div>
       {deleting && <div className="choice-dialog" role="dialog" aria-modal="true" aria-label="Excluir pagamento recorrente"><div><h3>Excluir {deleting.name}</h3><p>Escolha se vale somente para o próximo pagamento ou para toda a recorrência.</p><div className="actions"><button onClick={deleteOccurrence}>Apenas esta ocorrência</button><button className="danger-button" onClick={deleteRecurring}>Esta e próximas</button><button onClick={()=>setDeleting(undefined)}>Cancelar</button></div></div></div>}
+      <details className="completed-block"><summary>Cartões: recorrências e parcelas ({data.obligations.filter(isCardCommitment).length})</summary><p className="muted">Acompanhe aqui o previsto no cartão. Estas cobranças não exigem uma ação de pagamento nesta central.</p>{data.obligations.filter(isCardCommitment).slice().sort((a,b)=>nextDueDate(a).localeCompare(nextDueDate(b))).map(o=><div className="confirmed-row" key={o.id}><div><b>{o.name}</b><small>{o.kind} · próximo: {nextDueDate(o)} · <SensitiveMoney value={o.planned} hidden={hideValues} /></small></div></div>)}</details>
       <details className="completed-block"><summary>Pagamentos confirmados ({data.obligations.filter(o=>["Paga","Confirmada","Dispensada"].includes(o.status)).length})</summary>{data.obligations.filter(o=>["Paga","Confirmada","Dispensada"].includes(o.status)).sort((a,b)=>b.dueDate.localeCompare(a.dueDate)).map(o=><div className="confirmed-row" key={o.id}><div><b>{o.name}</b><small>{o.dueDate} · <SensitiveMoney value={o.paidAmount??o.planned} hidden={hideValues} /> · {o.status}</small></div><button onClick={()=>mutate(d=>{const item=d.obligations.find(x=>x.id===o.id);if(item){item.status="A pagar";item.paidAt=undefined;item.paidAmount=undefined;item.reconciledTransactionId=undefined;d.transactions=d.transactions.filter(transaction=>transaction.obligationId!==o.id||!transaction.provisional);for(const transaction of d.transactions)if(transaction.obligationId===o.id)transaction.obligationId=undefined}})}>Desconfirmar</button></div>)}</details>
       {!data.obligations.length && <Empty />}
     </section>
@@ -5725,7 +5707,7 @@ function CategoryEditor({
       });
   };
   const addSub = (id: string) => {
-    const name = prompt("Nome da nova subcategoria:");
+    const name = prompt("Nome da nova descrição:");
     if (name)
       mutate((d) => {
         const c = d.categories.find((x) => x.id === id)!;
@@ -5733,7 +5715,7 @@ function CategoryEditor({
       });
   };
   const renameSub = (id: string, old: string) => {
-    const name = prompt("Novo nome da subcategoria:", old);
+    const name = prompt("Novo nome da descrição:", old);
     if (name)
       mutate((d) => {
         const c = d.categories.find((x) => x.id === id)!;
@@ -5774,8 +5756,8 @@ function CategoryEditor({
         (t) => t.categoryId === id && t.subcategory === sub,
       )
     )
-      return alert("Esta subcategoria está em uso e não pode ser excluída.");
-    if (confirm(`Excluir a subcategoria ${sub}?`))
+      return alert("Esta descrição está em uso e não pode ser excluída.");
+    if (confirm(`Excluir a descrição ${sub}?`))
       mutate((d) => {
         const c = d.categories.find((x) => x.id === id)!;
         c.subcategories = c.subcategories.filter((s) => s !== sub);
@@ -5799,7 +5781,7 @@ function CategoryEditor({
         <details className={`category-details sortable-item${categorySort.draggingId === c.id ? " is-dragging" : ""}`} key={c.id} data-sort-category data-sort-id={c.id}>
           <summary onContextMenu={(event) => event.preventDefault()} onPointerDown={(event) => categorySort.start(event, c.id)} onPointerMove={categorySort.drag} onPointerUp={categorySort.end} onPointerCancel={categorySort.end}><b>{c.name}</b><span className="actions category-actions" onPointerDown={(event)=>event.stopPropagation()} onClick={(event)=>event.stopPropagation()}>
             <button className="icon-button" title="Renomear categoria" aria-label={`Renomear ${c.name}`} onClick={() => rename(c.id, c.name)}><Pencil size={16}/></button>
-            <button className="icon-button" title="Adicionar subcategoria" aria-label={`Adicionar subcategoria a ${c.name}`} onClick={() => addSub(c.id)}><Plus size={15}/></button>
+            <button className="icon-button" title="Adicionar descrição" aria-label={`Adicionar descrição a ${c.name}`} onClick={() => addSub(c.id)}><Plus size={15}/></button>
             <button
               className="danger-button icon-button"
               title="Excluir categoria"

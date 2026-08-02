@@ -83,6 +83,8 @@ export interface Budget extends Audit {
   endMonth?: string;
   /** Orçamento normal ou provisão mensal para a reserva unificada. */
   kind?: "budget" | "provision";
+  /** Entrada prevista ou limite de saída; bases anteriores são saídas. */
+  direction?: "income" | "expense";
   subcategory?: string;
   categoryId?: string;
   accountId?: string;
