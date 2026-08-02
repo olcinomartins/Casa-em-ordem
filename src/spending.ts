@@ -12,6 +12,8 @@ export type SpendingEntry = {
   id: string;
   date: string;
   description: string;
+  /** Descrição financeira escolhida pelo casal (antiga subcategoria). */
+  detail?: string;
   amount: number;
   categoryId?: string;
   state: "realized" | "estimated";
@@ -165,6 +167,7 @@ export function monthlySpending(
       id: transaction.id,
       date: transactionDate(transaction, view),
       description: transaction.description,
+      detail: transaction.subcategory || transaction.description,
       amount: Math.abs(realized(transaction, month, view)),
       categoryId: transaction.categoryId || otherCategory,
       state: "realized" as const,
@@ -214,6 +217,7 @@ export function monthlySpending(
       amount: receipt.total,
       date: receipt.date,
       description: receipt.store,
+      detail: receipt.store,
     };
     if (legacyActualMatch("receipt", matchable, 7, 5)) continue;
     entries.push({
@@ -251,6 +255,7 @@ export function monthlySpending(
       id: transaction.id,
       date,
       description: transaction.description,
+      detail: transaction.subcategory || transaction.description,
       amount: Math.abs(transaction.amount),
       categoryId: transaction.categoryId || otherCategory,
       state: "estimated",
@@ -272,10 +277,10 @@ export function monthlySpending(
         // Pagamento já concluído em outro mês: a recorrência volta a ser previsão neste mês.
         if (!occurrenceDate || amount <= 0) continue;
         else {
-          entries.push({ id: `obligation:${obligation.id}:${occurrenceDate}`, date: occurrenceDate, description: obligation.name, amount: Math.abs(amount), categoryId: categoryForObligation(data, obligation), state: "estimated", source: "payment" });
+          entries.push({ id: `obligation:${obligation.id}:${occurrenceDate}`, date: occurrenceDate, description: obligation.name, detail: obligation.subcategory || obligation.name, amount: Math.abs(amount), categoryId: categoryForObligation(data, obligation), state: "estimated", source: "payment" });
           continue;
         }
-      entries.push({ id: `paid:${obligation.id}`, date: obligation.paidAt || obligation.dueDate, description: obligation.name, amount: Math.abs(amount), categoryId: categoryForObligation(data, obligation), state: "realized", source: "payment" });
+      entries.push({ id: `paid:${obligation.id}`, date: obligation.paidAt || obligation.dueDate, description: obligation.name, detail: obligation.subcategory || obligation.name, amount: Math.abs(amount), categoryId: categoryForObligation(data, obligation), state: "realized", source: "payment" });
       continue;
     }
 
@@ -295,6 +300,7 @@ export function monthlySpending(
       id: `obligation:${obligation.id}:${occurrenceDate}`,
       date: occurrenceDate,
       description: obligation.name,
+      detail: obligation.subcategory || obligation.name,
       amount: Math.abs(amount),
       categoryId: categoryForObligation(data, obligation),
       state: "estimated",

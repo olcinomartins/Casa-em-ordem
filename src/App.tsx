@@ -2844,9 +2844,6 @@ function BudgetBars({
   const scheduledPayments = allSpending.filter(
     (entry) => entry.source === "payment" && entry.state === "estimated",
   );
-  const sourceLabel: Record<(typeof spending)[number]["source"], string> = {
-    transaction: "Lançamento confirmado", voice: "Lançamento por voz", manual: "Lançamento manual", receipt: "Nota de supermercado", payment: "Pagamento confirmado",
-  };
   const rows = data.categories
     .filter((c) => c.nature === "expense")
     .map((c) => {
@@ -2885,7 +2882,7 @@ function BudgetBars({
           </div>
           </summary>
           <div className="budget-detail-content">
-            <div className="budget-detail-section tracked-section"><b>Gastos registrados</b>{r.entries.slice().sort((a, b) => a.date.localeCompare(b.date) || a.description.localeCompare(b.description, "pt-BR")).map((entry) => <Row key={entry.id} a={entry.description} b={`${entry.date.slice(8, 10)}/${entry.date.slice(5, 7)} · ${sourceLabel[entry.source]} · ${mode === "registered" ? "Realizado no app" : "Realizado"}`} c={<SensitiveMoney value={entry.amount} hidden={hideValues} />} />)}{!r.entries.length && <small>Nenhum gasto registrado ainda.</small>}</div>
+            <div className="budget-detail-section tracked-section"><b>Gastos registrados</b>{r.entries.slice().sort((a, b) => a.date.localeCompare(b.date) || (a.detail || a.description).localeCompare(b.detail || b.description, "pt-BR")).map((entry) => <Row key={entry.id} a={entry.detail || entry.description} b={`${entry.date.slice(8, 10)}/${entry.date.slice(5, 7)}`} c={<SensitiveMoney value={entry.amount} hidden={hideValues} />} />)}{!r.entries.length && <small>Nenhum gasto registrado ainda.</small>}</div>
             <div className="budget-detail-section planned-section"><b>Planejado</b>{r.plannedItems.map((item) => <Row key={item.id} a={item.reason || "Orçamento"} b={item.subcategory || "Descrição"} c={<SensitiveMoney value={item.amount} hidden={hideValues} />} />)}{!r.plannedItems.length && <small>Nenhum orçamento específico nesta categoria.</small>}</div>
             {r.scheduledEntries.length > 0 && <div className="budget-detail-section scheduled-section"><b>Pagamentos agendados</b>{r.scheduledEntries.map((entry) => <Row key={entry.id} a={entry.description} b="Compromisso a pagar" c={<SensitiveMoney value={entry.amount} hidden={hideValues} />} />)}</div>}
             <div className="budget-detail-section remaining-section"><b>Restante</b><Row a="Depois dos registros e pagamentos agendados" b="Valor ainda disponível no orçamento" c={<SensitiveMoney value={Math.max(0, r.planned - r.committed)} hidden={hideValues} />} /></div>
