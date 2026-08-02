@@ -22,6 +22,7 @@ const compact = (value: string) => normalize(value).replace(/\s/g, "");
 const legacyPaymentBudget = (budget: Budget, payments: Obligation[]) =>
   payments.some(
     (payment) => {
+      if (budget.paymentId === payment.id) return true;
       const sameCategory = Boolean(payment.categoryId && budget.categoryId) && payment.categoryId === budget.categoryId;
       const paymentName = compact(payment.name);
       const budgetName = compact(budget.reason || "");

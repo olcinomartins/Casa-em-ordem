@@ -48,4 +48,16 @@ describe("planCheck", () => {
       margin: -1_800,
     });
   });
+
+  it("usa o vínculo do pagamento mesmo se a descrição for editada depois", () => {
+    const family = data();
+    const paymentId = "pagamento-aluguel";
+    family.budgets = [
+      { ...audit(), month: "2026-08", kind: "budget", direction: "expense", categoryId: "moradia", reason: "Aluguel revisado", amount: 2_000, paymentId },
+    ];
+    family.obligations = [
+      { ...audit(), id: paymentId, name: "Aluguel", kind: "Manual", planned: 2_000, dueDate: "2026-08-05", recurrence: "monthly", tolerance: 0, status: "A pagar", categoryId: "moradia" },
+    ];
+    expect(planCheck(family, "2026-08").manualBudget).toBe(0);
+  });
 });

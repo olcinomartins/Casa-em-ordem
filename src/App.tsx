@@ -273,6 +273,44 @@ const syncAutomaticProvisions = (data: FamilyData, by: Member = "Ambos") => {
     else data.budgets.push({ ...audit(by), ...values });
   }
 };
+/** Mantém um único orçamento de saída para cada pagamento mensal cadastrado. */
+const syncMonthlyPaymentBudgets = (data: FamilyData, by: Member = "Ambos") => {
+  const payments = data.obligations.filter(
+    (item) => item.recurrence === "monthly" && item.status !== "Dispensada",
+  );
+  const paymentIds = new Set(payments.map((item) => item.id));
+  data.budgets = data.budgets.filter(
+    (item) => !item.paymentId || paymentIds.has(item.paymentId),
+  );
+  const compact = (value: string) => normalize(value).replace(/\s/g, "");
+  for (const payment of payments) {
+    const existing = data.budgets.find((item) => item.paymentId === payment.id)
+      || data.budgets.find((item) => {
+        if (item.kind === "provision" || item.direction === "income") return false;
+        if (!item.categoryId || item.categoryId !== payment.categoryId) return false;
+        const budgetName = compact(item.reason || item.subcategory || "");
+        const paymentName = compact(payment.name);
+        const sameName = Boolean(budgetName && paymentName) && (budgetName === paymentName || budgetName.startsWith(paymentName) || paymentName.startsWith(budgetName));
+        const sameDescription = Boolean(item.subcategory && payment.subcategory) && compact(item.subcategory || "") === compact(payment.subcategory || "");
+        return sameName || sameDescription;
+      });
+    const values = {
+      kind: "budget" as const,
+      direction: "expense" as const,
+      month: "",
+      startMonth: undefined,
+      endMonth: undefined,
+      amount: payment.planned,
+      reason: payment.name,
+      categoryId: payment.categoryId,
+      subcategory: payment.subcategory,
+      accountId: payment.accountId,
+      paymentId: payment.id,
+    };
+    if (existing) Object.assign(existing, values, { updatedAt: now(), updatedBy: by, version: existing.version + 1 });
+    else data.budgets.push({ ...audit(by), ...values });
+  }
+};
 const syncProvisionPool = (data: FamilyData, by: Member = "Ambos") => {
   const monthlyTotal = data.budgets
     .filter((item) => item.kind === "provision")
@@ -585,8 +623,9 @@ export default function App() {
           : remote || current;
         if (!baseline) throw new Error("A base compartilhada não está disponível para registrar a alteração.");
         localMutationGeneration.current += 1;
-        const draft = structuredClone(baseline);
+      const draft = structuredClone(baseline);
       fn(draft);
+      syncMonthlyPaymentBudgets(draft, currentMember);
       syncAutomaticProvisions(draft, currentMember);
       syncProvisionPool(draft, currentMember);
       (draft.auditLog ??= []).push({ id: uid(), at: now(), by: currentMember, action: "Alteração registrada no aplicativo" });
@@ -606,6 +645,7 @@ export default function App() {
     if (!authenticated || !data || automaticProvisionChecked.current) return;
     automaticProvisionChecked.current = true;
     const check = structuredClone(data);
+    syncMonthlyPaymentBudgets(check, currentMember);
     syncAutomaticProvisions(check, currentMember);
     syncProvisionPool(check, currentMember);
     if (JSON.stringify(check.budgets) !== JSON.stringify(data.budgets)) {

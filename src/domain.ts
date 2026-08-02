@@ -94,6 +94,8 @@ export interface Budget extends Audit {
   /** Manual é informado pelo casal; automática é calculada a partir de um pagamento futuro. */
   provisionSource?: "manual" | "automatic";
   obligationId?: string;
+  /** Pagamento mensal que origina este orçamento, evitando contagem duplicada. */
+  paymentId?: string;
 }
 export type ObligationStatus =
   | "Prevista"
