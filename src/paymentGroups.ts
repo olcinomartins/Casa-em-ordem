@@ -8,6 +8,10 @@ export const PAYMENT_GROUP_ORDER = [
 
 export type PaymentGroupName = (typeof PAYMENT_GROUP_ORDER)[number];
 
+export function shouldResetNestedOnToggle(target: unknown, currentTarget: unknown) {
+  return target === currentTarget;
+}
+
 export function groupPayments<T>(
   items: T[],
   groupOf: (item: T) => string,

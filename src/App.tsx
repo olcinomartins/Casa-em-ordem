@@ -70,7 +70,7 @@ import {
   parseAccountOwnership,
 } from "./accounts";
 import { transactionDescriptionPatch } from "./transactionEditDraft";
-import { groupPayments } from "./paymentGroups";
+import { groupPayments, shouldResetNestedOnToggle } from "./paymentGroups";
 import {
   loadLocalIfPresent,
   markLocalPending,
@@ -1183,7 +1183,10 @@ function Collapsible({
       {...(open ? { open: true } : {})}
       onToggle={(event) => {
         if (event.currentTarget.open) {
-          if (resetNestedOnOpen)
+          if (
+            resetNestedOnOpen &&
+            shouldResetNestedOnToggle(event.target, event.currentTarget)
+          )
             event.currentTarget
               .querySelectorAll<HTMLDetailsElement>("details.payment-subgroup")
               .forEach((details) => details.removeAttribute("open"));

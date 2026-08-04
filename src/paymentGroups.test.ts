@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { groupPayments } from "./paymentGroups";
+import { groupPayments, shouldResetNestedOnToggle } from "./paymentGroups";
 
 describe("groupPayments", () => {
   it("ordena as faixas, os vencimentos e calcula os resumos", () => {
@@ -25,5 +25,15 @@ describe("groupPayments", () => {
     expect(groups[1].items.map((item) => item.id)).toEqual(["today-b", "today-a"]);
     expect(groups[1].count).toBe(2);
     expect(groups[1].total).toBe(100);
+  });
+});
+
+describe("shouldResetNestedOnToggle", () => {
+  it("não fecha os subblocos quando o evento veio de um grupo interno", () => {
+    const central = {};
+    const subgroup = {};
+
+    expect(shouldResetNestedOnToggle(subgroup, central)).toBe(false);
+    expect(shouldResetNestedOnToggle(central, central)).toBe(true);
   });
 });
