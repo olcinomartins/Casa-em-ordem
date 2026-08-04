@@ -70,6 +70,7 @@ import {
   parseAccountOwnership,
 } from "./accounts";
 import { transactionDescriptionPatch } from "./transactionEditDraft";
+import { groupPayments } from "./paymentGroups";
 import {
   loadLocalIfPresent,
   markLocalPending,
@@ -1041,7 +1042,7 @@ export default function App() {
                 onCreateDone={() => setCreateIntent(undefined)}
               />
             </Collapsible>
-            <Collapsible id="quick-payments" title="Central de pagamentos">
+            <Collapsible id="quick-payments" title="Central de pagamentos" resetNestedOnOpen>
               <Payments
                 data={data}
                 mutate={mutate}
@@ -1164,11 +1165,13 @@ function Collapsible({
   id,
   title,
   open = false,
+  resetNestedOnOpen = false,
   children,
 }: {
   id?: string;
   title: string;
   open?: boolean;
+  resetNestedOnOpen?: boolean;
   children: React.ReactNode;
 }) {
   const pageOrder = useContext(PageOrderContext);
@@ -1179,8 +1182,13 @@ function Collapsible({
       style={{ order: id ? pageOrder[id] : undefined }}
       {...(open ? { open: true } : {})}
       onToggle={(event) => {
-        if (event.currentTarget.open)
+        if (event.currentTarget.open) {
+          if (resetNestedOnOpen)
+            event.currentTarget
+              .querySelectorAll<HTMLDetailsElement>("details.payment-subgroup")
+              .forEach((details) => details.removeAttribute("open"));
           window.dispatchEvent(new Event("casa-em-ordem:block-open"));
+        }
       }}
     >
       <summary>
@@ -4865,6 +4873,16 @@ function Payments({
     mutate((d) => { d.obligations = d.obligations.filter((item) => item.id !== deleting.id); });
     setDeleting(undefined);
   };
+  const paymentGroups = groupPayments(
+    data.obligations.filter(
+      (obligation) =>
+        !["Paga", "Confirmada", "Dispensada"].includes(obligation.status) &&
+        !isCardCommitment(obligation),
+    ),
+    paymentGroup,
+    nextDueDate,
+    (obligation) => obligation.planned,
+  );
   return (
     <section className="panel">
       <div className="panel-head">
@@ -4914,13 +4932,16 @@ function Payments({
         />
       )}
       <div className="payment-grid payment-grid-grouped">
-        {data.obligations
-          .slice()
-          .filter(o=>!["Paga","Confirmada","Dispensada"].includes(o.status) && !isCardCommitment(o))
-          .sort((a, b) => nextDueDate(a).localeCompare(nextDueDate(b)))
-          .map((o, index, items) => {
-            const group = paymentGroup(o);
-            const previousGroup = index ? paymentGroup(items[index - 1]) : "";
+        {paymentGroups.map((paymentGroupSummary) => (
+          <details className="payment-subgroup" key={paymentGroupSummary.name}>
+            <summary>
+              <span>{paymentGroupSummary.name}</span>
+              <small>
+                {paymentGroupSummary.count} pagamento(s) · <SensitiveMoney value={paymentGroupSummary.total} hidden={hideValues} />
+              </small>
+            </summary>
+            <div className="payment-subgroup-content">
+          {paymentGroupSummary.items.map((o) => {
             const actual = o.pattern
               ? data.transactions.find((t) =>
                   normalize(t.description).includes(normalize(o.pattern!)),
@@ -4930,9 +4951,7 @@ function Payments({
               o.kind === "Recorrência no cartão"
                 ? recurringCheck(o.planned, actual, o.tolerance)
                 : undefined;
-            return <Fragment key={o.id}>
-              {group !== previousGroup && <h3 className="payment-group-title">{group}</h3>}
-              <article className="payment">
+            return <article className="payment" key={o.id}>
                 <div>
                   <Badge text={o.status} />
                   <h3>{o.name}</h3>
@@ -4973,9 +4992,11 @@ function Payments({
                     <div className="actions"><button className="primary" type="submit">Salvar alterações</button><button type="button" onClick={()=>setEditingId(undefined)}>Cancelar</button></div>
                   </form>
                 )}
-              </article>
-            </Fragment>;
+              </article>;
           })}
+            </div>
+          </details>
+        ))}
       </div>
       {deleting && <div className="choice-dialog" role="dialog" aria-modal="true" aria-label="Excluir pagamento recorrente"><div><h3>Excluir {deleting.name}</h3><p>Escolha se vale somente para o próximo pagamento ou para toda a recorrência.</p><div className="actions"><button onClick={deleteOccurrence}>Apenas esta ocorrência</button><button className="danger-button" onClick={deleteRecurring}>Esta e próximas</button><button onClick={()=>setDeleting(undefined)}>Cancelar</button></div></div></div>}
       <details className="completed-block"><summary>Cartões: recorrências e parcelas ({data.obligations.filter(isCardCommitment).length})</summary><p className="muted">Acompanhe aqui o previsto no cartão. Estas cobranças não exigem uma ação de pagamento nesta central.</p>{data.obligations.filter(isCardCommitment).slice().sort((a,b)=>nextDueDate(a).localeCompare(nextDueDate(b))).map(o=><div className="confirmed-row" key={o.id}><div><b>{o.name}</b><small>{o.kind} · próximo: {nextDueDate(o)} · <SensitiveMoney value={o.planned} hidden={hideValues} /></small></div></div>)}</details>
