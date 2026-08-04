@@ -69,6 +69,7 @@ import {
   inferLastDigits,
   parseAccountOwnership,
 } from "./accounts";
+import { transactionDescriptionPatch } from "./transactionEditDraft";
 import {
   loadLocalIfPresent,
   markLocalPending,
@@ -4111,6 +4112,36 @@ function TransactionTable({
   );
 }
 
+function TransactionDescriptionEditor({
+  transaction,
+  onCommit,
+}: {
+  transaction: Transaction;
+  onCommit: (patch: Partial<Transaction>) => void;
+}) {
+  const [value, setValue] = useState(transaction.description);
+
+  useEffect(() => {
+    setValue(transaction.description);
+  }, [transaction.id, transaction.description]);
+
+  const commit = () => {
+    const patch = transactionDescriptionPatch(transaction.description, value);
+    if (patch) onCommit(patch);
+  };
+
+  return (
+    <input
+      value={value}
+      onChange={(event) => setValue(event.target.value)}
+      onBlur={commit}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") event.currentTarget.blur();
+      }}
+    />
+  );
+}
+
 function Transactions({
   data,
   month,
@@ -4315,7 +4346,10 @@ function Transactions({
           >
             <input type="checkbox" checked={selected.has(t.id)} onChange={e=>setSelected(current=>{const next=new Set(current);e.target.checked?next.add(t.id):next.delete(t.id);return next})}/>
             <div className="tx-main">
-              <input value={t.description} onChange={e=>update(t.id,{description:e.target.value,normalized:normalize(e.target.value)})}/>
+              <TransactionDescriptionEditor
+                transaction={t}
+                onCommit={(patch) => update(t.id, patch)}
+              />
               <div className="tx-core-fields"><input type="date" value={t.date} onChange={e=>update(t.id,{date:e.target.value,paymentDate:e.target.value,competence:monthOf(e.target.value)})}/>{hideValues ? <span className="hidden-input"><HiddenValue /></span> : <CurrencyInput value={Math.abs(t.amount)} onChange={value=>update(t.id,{amount:t.amount<0?-Math.abs(value):Math.abs(value)})}/>}</div>
               <small>{t.estimated?`Estimativa ${t.estimateOrigin==="manual"?"manual":"por voz"} · `:""}{t.classification==="confirmed"?"Confirmado":"Em revisão"}</small>
             </div>
