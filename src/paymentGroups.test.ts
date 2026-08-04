@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { groupPayments, shouldResetNestedOnToggle } from "./paymentGroups";
+import {
+  groupPayments,
+  paymentDateForEdit,
+  shouldResetNestedOnToggle,
+} from "./paymentGroups";
 
 describe("groupPayments", () => {
   it("ordena as faixas, os vencimentos e calcula os resumos", () => {
@@ -35,5 +39,11 @@ describe("shouldResetNestedOnToggle", () => {
 
     expect(shouldResetNestedOnToggle(subgroup, central)).toBe(false);
     expect(shouldResetNestedOnToggle(central, central)).toBe(true);
+  });
+});
+
+describe("paymentDateForEdit", () => {
+  it("edita a mesma próxima ocorrência exibida no cartão", () => {
+    expect(paymentDateForEdit("2026-08-10", "2026-09-10")).toBe("2026-09-10");
   });
 });

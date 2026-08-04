@@ -12,6 +12,10 @@ export function shouldResetNestedOnToggle(target: unknown, currentTarget: unknow
   return target === currentTarget;
 }
 
+export function paymentDateForEdit(_storedDueDate: string, nextDueDate: string) {
+  return nextDueDate;
+}
+
 export function groupPayments<T>(
   items: T[],
   groupOf: (item: T) => string,

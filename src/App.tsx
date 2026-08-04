@@ -70,7 +70,11 @@ import {
   parseAccountOwnership,
 } from "./accounts";
 import { transactionDescriptionPatch } from "./transactionEditDraft";
-import { groupPayments, shouldResetNestedOnToggle } from "./paymentGroups";
+import {
+  groupPayments,
+  paymentDateForEdit,
+  shouldResetNestedOnToggle,
+} from "./paymentGroups";
 import {
   loadLocalIfPresent,
   markLocalPending,
@@ -4983,7 +4987,7 @@ function Payments({
                     <input name="name" required defaultValue={o.name} placeholder="Nome do pagamento" />
                     <MoneyInput name="planned" required defaultValue={o.planned} placeholder="Valor planejado" />
                     <MoneyInput name="tolerance" defaultValue={o.tolerance} placeholder="Tolerância" />
-                    <label>Data do próximo pagamento<input name="dueDate" type="date" required defaultValue={o.dueDate} /></label>
+                    <label>Data do próximo pagamento<input name="dueDate" type="date" required defaultValue={paymentDateForEdit(o.dueDate, nextDueDate(o))} /></label>
                     <select name="kind" defaultValue={o.kind}><option>Manual</option><option>Débito automático</option><option>Recorrência no cartão</option><option>Assinatura</option><option>Parcela</option><option>Variável</option><option>Eventual</option></select>
                     <select name="repeat" defaultValue={o.recurrence}><option value="none">Sem repetição</option><option value="monthly">Mensal</option><option value="quarterly">Trimestral</option><option value="semiannual">Semestral</option><option value="yearly">Anual</option></select>
                     {o.recurrence !== "none" && <label>Aplicar esta edição<select name="applyTo" defaultValue="future"><option value="single">Somente este pagamento</option><option value="future">Este e os próximos</option></select></label>}
