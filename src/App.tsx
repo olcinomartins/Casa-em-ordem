@@ -115,7 +115,7 @@ import {
 } from "./pdfPasswords";
 import { readVoiceExpense, VoiceTransaction } from "./voice";
 import { ShoppingListManager } from "./ShoppingListManager";
-import { isCardCommitment, planCheck } from "./planCheck";
+import { isCardCommitment, planCheck, standaloneBudgetItems } from "./planCheck";
 import { mergeFamilySnapshots } from "./familyMerge";
 import {
   loadUiPreferences,
@@ -2854,7 +2854,7 @@ function BudgetBars({
       const estimated = spending
         .filter((entry) => entry.categoryId === c.id && mode !== "registered" && entry.state === "estimated")
         .reduce((sum, entry) => sum + entry.amount, 0);
-      const plannedItems = data.budgets.filter((item) => item.categoryId === c.id && budgetApplies(item, month));
+      const plannedItems = standaloneBudgetItems(data, month, c.id);
       const entries = spending.filter((entry) => entry.categoryId === c.id);
       const scheduledEntries = scheduledPayments.filter((entry) => entry.categoryId === c.id);
       const scheduled = scheduledEntries.reduce((sum, entry) => sum + entry.amount, 0);

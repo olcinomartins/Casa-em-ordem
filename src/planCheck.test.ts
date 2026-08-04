@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { FamilyData, audit } from "./domain";
-import { planCheck } from "./planCheck";
+import { planCheck, standaloneBudgetItems } from "./planCheck";
 
 const data = (): FamilyData => ({
   schemaVersion: 1, household: { name: "Casa", currency: "BRL", members: ["Olcino", "Mari"] },
@@ -59,5 +59,14 @@ describe("planCheck", () => {
       { ...audit(), id: paymentId, name: "Aluguel", kind: "Manual", planned: 2_000, dueDate: "2026-08-05", recurrence: "monthly", tolerance: 0, status: "A pagar", categoryId: "moradia" },
     ];
     expect(planCheck(family, "2026-08").manualBudget).toBe(0);
+  });
+
+  it("não repete no detalhamento planejado o orçamento originado por pagamento", () => {
+    const family = data();
+    family.budgets = [
+      { ...audit(), month: "2026-08", categoryId: "moradia", amount: 2_000, reason: "Aluguel", paymentId: "pagamento-aluguel" },
+      { ...audit(), month: "2026-08", categoryId: "moradia", amount: 500, reason: "Manutenção" },
+    ];
+    expect(standaloneBudgetItems(family, "2026-08", "moradia").map((item) => item.reason)).toEqual(["Manutenção"]);
   });
 });

@@ -32,6 +32,13 @@ const legacyPaymentBudget = (budget: Budget, payments: Obligation[]) =>
     },
   );
 
+/** Orçamentos exibidos em Planejado; os originados por pagamentos aparecem na lista de agendados. */
+export function standaloneBudgetItems(data: FamilyData, month: string, categoryId: string) {
+  return data.budgets.filter(
+    (item) => item.categoryId === categoryId && budgetApplies(item, month) && !item.paymentId,
+  );
+}
+
 /** Valores mensais que precisam caber na entrada familiar prevista. */
 export function planCheck(data: FamilyData, month: string) {
   const activeBudgets = data.budgets.filter((item) => budgetApplies(item, month));
