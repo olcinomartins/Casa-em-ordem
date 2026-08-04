@@ -4,6 +4,7 @@ import {
   Obligation,
   Transaction,
 } from "./domain";
+import { nextOutstandingPaymentDue } from "./paymentSchedule";
 import { budgetValue } from "./finance";
 import { monthlySpending } from "./spending";
 
@@ -63,12 +64,8 @@ const comparePayments = (left: Obligation, right: Obligation) =>
 /** Mantém os alertas alinhados à Central: recorrências antigas são projetadas
  * para a próxima ocorrência, e não ficam eternamente como vencidas. */
 const nextPaymentDue = (payment: Obligation, today: string) => {
-  const step = payment.recurrence === "monthly" ? 1 : payment.recurrence === "quarterly" ? 3 : payment.recurrence === "semiannual" ? 6 : payment.recurrence === "yearly" ? 12 : 0;
-  if (!step) return payment.dueDate;
-  const date = new Date(`${payment.dueDate}T12:00:00`);
-  const todayDate = new Date(`${today}T12:00:00`);
-  while (date < todayDate || payment.skippedDates?.includes(dateOnly(date))) date.setMonth(date.getMonth() + step);
-  return dateOnly(date);
+  void today;
+  return nextOutstandingPaymentDue(payment);
 };
 const dateOnly = (date: Date) => date.toISOString().slice(0, 10);
 

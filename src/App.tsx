@@ -75,6 +75,7 @@ import {
   paymentDateForEdit,
   shouldResetNestedOnToggle,
 } from "./paymentGroups";
+import { nextOutstandingPaymentDue } from "./paymentSchedule";
 import {
   loadLocalIfPresent,
   markLocalPending,
@@ -4785,11 +4786,7 @@ function Payments({
     return [0, 1, 2].map((index) => { const date = new Date(start); date.setMonth(date.getMonth() + step * index); return dateOnly(date); });
   };
   const nextDueDate = (obligation: Obligation) => {
-    const step = obligation.recurrence === "monthly" ? 1 : obligation.recurrence === "quarterly" ? 3 : obligation.recurrence === "semiannual" ? 6 : obligation.recurrence === "yearly" ? 12 : 0;
-    const date = new Date(`${obligation.dueDate}T12:00:00`);
-    const today = new Date(); today.setHours(0, 0, 0, 0);
-    while (step && (date < today || obligation.skippedDates?.includes(dateOnly(date)))) date.setMonth(date.getMonth() + step);
-    return dateOnly(date);
+    return nextOutstandingPaymentDue(obligation);
   };
   const paymentGroup = (obligation: Obligation) => {
     const dueText = nextDueDate(obligation);
