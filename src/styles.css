@@ -853,7 +853,7 @@ th {
 }
 .payment-actions {
   grid-template-columns: 28px;
-  grid-template-rows: repeat(2, 28px);
+  grid-auto-rows: 28px;
   width: 28px;
 }
 .payment-actions .icon-button {
@@ -861,6 +861,12 @@ th {
   min-width: 28px;
   min-height: 28px;
   padding: .15rem;
+}
+.payment a.icon-button,
+.confirmed-row a.icon-button {
+  display: inline-grid;
+  place-items: center;
+  text-decoration: none;
 }
 .danger-button {
   color: var(--red);

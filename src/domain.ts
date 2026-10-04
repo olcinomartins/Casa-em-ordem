@@ -123,6 +123,8 @@ export interface Obligation extends Audit {
   tolerance: number;
   accountId?: string;
   pattern?: string;
+  /** Site ou link profundo do aplicativo usado para realizar o pagamento. */
+  paymentUrl?: string;
   status: ObligationStatus;
   paidAt?: string;
   paidAmount?: number;
