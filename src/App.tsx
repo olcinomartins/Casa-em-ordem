@@ -76,7 +76,7 @@ import {
   paymentDateForEdit,
   shouldResetNestedOnToggle,
 } from "./paymentGroups";
-import { nextOutstandingPaymentDue } from "./paymentSchedule";
+import { nextOutstandingPaymentDue, paymentForMonth } from "./paymentSchedule";
 import { normalizePaymentUrl } from "./paymentLinks";
 import {
   loadLocalIfPresent,
@@ -4766,7 +4766,7 @@ function UnifiedPlanForm({
 }
 
 function Payments({
-  data,
+  data: storedData,
   mutate,
   hideValues,
   month,
@@ -4780,6 +4780,7 @@ function Payments({
   creating: boolean;
   onCreateDone: () => void;
 }) {
+  const data = { ...storedData, obligations: storedData.obligations.map(item => paymentForMonth(item, month, storedData.transactions)) };
   const recurrenceLabel: Record<Obligation["recurrence"], string> = { none: "Único", monthly: "Mensal", quarterly: "Trimestral", semiannual: "Semestral", yearly: "Anual" };
   const futureDates = (obligation: Obligation) => {
     const step = obligation.recurrence === "monthly" ? 1 : obligation.recurrence === "quarterly" ? 3 : obligation.recurrence === "semiannual" ? 6 : obligation.recurrence === "yearly" ? 12 : 0;
@@ -4844,7 +4845,7 @@ function Payments({
     const paidAmount=parseCurrency(raw); if(paidAmount<=0)return alert("Informe um valor maior que zero.");
     const paidAt=prompt("Data efetiva do pagamento (AAAA-MM-DD):",dateOnly(new Date())); if(!paidAt||!/^\d{4}-\d{2}-\d{2}$/.test(paidAt))return alert("Data inválida.");
     const account=current.accountId||data.accounts[0]?.id; if(!account)return alert("Cadastre uma conta para o pagamento.");
-    mutate(d=>{const o=d.obligations.find(x=>x.id===id)!;o.status="Paga";o.paidAt=paidAt;o.paidAmount=paidAmount;o.reconciledTransactionId=undefined;const accountOwner=d.accounts.find(item=>item.id===account)?.operator||"Ambos";const rule=suggest(o.name,account,accountOwner,d.rules);const fallback=d.categories.find(category=>normalize(category.name)==="OUTROS")?.id;d.transactions=d.transactions.filter(t=>t.obligationId!==id);d.transactions.push({...audit(accountOwner),date:paidAt,competence:monthOf(paidAt),purchaseDate:o.dueDate,paymentDate:paidAt,description:o.name,normalized:normalize(o.name),amount:paidAmount,accountId:account,operator:accountOwner,scope:"Familiar",categoryId:o.categoryId||rule?.categoryId||fallback,subcategory:o.subcategory||rule?.subcategory,classification:o.categoryId?"confirmed":rule?"suggested":"pending",dedupeKey:`payment:${id}:${paidAt}`,transfer:false,movement:"expense_income",sourceKind:"statement",obligationId:id,provisional:true,notes:`Pagamento realizado. Previsto: ${money(o.planned)}`})});
+    mutate(d=>{const o=d.obligations.find(x=>x.id===id)!;o.status="Paga";o.paidAt=paidAt;o.paidAmount=paidAmount;o.reconciledTransactionId=undefined;const accountOwner=d.accounts.find(item=>item.id===account)?.operator||"Ambos";const rule=suggest(o.name,account,accountOwner,d.rules);const fallback=d.categories.find(category=>normalize(category.name)==="OUTROS")?.id;d.transactions=d.transactions.filter(t=>t.obligationId!==id||(t.purchaseDate||t.paymentDate||t.date).slice(0,7)!==current.dueDate.slice(0,7));d.transactions.push({...audit(accountOwner),date:paidAt,competence:monthOf(paidAt),purchaseDate:current.dueDate,paymentDate:paidAt,description:o.name,normalized:normalize(o.name),amount:paidAmount,accountId:account,operator:accountOwner,scope:"Familiar",categoryId:o.categoryId||rule?.categoryId||fallback,subcategory:o.subcategory||rule?.subcategory,classification:o.categoryId?"confirmed":rule?"suggested":"pending",dedupeKey:`payment:${id}:${paidAt}`,transfer:false,movement:"expense_income",sourceKind:"statement",obligationId:id,provisional:true,notes:`Pagamento realizado. Previsto: ${money(o.planned)}`})});
   };
   const saveEdit = (id: string, form: FormData) => {
     const current = data.obligations.find((o) => o.id === id)!;
@@ -5028,7 +5029,7 @@ function Payments({
       </div>
       {deleting && <div className="choice-dialog" role="dialog" aria-modal="true" aria-label="Excluir pagamento recorrente"><div><h3>Excluir {deleting.name}</h3><p>Escolha se vale somente para o próximo pagamento ou para toda a recorrência.</p><div className="actions"><button onClick={deleteOccurrence}>Apenas esta ocorrência</button><button className="danger-button" onClick={deleteRecurring}>Esta e próximas</button><button onClick={()=>setDeleting(undefined)}>Cancelar</button></div></div></div>}
       <details className="completed-block"><summary>Cartões: recorrências e parcelas ({data.obligations.filter(isCardCommitment).length})</summary><p className="muted">Acompanhe aqui o previsto no cartão. Estas cobranças não exigem uma ação de pagamento nesta central.</p>{data.obligations.filter(isCardCommitment).slice().sort((a,b)=>nextDueDate(a).localeCompare(nextDueDate(b))).map(o=><div className="confirmed-row" key={o.id}><div><b>{o.name}</b><small>{o.kind} · próximo: {nextDueDate(o)} · <SensitiveMoney value={o.planned} hidden={hideValues} /></small></div>{o.paymentUrl && <a className="icon-button" href={o.paymentUrl} target="_blank" rel="noreferrer" title="Abrir pagamento" aria-label={`Abrir pagamento de ${o.name}`}><ExternalLink size={18} /></a>}</div>)}</details>
-      <details className="completed-block"><summary>Pagamentos confirmados ({data.obligations.filter(o=>["Paga","Confirmada","Dispensada"].includes(o.status)).length})</summary>{data.obligations.filter(o=>["Paga","Confirmada","Dispensada"].includes(o.status)).sort((a,b)=>b.dueDate.localeCompare(a.dueDate)).map(o=><div className="confirmed-row" key={o.id}><div><b>{o.name}</b><small>{o.dueDate} · <SensitiveMoney value={o.paidAmount??o.planned} hidden={hideValues} /> · {o.status}</small></div>{o.paymentUrl && <a className="icon-button" href={o.paymentUrl} target="_blank" rel="noreferrer" title="Abrir pagamento" aria-label={`Abrir pagamento de ${o.name}`}><ExternalLink size={18} /></a>}<button onClick={()=>mutate(d=>{const item=d.obligations.find(x=>x.id===o.id);if(item){item.status="A pagar";item.paidAt=undefined;item.paidAmount=undefined;item.reconciledTransactionId=undefined;d.transactions=d.transactions.filter(transaction=>transaction.obligationId!==o.id||!transaction.provisional);for(const transaction of d.transactions)if(transaction.obligationId===o.id)transaction.obligationId=undefined}})}>Desconfirmar</button></div>)}</details>
+      <details className="completed-block"><summary>Pagamentos confirmados ({data.obligations.filter(o=>["Paga","Confirmada","Dispensada"].includes(o.status)).length})</summary>{data.obligations.filter(o=>["Paga","Confirmada","Dispensada"].includes(o.status)).sort((a,b)=>b.dueDate.localeCompare(a.dueDate)).map(o=><div className="confirmed-row" key={o.id}><div><b>{o.name}</b><small>{o.dueDate} · <SensitiveMoney value={o.paidAmount??o.planned} hidden={hideValues} /> · {o.status}</small></div>{o.paymentUrl && <a className="icon-button" href={o.paymentUrl} target="_blank" rel="noreferrer" title="Abrir pagamento" aria-label={`Abrir pagamento de ${o.name}`}><ExternalLink size={18} /></a>}<button onClick={()=>mutate(d=>{const item=d.obligations.find(x=>x.id===o.id);if(item){item.status="A pagar";item.paidAt=undefined;item.paidAmount=undefined;item.reconciledTransactionId=undefined;d.transactions=d.transactions.filter(transaction=>transaction.obligationId!==o.id||!transaction.provisional||(transaction.purchaseDate||transaction.paymentDate||transaction.date).slice(0,7)!==o.dueDate.slice(0,7));for(const transaction of d.transactions)if(transaction.obligationId===o.id&&(transaction.purchaseDate||transaction.paymentDate||transaction.date).slice(0,7)===o.dueDate.slice(0,7))transaction.obligationId=undefined}})}>Desconfirmar</button></div>)}</details>
       {!data.obligations.length && <Empty />}
     </section>
   );
