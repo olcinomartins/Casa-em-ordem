@@ -1,3 +1,5 @@
+import { PaymentAccessFields, PaymentAccessPanel } from "./PaymentAccessPanel";
+import { accessFromForm, loadPaymentAccess, savePaymentAccess, parsePaidAmount } from "./paymentAccess";
 import {
   Fragment,
   createContext,
@@ -4818,9 +4820,12 @@ function Payments({
       alert((error as Error).message);
       return false;
     }
+    const paymentAudit = audit();
+    try { savePaymentAccess(paymentAudit.id, accessFromForm(fd)); }
+    catch { alert("Não foi possível salvar o acesso neste navegador."); return false; }
     mutate((d) =>
       d.obligations.push({
-        ...audit(),
+        ...paymentAudit,
         name: String(fd.get("name")),
         kind: String(fd.get("kind")) as Obligation["kind"],
         planned: parseCurrency(fd.get("planned")),
@@ -4842,7 +4847,7 @@ function Payments({
       return alert("Mostre os valores pelo botão do olho para confirmar o pagamento.");
     const current=data.obligations.find(o=>o.id===id)!;
     const raw=prompt("Valor efetivamente pago:",hideValues?"":money(current.planned)); if(raw===null)return;
-    const paidAmount=parseCurrency(raw); if(paidAmount<=0)return alert("Informe um valor maior que zero.");
+    let paidAmount: number; try { paidAmount=parsePaidAmount(raw); } catch (error) { return alert((error as Error).message); }
     const paidAt=prompt("Data efetiva do pagamento (AAAA-MM-DD):",dateOnly(new Date())); if(!paidAt||!/^\d{4}-\d{2}-\d{2}$/.test(paidAt))return alert("Data inválida.");
     const account=current.accountId||data.accounts[0]?.id; if(!account)return alert("Cadastre uma conta para o pagamento.");
     mutate(d=>{const o=d.obligations.find(x=>x.id===id)!;o.status="Paga";o.paidAt=paidAt;o.paidAmount=paidAmount;o.reconciledTransactionId=undefined;const accountOwner=d.accounts.find(item=>item.id===account)?.operator||"Ambos";const rule=suggest(o.name,account,accountOwner,d.rules);const fallback=d.categories.find(category=>normalize(category.name)==="OUTROS")?.id;d.transactions=d.transactions.filter(t=>t.obligationId!==id||(t.purchaseDate||t.paymentDate||t.date).slice(0,7)!==current.dueDate.slice(0,7));d.transactions.push({...audit(accountOwner),date:paidAt,competence:monthOf(paidAt),purchaseDate:current.dueDate,paymentDate:paidAt,description:o.name,normalized:normalize(o.name),amount:paidAmount,accountId:account,operator:accountOwner,scope:"Familiar",categoryId:o.categoryId||rule?.categoryId||fallback,subcategory:o.subcategory||rule?.subcategory,classification:o.categoryId?"confirmed":rule?"suggested":"pending",dedupeKey:`payment:${id}:${paidAt}`,transfer:false,movement:"expense_income",sourceKind:"statement",obligationId:id,provisional:true,notes:`Pagamento realizado. Previsto: ${money(o.planned)}`})});
@@ -4858,6 +4863,9 @@ function Payments({
       alert((error as Error).message);
       return;
     }
+    const singleAudit = applyTo === "single" && current.recurrence !== "none" ? audit() : undefined;
+    try { savePaymentAccess(singleAudit?.id || id, accessFromForm(form)); }
+    catch { alert("Não foi possível salvar o acesso neste navegador."); return; }
     mutate((d) => {
       const o = d.obligations.find((x) => x.id === id)!;
       const changes = {
@@ -4871,7 +4879,7 @@ function Payments({
       if (applyTo === "single" && o.recurrence !== "none") {
         const occurrence = nextDueDate(current);
         o.skippedDates = [...new Set([...(o.skippedDates || []), occurrence])];
-        d.obligations.push({ ...o, ...changes, ...audit(), dueDate, recurrence: "none", skippedDates: undefined, status: "A pagar", paidAt: undefined, paidAmount: undefined, reconciledTransactionId: undefined });
+        d.obligations.push({ ...o, ...changes, ...singleAudit!, dueDate, recurrence: "none", skippedDates: undefined, status: "A pagar", paidAt: undefined, paidAmount: undefined, reconciledTransactionId: undefined });
       } else {
         Object.assign(o, changes);
         o.updatedAt = now();
@@ -4920,6 +4928,7 @@ function Payments({
       </div>
       {creating && (
         <QuickForm
+          allowZero
           onSubmit={(fd) => {
             const created = add(fd);
             if (created) onCreateDone();
@@ -4954,6 +4963,7 @@ function Payments({
               <select name="accountId"><option value="">Conta do pagamento</option>{data.accounts.filter(account=>account.active).map(account=><option key={account.id} value={account.id}>{accountDisplayName(account)}</option>)}</select>
               <select name="categoryId"><option value="">Categoria da despesa</option>{data.categories.filter(category=>category.nature==="expense").map(category=><option key={category.id} value={category.id}>{category.name}</option>)}</select>
               <input name="paymentUrl" type="text" inputMode="url" autoCapitalize="none" autoCorrect="off" placeholder="Link para pagamento (opcional)" aria-label="Link para pagamento" />
+              <PaymentAccessFields />
             </>
           }
         />
@@ -5003,11 +5013,12 @@ function Payments({
                     <Trash2 size={18} />
                   </button>
                 </div>
+                <PaymentAccessPanel paymentId={o.id} name={o.name} />
                 {editingId === o.id && (
                   <form className="quick-form payment-edit-form" onSubmit={(event)=>{event.preventDefault();saveEdit(o.id,new FormData(event.currentTarget));}}>
                     <input name="name" required defaultValue={o.name} placeholder="Nome do pagamento" />
-                    <MoneyInput name="planned" required defaultValue={o.planned} placeholder="Valor planejado" />
-                    <MoneyInput name="tolerance" defaultValue={o.tolerance} placeholder="Tolerância" />
+                    <MoneyInput name="planned" allowZero required defaultValue={o.planned} placeholder="Valor planejado" />
+                    <MoneyInput name="tolerance" allowZero defaultValue={o.tolerance} placeholder="Tolerância" />
                     <label>Data do próximo pagamento<input name="dueDate" type="date" required defaultValue={paymentDateForEdit(o.dueDate, nextDueDate(o))} /></label>
                     <select name="kind" defaultValue={o.kind}><option>Manual</option><option>Débito automático</option><option>Recorrência no cartão</option><option>Assinatura</option><option>Parcela</option><option>Variável</option><option>Eventual</option></select>
                     <select name="repeat" defaultValue={o.recurrence}><option value="none">Sem repetição</option><option value="monthly">Mensal</option><option value="quarterly">Trimestral</option><option value="semiannual">Semestral</option><option value="yearly">Anual</option></select>
@@ -5015,6 +5026,7 @@ function Payments({
                     <select name="accountId" defaultValue={o.accountId || ""}><option value="">Conta do pagamento</option>{data.accounts.filter(account=>account.active).map(account=><option key={account.id} value={account.id}>{accountDisplayName(account)}</option>)}</select>
                     <select name="categoryId" defaultValue={o.categoryId || ""}><option value="">Categoria da despesa</option>{data.categories.filter(category=>category.nature==="expense").map(category=><option key={category.id} value={category.id}>{category.name}</option>)}</select>
                     <input name="subcategory" defaultValue={o.subcategory || ""} placeholder="Descrição" />
+                    <PaymentAccessFields access={loadPaymentAccess(o.id)} />
                     <label>Link para pagamento (opcional)<input name="paymentUrl" type="text" inputMode="url" autoCapitalize="none" autoCorrect="off" defaultValue={o.paymentUrl || ""} placeholder="https://... ou app://..." /></label>
                     <label>Texto para conciliação (opcional)<input name="pattern" defaultValue={o.pattern || ""} placeholder="Ex.: nome que vem na fatura" /></label>
                     <small className="reconciliation-help">Opcional: identifica o lançamento correspondente na fatura/extrato para conciliar este pagamento automaticamente.</small>
@@ -5028,8 +5040,8 @@ function Payments({
         ))}
       </div>
       {deleting && <div className="choice-dialog" role="dialog" aria-modal="true" aria-label="Excluir pagamento recorrente"><div><h3>Excluir {deleting.name}</h3><p>Escolha se vale somente para o próximo pagamento ou para toda a recorrência.</p><div className="actions"><button onClick={deleteOccurrence}>Apenas esta ocorrência</button><button className="danger-button" onClick={deleteRecurring}>Esta e próximas</button><button onClick={()=>setDeleting(undefined)}>Cancelar</button></div></div></div>}
-      <details className="completed-block"><summary>Cartões: recorrências e parcelas ({data.obligations.filter(isCardCommitment).length})</summary><p className="muted">Acompanhe aqui o previsto no cartão. Estas cobranças não exigem uma ação de pagamento nesta central.</p>{data.obligations.filter(isCardCommitment).slice().sort((a,b)=>nextDueDate(a).localeCompare(nextDueDate(b))).map(o=><div className="confirmed-row" key={o.id}><div><b>{o.name}</b><small>{o.kind} · próximo: {nextDueDate(o)} · <SensitiveMoney value={o.planned} hidden={hideValues} /></small></div>{o.paymentUrl && <a className="icon-button" href={o.paymentUrl} target="_blank" rel="noreferrer" title="Abrir pagamento" aria-label={`Abrir pagamento de ${o.name}`}><ExternalLink size={18} /></a>}</div>)}</details>
-      <details className="completed-block"><summary>Pagamentos confirmados ({data.obligations.filter(o=>["Paga","Confirmada","Dispensada"].includes(o.status)).length})</summary>{data.obligations.filter(o=>["Paga","Confirmada","Dispensada"].includes(o.status)).sort((a,b)=>b.dueDate.localeCompare(a.dueDate)).map(o=><div className="confirmed-row" key={o.id}><div><b>{o.name}</b><small>{o.dueDate} · <SensitiveMoney value={o.paidAmount??o.planned} hidden={hideValues} /> · {o.status}</small></div>{o.paymentUrl && <a className="icon-button" href={o.paymentUrl} target="_blank" rel="noreferrer" title="Abrir pagamento" aria-label={`Abrir pagamento de ${o.name}`}><ExternalLink size={18} /></a>}<button onClick={()=>mutate(d=>{const item=d.obligations.find(x=>x.id===o.id);if(item){item.status="A pagar";item.paidAt=undefined;item.paidAmount=undefined;item.reconciledTransactionId=undefined;d.transactions=d.transactions.filter(transaction=>transaction.obligationId!==o.id||!transaction.provisional||(transaction.purchaseDate||transaction.paymentDate||transaction.date).slice(0,7)!==o.dueDate.slice(0,7));for(const transaction of d.transactions)if(transaction.obligationId===o.id&&(transaction.purchaseDate||transaction.paymentDate||transaction.date).slice(0,7)===o.dueDate.slice(0,7))transaction.obligationId=undefined}})}>Desconfirmar</button></div>)}</details>
+      <details className="completed-block"><summary>Cartões: recorrências e parcelas ({data.obligations.filter(isCardCommitment).length})</summary><p className="muted">Acompanhe aqui o previsto no cartão. Estas cobranças não exigem uma ação de pagamento nesta central.</p>{data.obligations.filter(isCardCommitment).slice().sort((a,b)=>nextDueDate(a).localeCompare(nextDueDate(b))).map(o=><div className="confirmed-row" key={o.id}><div><b>{o.name}</b><small>{o.kind} · próximo: {nextDueDate(o)} · <SensitiveMoney value={o.planned} hidden={hideValues} /></small></div>{o.paymentUrl && <a className="icon-button" href={o.paymentUrl} target="_blank" rel="noreferrer" title="Abrir pagamento" aria-label={`Abrir pagamento de ${o.name}`}><ExternalLink size={18} /></a>}<PaymentAccessPanel paymentId={o.id} name={o.name} /></div>)}</details>
+      <details className="completed-block"><summary>Pagamentos confirmados ({data.obligations.filter(o=>["Paga","Confirmada","Dispensada"].includes(o.status)).length})</summary>{data.obligations.filter(o=>["Paga","Confirmada","Dispensada"].includes(o.status)).sort((a,b)=>b.dueDate.localeCompare(a.dueDate)).map(o=><div className="confirmed-row" key={o.id}><div><b>{o.name}</b><small>{o.dueDate} · <SensitiveMoney value={o.paidAmount??o.planned} hidden={hideValues} /> · {o.status}</small></div>{o.paymentUrl && <a className="icon-button" href={o.paymentUrl} target="_blank" rel="noreferrer" title="Abrir pagamento" aria-label={`Abrir pagamento de ${o.name}`}><ExternalLink size={18} /></a>}<PaymentAccessPanel paymentId={o.id} name={o.name} /><button onClick={()=>mutate(d=>{const item=d.obligations.find(x=>x.id===o.id);if(item){item.status="A pagar";item.paidAt=undefined;item.paidAmount=undefined;item.reconciledTransactionId=undefined;d.transactions=d.transactions.filter(transaction=>transaction.obligationId!==o.id||!transaction.provisional||(transaction.purchaseDate||transaction.paymentDate||transaction.date).slice(0,7)!==o.dueDate.slice(0,7));for(const transaction of d.transactions)if(transaction.obligationId===o.id&&(transaction.purchaseDate||transaction.paymentDate||transaction.date).slice(0,7)===o.dueDate.slice(0,7))transaction.obligationId=undefined}})}>Desconfirmar</button></div>)}</details>
       {!data.obligations.length && <Empty />}
     </section>
   );
@@ -6312,22 +6324,24 @@ function MoneyInput({
   placeholder,
   required,
   autoFocus,
+  allowZero = false,
 }: {
   name: string;
   defaultValue?: number;
   placeholder?: string;
   required?: boolean;
   autoFocus?: boolean;
+  allowZero?: boolean;
 }) {
   const format = (value: number) =>
-    value
+    value || allowZero
       ? new Intl.NumberFormat("pt-BR", {
           style: "currency",
           currency: "BRL",
         }).format(value)
       : "";
   const [display, setDisplay] = useState(
-    defaultValue ? format(defaultValue) : "",
+    defaultValue !== undefined ? format(defaultValue) : "",
   );
   return (
     <input
@@ -6338,7 +6352,7 @@ function MoneyInput({
       placeholder={placeholder}
       value={display}
       onChange={(event) => setDisplay(event.target.value)}
-      onBlur={() => setDisplay(format(parseCurrency(display)))}
+      onBlur={() => setDisplay(display.trim() ? format(parseCurrency(display)) : "")}
     />
   );
 }
@@ -6347,10 +6361,12 @@ function QuickForm({
   fields,
   extras,
   onSubmit,
+  allowZero = false,
 }: {
   fields: [string, string, string][];
   extras?: React.ReactNode;
   onSubmit: (fd: FormData) => void | boolean;
+  allowZero?: boolean;
 }) {
   return (
     <form
@@ -6363,7 +6379,7 @@ function QuickForm({
     >
       {fields.map(([name, label, type]) =>
         type === "number" ? (
-          <MoneyInput key={name} name={name} required placeholder={label} />
+          <MoneyInput key={name} name={name} required placeholder={label} allowZero={allowZero} />
         ) : (
           <input
             key={name}
