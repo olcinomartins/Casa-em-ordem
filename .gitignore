@@ -10,3 +10,20 @@ Planejamento/
 vite.config.js
 vite.config.d.ts
 migration-output/
+
+# Dados financeiros e artefatos locais: nunca publicar no GitHub.
+movimentacoes do mes passado/
+outputs/
+tmp/
+dist-verify/
+test-results/
+*.xlsx
+*.xls
+*.xlsm
+*.csv
+*.pdf
+CasaEmOrdem*.json
+# Scripts locais de revisão contêm dados pessoais da importação.
+scripts/build_monthly_review.py
+scripts/build_review_workbook.mjs
+scripts/style_review_workbook.py

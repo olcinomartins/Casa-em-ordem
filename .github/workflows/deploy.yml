@@ -18,6 +18,8 @@ jobs:
           VITE_MS_CLIENT_ID: ${{ vars.VITE_MS_CLIENT_ID }}
           VITE_MS_REDIRECT_URI: ${{ vars.VITE_MS_REDIRECT_URI }}
           VITE_ALLOWED_EMAILS: ${{ vars.VITE_ALLOWED_EMAILS }}
+          VITE_FAMILY_DRIVE_ID: ${{ vars.VITE_FAMILY_DRIVE_ID }}
+          VITE_FAMILY_ITEM_ID: ${{ vars.VITE_FAMILY_ITEM_ID }}
       - uses: actions/upload-pages-artifact@v3
         with: { path: dist }
   deploy:

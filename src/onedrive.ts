@@ -1,6 +1,7 @@
 import { PublicClientApplication, AccountInfo } from "@azure/msal-browser";
 import { FamilyData } from "./domain";
 import { mergeFamilySnapshots } from "./familyMerge";
+import { configuredCloudLocation } from "./cloudLocation";
 const clientId = import.meta.env.VITE_MS_CLIENT_ID as string | undefined;
 const redirectUri =
   (import.meta.env.VITE_MS_REDIRECT_URI as string | undefined) ||
@@ -26,7 +27,6 @@ let etag: string | undefined;
 let knownMissing = false;
 const scopes = ["Files.ReadWrite", "User.Read"];
 const rememberedAccountKey = "casa-em-ordem-microsoft-account";
-const familyShareUrl = "https://1drv.ms/u/c/f55991dc870e2ff6/IQDzSgFJjs81SZM-o0Azn3oDAVCzNszRi85T6rrUrVVjMzs?e=QUS2Jl";
 export interface CloudLocation {
   driveId: string;
   itemId: string;
@@ -211,27 +211,12 @@ export async function loadCloud(
   const readGeneration = ++requestedReadGeneration;
   const generationAtStart = writeGeneration;
   const t = await token();
-  // A URL compartilhada é a fonte canônica da família. Não reutilizamos um
-  // drive/item salvo por um navegador antigo, pois ele pode apontar para uma
-  // cópia particular e causar divergência entre computador e celular.
+  // Use the configured canonical file, never an anonymous link or stale cache.
   if (!canonicalLocationResolved) {
-    const encoded = btoa(familyShareUrl)
-      .replace(/=/g, "")
-      .replace(/\//g, "_")
-      .replace(/\+/g, "-");
-    const meta = await fetch(
-      `https://graph.microsoft.com/v1.0/shares/u!${encoded}/driveItem`,
-      { headers: { Authorization: `Bearer ${t}` } },
-    );
-    if (!meta.ok)
-      throw new Error(
-        "Não foi possível acessar a base compartilhada da família. Confirme o compartilhamento do arquivo no OneDrive.",
-      );
-    const item = await meta.json();
-    const driveId = item.parentReference?.driveId;
-    if (!driveId || !item.id)
-      throw new Error("O OneDrive não informou a localização da base familiar compartilhada.");
-    setCloudLocation({ driveId, itemId: item.id });
+    setCloudLocation(configuredCloudLocation({
+      VITE_FAMILY_DRIVE_ID: import.meta.env.VITE_FAMILY_DRIVE_ID,
+      VITE_FAMILY_ITEM_ID: import.meta.env.VITE_FAMILY_ITEM_ID,
+    }));
     canonicalLocationResolved = true;
   }
   let r = await fetch(`https://graph.microsoft.com/v1.0${contentPath()}`, {

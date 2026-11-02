@@ -19,8 +19,12 @@ Sem configuração Microsoft, a aplicação funciona localmente usando IndexedDB
 4. Em permissões delegadas do Microsoft Graph, adicione `User.Read` e `Files.ReadWrite`.
 5. Copie `.env.example` para `.env` e informe o Client ID e a URI local.
 6. Para produção, configure `VITE_MS_CLIENT_ID` e `VITE_MS_REDIRECT_URI` como variáveis do workflow ou substitua durante o build. Client ID não é segredo.
-7. O primeiro membro conecta e cria `CasaEmOrdem-familia.json` na raiz do OneDrive. Compartilhe esse arquivo com permissão de edição para a conta Microsoft do outro membro.
-8. Em **Configurações → Base compartilhada**, copie os IDs do drive e do arquivo exibidos no primeiro aparelho e informe-os no aparelho do segundo membro.
+7. No OneDrive, compartilhe a base familiar somente com as contas Microsoft da família, exigindo login. Remova links de **qualquer pessoa com o link** em **Gerenciar acesso**.
+8. Configure `VITE_FAMILY_DRIVE_ID` e `VITE_FAMILY_ITEM_ID` no `.env` local e nas **Actions Variables** do repositório. Use os IDs do arquivo que já contém a base em uso, mesmo se seu nome tiver sido alterado; não selecione uma cópia antiga pelo nome. Todos os aparelhos usam esse mesmo arquivo, com token Microsoft e permissão individual.
+
+Variáveis `VITE_*` são incorporadas ao JavaScript público. Colocar um link anônimo em um GitHub Secret não o protege se ele for usado no frontend. Os IDs configurados apenas localizam o arquivo; o acesso depende das permissões do OneDrive. Revogar o link antigo também bloqueia seu uso a partir do histórico do GitHub.
+
+Extratos, faturas, relatórios em `outputs/` e arquivos temporários são ignorados pelo Git. Não use `git add -f` nesses arquivos. O deploy publica apenas `dist/`.
 
 O salvamento usa `If-Match`/`eTag`: alterações concorrentes causam erro explícito, nunca sobrescrita silenciosa.
 
