@@ -4998,10 +4998,10 @@ function Payments({
                 </div>
                 <strong><SensitiveMoney value={o.planned} hidden={hideValues} /></strong>
                 {check && <Badge text={check} />}{" "}
+                <div className="actions payment-actions">
                 {!["Paga", "Confirmada"].includes(o.status) && (
                   <button className="icon-button success-button" title="Marcar como paga" aria-label={`Marcar ${o.name} como paga`} onClick={() => mark(o.id)}><CheckCircle2 size={20} /></button>
                 )}
-                <div className="actions payment-actions">
                   {o.paymentUrl && <a className="icon-button" href={o.paymentUrl} target="_blank" rel="noreferrer" title="Abrir pagamento" aria-label={`Abrir pagamento de ${o.name}`}><ExternalLink size={18} /></a>}
                   <button className="icon-button" title="Editar pagamento" aria-label={`Editar ${o.name}`} onClick={() => hideValues ? alert("Mostre os valores para editar este pagamento.") : setEditingId(editingId === o.id ? undefined : o.id)}><Pencil size={18} /></button>
                   <button

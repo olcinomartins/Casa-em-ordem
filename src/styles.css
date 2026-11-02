@@ -833,34 +833,27 @@ th {
 .payment > .icon-button { grid-column: 2; grid-row: 1; }
 .payment-actions {
   grid-column: 2;
-  grid-row: 2;
+  grid-row: 1 / span 2;
   display: grid;
-  grid-template-columns: repeat(2, 32px);
-  gap: .25rem;
-  align-self: end;
+  grid-template-columns: 36px;
+  grid-auto-rows: 36px;
+  gap: .5rem;
+  align-self: start;
+  width: 36px;
 }
 .payment-actions .icon-button {
-  width: 32px;
-  min-width: 32px;
-  min-height: 32px;
-  padding: .25rem;
+  box-sizing: border-box;
+  width: 36px;
+  min-width: 36px;
+  height: 36px;
+  min-height: 36px;
+  padding: 0;
 }
-.payment > .icon-button {
-  width: 28px;
-  min-width: 28px;
-  min-height: 28px;
-  padding: .15rem;
-}
-.payment-actions {
-  grid-template-columns: 28px;
-  grid-auto-rows: 28px;
-  width: 28px;
-}
-.payment-actions .icon-button {
-  width: 28px;
-  min-width: 28px;
-  min-height: 28px;
-  padding: .15rem;
+.payment-actions a.icon-button {
+  color: #243b33;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 10px;
 }
 .payment a.icon-button,
 .confirmed-row a.icon-button {
@@ -1903,7 +1896,7 @@ button.attention-item { justify-content: initial; }
   .payment { grid-template-columns: minmax(0,1fr) auto; }
   .payment > strong { grid-column: 1; }
   .payment > .icon-button { grid-column: 2; grid-row: 1; }
-  .payment-actions { grid-column: 2; grid-row: 2; }
+  .payment-actions { grid-column: 2; grid-row: 1 / span 2; }
   .task-list article { grid-template-columns: auto minmax(0,1fr) auto; gap: .55rem; padding: .65rem .2rem; }
   .task-list article > .badge { grid-column: 2; }
   .task-actions { grid-column: 3; grid-row: 1 / span 2; }
