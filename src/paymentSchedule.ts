@@ -30,6 +30,27 @@ export function paymentForMonth(
 ): import("./domain").Obligation {
   const step = recurrenceMonths(payment.recurrence);
   if (!step || payment.status === "Dispensada") return payment;
+  if (step > 1) {
+    const linked = transactions.filter(t => t.obligationId === payment.id);
+    const occurrence = linked.find(t => (t.purchaseDate || t.paymentDate || t.date).slice(0, 7) === month);
+    if (occurrence) return { ...payment, dueDate: occurrence.purchaseDate || payment.dueDate, status: "Paga", paidAt: occurrence.paymentDate || occurrence.date, paidAmount: Math.abs(occurrence.amount) };
+    const lastPaid = linked
+      .map(t => t.paymentDate || t.date)
+      .filter(date => date.slice(0, 7) <= month)
+      .sort().at(-1);
+    const legacyPaidAt = !linked.length && ["Paga", "Confirmada"].includes(payment.status) ? payment.paidAt || payment.dueDate : undefined;
+    const paidAnchor = lastPaid || (legacyPaidAt && legacyPaidAt.slice(0, 7) < month ? legacyPaidAt : undefined);
+    const anchor = paidAnchor || payment.dueDate;
+    const [year, startMonth, day] = anchor.split("-").map(Number);
+    const [targetYear, targetMonth] = month.split("-").map(Number);
+    const distance = (targetYear - year) * 12 + targetMonth - startMonth;
+    if (distance < 0 || (!paidAnchor && legacyPaidAt && month === anchor.slice(0, 7))) return payment;
+    const intervals = Math.max(paidAnchor ? 1 : 0, Math.ceil(distance / step));
+    const date = new Date(year, startMonth - 1 + intervals * step, 1, 12);
+    const lastDay = new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
+    const dueDate = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(Math.min(day, lastDay)).padStart(2, "0")}`;
+    return { ...payment, dueDate, status: payment.skippedDates?.includes(dueDate) ? "Dispensada" : "A pagar", paidAt: undefined, paidAmount: undefined, reconciledTransactionId: undefined };
+  }
   const [year, startMonth, day] = payment.dueDate.split("-").map(Number);
   const [targetYear, targetMonth] = month.split("-").map(Number);
   const distance = (targetYear - year) * 12 + targetMonth - startMonth;

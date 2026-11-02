@@ -2047,6 +2047,18 @@ button.attention-item { justify-content: initial; }
 }
 
 .payment-access, .payment-access-fields { grid-column: 1 / -1; min-width: 0; width: 100%; }
+.payment-confirm-dialog { width: min(430px, calc(100% - 2rem)); max-height: calc(100dvh - 2rem); margin: auto; padding: 1.25rem; overflow-y: auto; border: 1px solid var(--line); border-radius: 20px; background: #fbfcf8; color: #243b33; box-shadow: 0 24px 70px #14271c40; }
+.payment-confirm-dialog::backdrop { background: #14271c80; }
+.payment-confirm-dialog form { display: grid; gap: 1rem; }
+.payment-confirm-heading { display: flex; align-items: center; gap: .65rem; color: var(--green); }
+.payment-confirm-heading h3 { margin: 0; font-size: 1.15rem; }
+.payment-confirm-name { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
+.payment-confirm-dialog label { display: grid; gap: .4rem; font-size: .85rem; font-weight: 600; min-width: 0; }
+.payment-confirm-dialog input, .payment-confirm-dialog select { box-sizing: border-box; width: 100%; min-width: 0; min-height: 44px; }
+.payment-confirm-hint { margin: 0; padding: .75rem; border-radius: 10px; background: #e9f2eb; color: #486252; font-size: .8rem; line-height: 1.5; }
+.payment-confirm-error { margin: 0; color: var(--red); }
+.payment-confirm-buttons { display: flex; flex-wrap: wrap; gap: .65rem; padding-top: .25rem; }
+.payment-confirm-buttons button { flex: 1 1 auto; min-height: 44px; }
 .payment-access { border-top: 1px solid var(--line, #deded5); padding-top: .65rem; }
 .payment-access > summary { cursor: pointer; font-weight: 600; }
 .payment-access-content { display: grid; gap: .65rem; padding-top: .7rem; }
