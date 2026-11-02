@@ -4976,7 +4976,7 @@ function Payments({
       )}
       <div className="payment-grid payment-grid-grouped">
         {paymentGroups.map((paymentGroupSummary) => (
-          <details className="payment-subgroup" key={`${month}:${paymentGroupSummary.name}`} open={paymentGroupSummary.name !== "Vence nos próximos meses"}>
+          <details className="payment-subgroup" key={`${month}:${paymentGroupSummary.name}`} open>
             <summary>
               <span>{paymentGroupSummary.name}</span>
               <small>
