@@ -4806,6 +4806,7 @@ function Payments({
   const [deleting, setDeleting] = useState<Obligation>();
   const [confirmingPayment, setConfirmingPayment] = useState<Obligation>();
   const [paymentError, setPaymentError] = useState("");
+  const [paymentGroupsOpen, setPaymentGroupsOpen] = useState<Record<string, boolean>>({});
   const dueDateForDay = (baseMonth: string, rawDay: FormDataEntryValue | null) => {
     const day = Math.max(1, Math.min(31, Number(rawDay) || 10));
     const [year, monthNumber] = baseMonth.split("-").map(Number);
@@ -4981,7 +4982,14 @@ function Payments({
       )}
       <div className="payment-grid payment-grid-grouped">
         {paymentGroups.map((paymentGroupSummary) => (
-          <details className="payment-subgroup" key={`${month}:${paymentGroupSummary.name}`} open>
+          <details className="payment-subgroup" key={paymentGroupSummary.name}
+            open={paymentGroupsOpen[paymentGroupSummary.name] ?? true}
+            onToggle={event => {
+              if (event.target !== event.currentTarget) return;
+              const open = event.currentTarget.open;
+              setPaymentGroupsOpen(current => current[paymentGroupSummary.name] === open
+                ? current : { ...current, [paymentGroupSummary.name]: open });
+            }}>
             <summary>
               <span>{paymentGroupSummary.name}</span>
               <small>
