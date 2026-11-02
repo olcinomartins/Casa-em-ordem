@@ -1,4 +1,23 @@
 import { describe, expect, it } from "vitest";
+import { paymentGroupForDate } from "./paymentGroups";
+import { paymentForMonth } from "./paymentSchedule";
+import type { Obligation, Transaction } from "./domain";
+
+describe("payment groups for the selected month", () => {
+  it("puts a quarterly occurrence in the selected future month instead of a collapsed future group", () => {
+    const payment = { id: "quarterly", dueDate: "2026-11-02", recurrence: "quarterly", status: "Paga", paidAt: "2026-11-01" } as Obligation;
+    const transactions = [{ obligationId: payment.id, purchaseDate: "2026-11-02", paymentDate: "2026-11-01", amount: 100 }] as Transaction[];
+    const occurrence = paymentForMonth(payment, "2027-02", transactions);
+    expect(occurrence.status).toBe("A pagar");
+    expect(paymentGroupForDate(occurrence.dueDate, "2027-02", "2026-11-02")).toBe("Vence este mês");
+  });
+  it("keeps current-month urgency and compares other dates to the selected month", () => {
+    expect(paymentGroupForDate("2026-11-02", "2026-11", "2026-11-02")).toBe("Vence hoje");
+    expect(paymentGroupForDate("2026-11-08", "2026-11", "2026-11-02")).toBe("Vence nos próximos 7 dias");
+    expect(paymentGroupForDate("2027-01-31", "2027-02", "2026-11-02")).toBe("Vencidos");
+    expect(paymentGroupForDate("2027-05-01", "2027-03", "2026-11-02")).toBe("Vence nos próximos meses");
+  });
+});
 import {
   groupPayments,
   paymentDateForEdit,

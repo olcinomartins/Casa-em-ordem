@@ -8,6 +8,18 @@ export const PAYMENT_GROUP_ORDER = [
 
 export type PaymentGroupName = (typeof PAYMENT_GROUP_ORDER)[number];
 
+export function paymentGroupForDate(dueDate: string, month: string, today: string): PaymentGroupName {
+  if (month !== today.slice(0, 7)) {
+    if (dueDate < `${month}-01`) return "Vencidos";
+    return dueDate.slice(0, 7) === month ? "Vence este mês" : "Vence nos próximos meses";
+  }
+  const days = Math.round((new Date(`${dueDate}T12:00:00`).getTime() - new Date(`${today}T12:00:00`).getTime()) / 86_400_000);
+  if (days < 0) return "Vencidos";
+  if (days === 0) return "Vence hoje";
+  if (days <= 7) return "Vence nos próximos 7 dias";
+  return dueDate.slice(0, 7) === month ? "Vence este mês" : "Vence nos próximos meses";
+}
+
 export function shouldResetNestedOnToggle(target: unknown, currentTarget: unknown) {
   return target === currentTarget;
 }

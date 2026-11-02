@@ -75,6 +75,7 @@ import {
 import { transactionDescriptionPatch } from "./transactionEditDraft";
 import {
   groupPayments,
+  paymentGroupForDate,
   paymentDateForEdit,
   shouldResetNestedOnToggle,
 } from "./paymentGroups";
@@ -1051,7 +1052,7 @@ export default function App() {
                 onCreateDone={() => setCreateIntent(undefined)}
               />
             </Collapsible>
-            <Collapsible id="quick-payments" title="Central de pagamentos" resetNestedOnOpen>
+            <Collapsible id="quick-payments" title="Central de pagamentos">
               <Payments
                 data={data}
                 mutate={mutate}
@@ -4794,16 +4795,7 @@ function Payments({
     return nextOutstandingPaymentDue(obligation);
   };
   const paymentGroup = (obligation: Obligation) => {
-    const dueText = nextDueDate(obligation);
-    const due = new Date(`${dueText}T12:00:00`);
-    const todayText = dateOnly(new Date());
-    const today = new Date(`${todayText}T12:00:00`);
-    const days = Math.round((due.getTime() - today.getTime()) / 86_400_000);
-    if (days < 0) return "Vencidos";
-    if (days === 0) return "Vence hoje";
-    if (days <= 7) return "Vence nos próximos 7 dias";
-    if (dueText.slice(0, 7) === todayText.slice(0, 7)) return "Vence este mês";
-    return "Vence nos próximos meses";
+    return paymentGroupForDate(nextDueDate(obligation), month, dateOnly(new Date()));
   };
   const [editingId, setEditingId] = useState<string>();
   const [deleting, setDeleting] = useState<Obligation>();
@@ -4984,7 +4976,7 @@ function Payments({
       )}
       <div className="payment-grid payment-grid-grouped">
         {paymentGroups.map((paymentGroupSummary) => (
-          <details className="payment-subgroup" key={paymentGroupSummary.name}>
+          <details className="payment-subgroup" key={`${month}:${paymentGroupSummary.name}`} open={paymentGroupSummary.name !== "Vence nos próximos meses"}>
             <summary>
               <span>{paymentGroupSummary.name}</span>
               <small>
