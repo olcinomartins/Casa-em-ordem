@@ -7,6 +7,26 @@ import {
 } from "./uiPreferences";
 
 describe("uiPreferences", () => {
+  it("opens in the local current month after manual selection and year rollover", () => {
+    vi.useFakeTimers();
+    try {
+      let serialized = "";
+      const storage = {
+        getItem: () => serialized,
+        setItem: (_key: string, value: string) => { serialized = value; },
+      };
+      vi.setSystemTime(new Date(2026, 11, 31, 23, 59));
+      const manuallySelected = { ...defaultUiPreferences(), month: "2026-10" };
+      saveUiPreferences(manuallySelected, storage);
+      expect(manuallySelected.month).toBe("2026-10");
+      expect(loadUiPreferences(storage).month).toBe("2026-12");
+      vi.setSystemTime(new Date(2027, 0, 1, 0, 1));
+      expect(loadUiPreferences(storage).month).toBe("2027-01");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("loads a complete versioned preference set", () => {
     const storage = {
       getItem: () =>
@@ -26,7 +46,7 @@ describe("uiPreferences", () => {
 
     expect(loadUiPreferences(storage)).toEqual({
       version: 1,
-      month: "2026-05",
+      month: defaultUiPreferences().month,
       view: "compare",
       analytics: {
         start: "2025-01",
@@ -54,7 +74,7 @@ describe("uiPreferences", () => {
 
     expect(loadUiPreferences(storage)).toMatchObject({
       version: 1,
-      month: "2026-07",
+      month: defaultUiPreferences().month,
       view: "accrual",
       analytics: {
         start: "2025-02",

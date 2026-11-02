@@ -145,7 +145,9 @@ export function loadUiPreferences(storage?: ReadStorage): UiPreferences {
       UI_PREFERENCES_STORAGE_KEY,
     );
     if (!serialized) return defaultUiPreferences();
-    return normalizeUiPreferences(JSON.parse(serialized));
+    // The month selector starts fresh on every app opening. Manual changes
+    // remain in React state during the session; other preferences persist.
+    return { ...normalizeUiPreferences(JSON.parse(serialized)), month: currentMonth() };
   } catch {
     return defaultUiPreferences();
   }
