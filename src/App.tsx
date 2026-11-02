@@ -878,11 +878,16 @@ export default function App() {
             </p>
           </div>
           <div className="period">
+            <div className="month-selector">
             <input
               type="month"
+              aria-label="Mês selecionado"
               value={month}
               onChange={(e) => setMonth(e.target.value)}
             />
+            <button type="button" className="month-today" title="Voltar ao mês atual" aria-label="Selecionar mês atual"
+              onClick={() => setMonth(monthOf(dateOnly(new Date())))}>Hoje</button>
+            </div>
             <button
               className="page-order-button"
               title={organizingPage ? "Concluir ajuste da ordem" : "Ajustar ordem dos blocos"}
