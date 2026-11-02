@@ -103,7 +103,7 @@ describe("selectActionSummary", () => {
 
   it("does not alert for an occurrence paid in the selected month", () => {
     const data = setup();
-    data.obligations = [payment({ recurrence: "monthly", dueDate: "2026-10-01" })];
+    data.obligations = [payment({ recurrence: "monthly", dueDate: "2026-11-01" })];
     data.transactions = [transaction({ obligationId: "payment", purchaseDate: "2026-11-01", paymentDate: "2026-11-02" })];
     const result = selectActionSummary(data, {
       month: "2026-11", view: "cash", today: "2026-11-02",

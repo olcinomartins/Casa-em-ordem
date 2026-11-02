@@ -9,6 +9,61 @@ const recurrenceMonths = (recurrence: PaymentRecurrence) =>
 
 const dateOnly = (date: Date) => date.toISOString().slice(0, 10);
 
+export const paymentOccurrenceKey = (payment: Pick<import("./domain").Obligation, "id" | "dueDate">) => `${payment.id}:${payment.dueDate}`;
+
+export function summarizePaymentOccurrences(items: import("./domain").Obligation[], month: string) {
+  const unpaid = (item: import("./domain").Obligation) => !["Paga", "Confirmada", "Dispensada"].includes(item.status);
+  const scheduled = items.filter(item => item.dueDate.slice(0, 7) === month && item.status !== "Dispensada");
+  const pending = scheduled.filter(unpaid);
+  const overdue = items.filter(item => item.dueDate < `${month}-01` && unpaid(item));
+  const total = (rows: import("./domain").Obligation[]) => rows.reduce((sum, item) => sum + item.planned, 0);
+  return { monthCount: scheduled.length, monthTotal: total(scheduled), pendingCount: pending.length, pendingTotal: total(pending), overdueCount: overdue.length, overdueTotal: total(overdue) };
+}
+
+/** Past unpaid occurrences, all occurrences in the selected month, and the next forecast.
+ * Projections never write records or require earlier occurrences to be paid. */
+export function paymentOccurrencesForMonth(
+  payment: import("./domain").Obligation,
+  month: string,
+  transactions: import("./domain").Transaction[],
+): import("./domain").Obligation[] {
+  if (payment.status === "Dispensada") return payment.dueDate.slice(0, 7) === month ? [payment] : [];
+  const step = recurrenceMonths(payment.recurrence);
+  const linked = transactions.filter(t => t.obligationId === payment.id);
+  const paidStatuses = ["Paga", "Confirmada"];
+  const result: import("./domain").Obligation[] = [];
+  let anchor = payment.dueDate;
+  let offset = 0;
+  let anchorApplied = false;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(anchor) || !/^\d{4}-\d{2}$/.test(month)) return [];
+  while (true) {
+    const [year, startMonth, day] = anchor.split("-").map(Number);
+    const date = new Date(year, startMonth - 1 + offset, 1, 12);
+    const lastDay = new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
+    const dueDate = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(Math.min(day, lastDay)).padStart(2, "0")}`;
+    const dueMonth = dueDate.slice(0, 7);
+    const transaction = linked.find(t => (t.purchaseDate || t.paymentDate || t.date) === dueDate);
+    const legacyPaid = !linked.length && paidStatuses.includes(payment.status) &&
+      (!step || (step > 1 ? dueDate === payment.dueDate : dueMonth === (payment.paidAt || payment.dueDate).slice(0, 7)));
+    const paid = Boolean(transaction || legacyPaid);
+    const skipped = payment.skippedDates?.includes(dueDate);
+    const occurrence: import("./domain").Obligation = {
+      ...payment, dueDate, status: skipped ? "Dispensada" : paid ? legacyPaid && payment.status === "Confirmada" ? "Confirmada" : "Paga" : "A pagar",
+      paidAt: paid ? transaction?.paymentDate || payment.paidAt : undefined,
+      paidAmount: paid ? transaction ? Math.abs(transaction.amount) : payment.paidAmount : undefined,
+      reconciledTransactionId: paid ? transaction?.id || payment.reconciledTransactionId : undefined,
+    };
+    if (dueMonth === month || (!paid && !skipped)) result.push(occurrence);
+    if (!step || dueMonth > month) break;
+    // The first real payment anchors non-monthly series. Later settlements must
+    // not erase occurrences that were already forecast while an earlier bill was unpaid.
+    const paidAt = transaction?.paymentDate || (legacyPaid ? payment.paidAt : undefined);
+    if (step > 1 && paidAt && !anchorApplied && dueDate === payment.dueDate) { anchor = paidAt; offset = step; anchorApplied = true; }
+    else offset += step;
+  }
+  return result;
+}
+
 export function nextOutstandingPaymentDue(payment: {
   dueDate: string;
   recurrence: PaymentRecurrence;

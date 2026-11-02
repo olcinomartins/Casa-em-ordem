@@ -79,7 +79,7 @@ import {
   paymentDateForEdit,
   shouldResetNestedOnToggle,
 } from "./paymentGroups";
-import { nextOutstandingPaymentDue, paymentForMonth } from "./paymentSchedule";
+import { nextOutstandingPaymentDue, paymentOccurrenceKey, paymentOccurrencesForMonth, summarizePaymentOccurrences } from "./paymentSchedule";
 import { normalizePaymentUrl } from "./paymentLinks";
 import {
   loadLocalIfPresent,
@@ -131,6 +131,7 @@ import { isCardCommitment, planCheck, standaloneBudgetItems } from "./planCheck"
 import { mergeFamilySnapshots } from "./familyMerge";
 import {
   loadUiPreferences,
+  compactMonthLabel,
   saveUiPreferences,
   UI_PREFERENCES_STORAGE_KEY,
 } from "./uiPreferences";
@@ -879,12 +880,15 @@ export default function App() {
           </div>
           <div className="period">
             <div className="month-selector">
+            <label className="month-picker">
+            <span aria-hidden="true">{compactMonthLabel(month)}</span>
             <input
               type="month"
               aria-label="Mês selecionado"
               value={month}
               onChange={(e) => setMonth(e.target.value)}
             />
+            </label>
             <button type="button" className="month-today" title="Voltar ao mês atual" aria-label="Selecionar mês atual"
               onClick={() => setMonth(monthOf(dateOnly(new Date())))}>Hoje</button>
             </div>
@@ -4788,7 +4792,7 @@ function Payments({
   creating: boolean;
   onCreateDone: () => void;
 }) {
-  const data = { ...storedData, obligations: storedData.obligations.map(item => paymentForMonth(item, month, storedData.transactions)) };
+  const data = { ...storedData, obligations: storedData.obligations.flatMap(item => paymentOccurrencesForMonth(item, month, storedData.transactions)) };
   const recurrenceLabel: Record<Obligation["recurrence"], string> = { none: "Único", monthly: "Mensal", quarterly: "Trimestral", semiannual: "Semestral", yearly: "Anual" };
   const futureDates = (obligation: Obligation) => {
     const step = obligation.recurrence === "monthly" ? 1 : obligation.recurrence === "quarterly" ? 3 : obligation.recurrence === "semiannual" ? 6 : obligation.recurrence === "yearly" ? 12 : 0;
@@ -4807,6 +4811,15 @@ function Payments({
   const [confirmingPayment, setConfirmingPayment] = useState<Obligation>();
   const [paymentError, setPaymentError] = useState("");
   const [paymentGroupsOpen, setPaymentGroupsOpen] = useState<Record<string, boolean>>({});
+  const disclosureProps = (key: string) => ({
+    open: paymentGroupsOpen[key] ?? false,
+    onToggle: (event: React.SyntheticEvent<HTMLDetailsElement>) => {
+      if (event.target !== event.currentTarget) return;
+      const open = event.currentTarget.open;
+      setPaymentGroupsOpen(current => current[key] === open ? current : { ...current, [key]: open });
+    },
+  });
+  const overview = summarizePaymentOccurrences(data.obligations, month);
   const dueDateForDay = (baseMonth: string, rawDay: FormDataEntryValue | null) => {
     const day = Math.max(1, Math.min(31, Number(rawDay) || 10));
     const [year, monthNumber] = baseMonth.split("-").map(Number);
@@ -4842,11 +4855,11 @@ function Payments({
     );
     return true;
   };
-  const mark = (id: string) => {
+  const mark = (payment: Obligation) => {
     if (hideValues)
       return alert("Mostre os valores pelo botão do olho para confirmar o pagamento.");
     setPaymentError("");
-    setConfirmingPayment(data.obligations.find(o => o.id === id));
+    setConfirmingPayment(payment);
   };
   const confirmPayment = (form: FormData) => {
     if (!confirmingPayment || hideValues) return;
@@ -4861,11 +4874,26 @@ function Payments({
     }
     const account = String(form.get("accountId") || "");
     if (!data.accounts.some(item => item.id === account)) { setPaymentError("Selecione uma conta para o pagamento."); return; }
-    mutate(d=>{const o=d.obligations.find(x=>x.id===id)!;o.status="Paga";o.paidAt=paidAt;o.paidAmount=paidAmount;o.reconciledTransactionId=undefined;const accountOwner=d.accounts.find(item=>item.id===account)?.operator||"Ambos";const rule=suggest(o.name,account,accountOwner,d.rules);const fallback=d.categories.find(category=>normalize(category.name)==="OUTROS")?.id;d.transactions=d.transactions.filter(t=>t.obligationId!==id||(t.purchaseDate||t.paymentDate||t.date).slice(0,7)!==current.dueDate.slice(0,7));d.transactions.push({...audit(accountOwner),date:paidAt,competence:monthOf(paidAt),purchaseDate:current.dueDate,paymentDate:paidAt,description:o.name,normalized:normalize(o.name),amount:paidAmount,accountId:account,operator:accountOwner,scope:"Familiar",categoryId:o.categoryId||rule?.categoryId||fallback,subcategory:o.subcategory||rule?.subcategory,classification:o.categoryId?"confirmed":rule?"suggested":"pending",dedupeKey:`payment:${id}:${paidAt}`,transfer:false,movement:"expense_income",sourceKind:"statement",obligationId:id,provisional:true,notes:`Pagamento realizado. Previsto: ${money(o.planned)}`})});
+    mutate(d => {
+      const o = d.obligations.find(x => x.id === id);
+      if (!o) return;
+      o.status = "Paga"; o.paidAt = paidAt; o.paidAmount = paidAmount;
+      o.reconciledTransactionId = undefined; o.updatedAt = now(); o.version++;
+      const accountOwner = d.accounts.find(item => item.id === account)?.operator || "Ambos";
+      const rule = suggest(o.name, account, accountOwner, d.rules);
+      const fallback = d.categories.find(category => normalize(category.name) === "OUTROS")?.id;
+      d.transactions = d.transactions.filter(t => t.obligationId !== id || (t.purchaseDate || t.paymentDate || t.date) !== current.dueDate);
+      d.transactions.push({ ...audit(accountOwner), date: paidAt, competence: monthOf(paidAt), purchaseDate: current.dueDate,
+        paymentDate: paidAt, description: o.name, normalized: normalize(o.name), amount: paidAmount, accountId: account,
+        operator: accountOwner, scope: "Familiar", categoryId: o.categoryId || rule?.categoryId || fallback,
+        subcategory: o.subcategory || rule?.subcategory, classification: o.categoryId ? "confirmed" : rule ? "suggested" : "pending",
+        dedupeKey: `payment:${id}:${current.dueDate}`, transfer: false, movement: "expense_income", sourceKind: "statement",
+        obligationId: id, provisional: true, notes: `Pagamento de ${current.dueDate}. Previsto: ${money(o.planned)}` });
+    });
     setConfirmingPayment(undefined);
   };
-  const saveEdit = (id: string, form: FormData) => {
-    const current = data.obligations.find((o) => o.id === id)!;
+  const saveEdit = (current: Obligation, form: FormData) => {
+    const id = current.id;
     const dueDate = String(form.get("dueDate") || current.dueDate);
     const applyTo = String(form.get("applyTo") || "future");
     let paymentUrl: string | undefined;
@@ -4918,6 +4946,19 @@ function Payments({
     mutate((d) => { d.obligations = d.obligations.filter((item) => item.id !== deleting.id); });
     setDeleting(undefined);
   };
+  const unconfirmPayment = (payment: Obligation) => mutate(d => {
+    const item = d.obligations.find(o => o.id === payment.id);
+    if (!item) return;
+    item.status = "A pagar"; item.paidAt = undefined; item.paidAmount = undefined;
+    item.reconciledTransactionId = undefined; item.updatedAt = now(); item.version++;
+    item.skippedDates = item.skippedDates?.filter(date => date !== payment.dueDate);
+    const matches = (t: Transaction) => t.obligationId === payment.id && (t.purchaseDate || t.paymentDate || t.date) === payment.dueDate;
+    d.transactions = d.transactions.filter(t => !matches(t) || !t.provisional);
+    for (const transaction of d.transactions) if (matches(transaction)) transaction.obligationId = undefined;
+  });
+  const cardPayments = data.obligations.filter(o => isCardCommitment(o) && !["Paga", "Confirmada", "Dispensada"].includes(o.status));
+  const completedPayments = data.obligations.filter(o => ["Paga", "Confirmada", "Dispensada"].includes(o.status));
+  const cardGroups = groupPayments(cardPayments, paymentGroup, nextDueDate, o => o.planned);
   const paymentGroups = groupPayments(
     data.obligations.filter(
       (obligation) =>
@@ -4934,9 +4975,14 @@ function Payments({
         <div>
           <h2>Central de pagamentos</h2>
           <p className="muted">
-            Ações manuais e conferência de cobranças automáticas.
+            Previsão por mês, contas vencidas e confirmação de pagamentos.
           </p>
         </div>
+      </div>
+      <div className="payment-month-summary">
+        <div><span>Previsto em {month.split("-").reverse().join("/")}</span><strong><SensitiveMoney value={overview.monthTotal} hidden={hideValues} /></strong><small>{overview.monthCount} cobrança(s) no mês</small></div>
+        <div><span>A pagar no mês</span><strong><SensitiveMoney value={overview.pendingTotal} hidden={hideValues} /></strong><small>{overview.pendingCount} pendente(s)</small></div>
+        <div><span>Atrasados anteriores</span><strong><SensitiveMoney value={overview.overdueTotal} hidden={hideValues} /></strong><small>{overview.overdueCount} pendente(s) acumulada(s)</small></div>
       </div>
       {creating && (
         <QuickForm
@@ -4982,14 +5028,7 @@ function Payments({
       )}
       <div className="payment-grid payment-grid-grouped">
         {paymentGroups.map((paymentGroupSummary) => (
-          <details className="payment-subgroup" key={paymentGroupSummary.name}
-            open={paymentGroupsOpen[paymentGroupSummary.name] ?? true}
-            onToggle={event => {
-              if (event.target !== event.currentTarget) return;
-              const open = event.currentTarget.open;
-              setPaymentGroupsOpen(current => current[paymentGroupSummary.name] === open
-                ? current : { ...current, [paymentGroupSummary.name]: open });
-            }}>
+          <details className="payment-subgroup" key={paymentGroupSummary.name} {...disclosureProps(paymentGroupSummary.name)}>
             <summary>
               <span>{paymentGroupSummary.name}</span>
               <small>
@@ -5007,22 +5046,22 @@ function Payments({
               o.kind === "Recorrência no cartão"
                 ? recurringCheck(o.planned, actual, o.tolerance)
                 : undefined;
-            return <article className="payment" key={o.id}>
+            return <article className="payment" key={paymentOccurrenceKey(o)}>
                 <div>
                   <Badge text={o.status} />
                   <h3>{o.name}</h3>
                   <small>
-                    {o.kind} · {recurrenceLabel[o.recurrence]} · próximo: {nextDueDate(o)}
+                    {o.kind} · {recurrenceLabel[o.recurrence]} · vencimento: {o.dueDate.split("-").reverse().join("/")}
                   </small>
                 </div>
                 <strong><SensitiveMoney value={o.planned} hidden={hideValues} /></strong>
                 {check && <Badge text={check} />}{" "}
                 <div className="actions payment-actions">
                 {!["Paga", "Confirmada"].includes(o.status) && (
-                  <button className="icon-button success-button" title="Marcar como paga" aria-label={`Marcar ${o.name} como paga`} onClick={() => mark(o.id)}><CheckCircle2 size={20} /></button>
+                  <button className="icon-button success-button" title="Marcar como paga" aria-label={`Marcar ${o.name} de ${o.dueDate} como paga`} onClick={() => mark(o)}><CheckCircle2 size={20} /></button>
                 )}
                   {o.paymentUrl && <a className="icon-button" href={o.paymentUrl} target="_blank" rel="noreferrer" title="Abrir pagamento" aria-label={`Abrir pagamento de ${o.name}`}><ExternalLink size={18} /></a>}
-                  <button className="icon-button" title="Editar pagamento" aria-label={`Editar ${o.name}`} onClick={() => hideValues ? alert("Mostre os valores para editar este pagamento.") : setEditingId(editingId === o.id ? undefined : o.id)}><Pencil size={18} /></button>
+                  <button className="icon-button" title="Editar pagamento" aria-label={`Editar ${o.name}`} onClick={() => hideValues ? alert("Mostre os valores para editar este pagamento.") : setEditingId(editingId === paymentOccurrenceKey(o) ? undefined : paymentOccurrenceKey(o))}><Pencil size={18} /></button>
                   <button
                     className="danger-button icon-button"
                     title="Excluir pagamento"
@@ -5033,8 +5072,8 @@ function Payments({
                   </button>
                 </div>
                 <PaymentAccessPanel paymentId={o.id} name={o.name} />
-                {editingId === o.id && (
-                  <form className="quick-form payment-edit-form" onSubmit={(event)=>{event.preventDefault();saveEdit(o.id,new FormData(event.currentTarget));}}>
+                {editingId === paymentOccurrenceKey(o) && (
+                  <form className="quick-form payment-edit-form" onSubmit={(event)=>{event.preventDefault();saveEdit(o,new FormData(event.currentTarget));}}>
                     <input name="name" required defaultValue={o.name} placeholder="Nome do pagamento" />
                     <MoneyInput name="planned" allowZero required defaultValue={o.planned} placeholder="Valor planejado" />
                     <MoneyInput name="tolerance" allowZero defaultValue={o.tolerance} placeholder="Tolerância" />
@@ -5065,21 +5104,44 @@ function Payments({
           <form onSubmit={event => { event.preventDefault(); confirmPayment(new FormData(event.currentTarget)); }}>
             <div className="payment-confirm-heading"><CheckCircle2 size={24} /><h3 id="payment-confirm-title">Confirmar pagamento</h3></div>
             <p className="payment-confirm-name">{confirmingPayment.name}</p>
+            <small>Vencimento desta cobrança: {confirmingPayment.dueDate.split("-").reverse().join("/")}</small>
             <label>Valor pago<MoneyInput name="paidAmount" allowZero required defaultValue={confirmingPayment.planned} /></label>
             <label>Data do pagamento<input name="paidAt" type="date" required defaultValue={dateOnly(new Date())} /></label>
             <label>Conta do pagamento<select name="accountId" required defaultValue={confirmingPayment.accountId || data.accounts.find(account => account.active)?.id || ""}>
               <option value="">Selecione uma conta</option>
               {data.accounts.filter(account => account.active || account.id === confirmingPayment.accountId).map(account => <option key={account.id} value={account.id}>{accountDisplayName(account)}</option>)}
             </select></label>
-            {["quarterly", "semiannual", "yearly"].includes(confirmingPayment.recurrence) && <p className="payment-confirm-hint">A próxima cobrança será em {confirmingPayment.recurrence === "quarterly" ? 3 : confirmingPayment.recurrence === "semiannual" ? 6 : 12} meses, a partir da data deste pagamento.</p>}
+            {["quarterly", "semiannual", "yearly"].includes(confirmingPayment.recurrence) && <p className="payment-confirm-hint">Repete a cada {confirmingPayment.recurrence === "quarterly" ? 3 : confirmingPayment.recurrence === "semiannual" ? 6 : 12} meses. As outras cobranças previstas continuam no calendário mesmo enquanto esta está pendente.</p>}
             {paymentError && <p className="payment-confirm-error" role="alert">{paymentError}</p>}
             <div className="payment-confirm-buttons"><button type="button" onClick={() => setConfirmingPayment(undefined)}>Cancelar</button><button className="primary" type="submit">Confirmar pagamento</button></div>
           </form>
         </dialog>
       )}
       {deleting && <div className="choice-dialog" role="dialog" aria-modal="true" aria-label="Excluir pagamento recorrente"><div><h3>Excluir {deleting.name}</h3><p>Escolha se vale somente para o próximo pagamento ou para toda a recorrência.</p><div className="actions"><button onClick={deleteOccurrence}>Apenas esta ocorrência</button><button className="danger-button" onClick={deleteRecurring}>Esta e próximas</button><button onClick={()=>setDeleting(undefined)}>Cancelar</button></div></div></div>}
-      <details className="completed-block"><summary>Cartões: recorrências e parcelas ({data.obligations.filter(isCardCommitment).length})</summary><p className="muted">Acompanhe aqui o previsto no cartão. Estas cobranças não exigem uma ação de pagamento nesta central.</p>{data.obligations.filter(isCardCommitment).slice().sort((a,b)=>nextDueDate(a).localeCompare(nextDueDate(b))).map(o=><div className="confirmed-row" key={o.id}><div><b>{o.name}</b><small>{o.kind} · próximo: {nextDueDate(o)} · <SensitiveMoney value={o.planned} hidden={hideValues} /></small></div>{o.paymentUrl && <a className="icon-button" href={o.paymentUrl} target="_blank" rel="noreferrer" title="Abrir pagamento" aria-label={`Abrir pagamento de ${o.name}`}><ExternalLink size={18} /></a>}<PaymentAccessPanel paymentId={o.id} name={o.name} /></div>)}</details>
-      <details className="completed-block"><summary>Pagamentos confirmados ({data.obligations.filter(o=>["Paga","Confirmada","Dispensada"].includes(o.status)).length})</summary>{data.obligations.filter(o=>["Paga","Confirmada","Dispensada"].includes(o.status)).sort((a,b)=>b.dueDate.localeCompare(a.dueDate)).map(o=><div className="confirmed-row" key={o.id}><div><b>{o.name}</b><small>{o.dueDate} · <SensitiveMoney value={o.paidAmount??o.planned} hidden={hideValues} /> · {o.status}</small></div>{o.paymentUrl && <a className="icon-button" href={o.paymentUrl} target="_blank" rel="noreferrer" title="Abrir pagamento" aria-label={`Abrir pagamento de ${o.name}`}><ExternalLink size={18} /></a>}<PaymentAccessPanel paymentId={o.id} name={o.name} /><button onClick={()=>mutate(d=>{const item=d.obligations.find(x=>x.id===o.id);if(item){item.status="A pagar";item.paidAt=undefined;item.paidAmount=undefined;item.reconciledTransactionId=undefined;d.transactions=d.transactions.filter(transaction=>transaction.obligationId!==o.id||!transaction.provisional||(transaction.purchaseDate||transaction.paymentDate||transaction.date).slice(0,7)!==o.dueDate.slice(0,7));for(const transaction of d.transactions)if(transaction.obligationId===o.id&&(transaction.purchaseDate||transaction.paymentDate||transaction.date).slice(0,7)===o.dueDate.slice(0,7))transaction.obligationId=undefined}})}>Desconfirmar</button></div>)}</details>
+      <div className="payment-grid payment-grid-grouped payment-secondary-groups">
+        <details className="payment-subgroup" {...disclosureProps("cards")}>
+          <summary><span>Cartões: recorrências e parcelas</span><small>{cardPayments.length} cobrança(s) · <SensitiveMoney value={cardPayments.reduce((sum, o) => sum + o.planned, 0)} hidden={hideValues} /></small></summary>
+          <div className="payment-section-content">
+            <p className="muted">Previsões do cartão, separadas por vencimento. Confira o pagamento na fatura.</p>
+            {cardGroups.map(group => <details className="payment-subgroup" key={group.name} {...disclosureProps(`cards:${group.name}`)}>
+              <summary><span>{group.name}</span><small>{group.count} cobrança(s) · <SensitiveMoney value={group.total} hidden={hideValues} /></small></summary>
+              {group.items.map(o => <div className="confirmed-row" key={paymentOccurrenceKey(o)}><div><b>{o.name}</b><small>{o.dueDate.split("-").reverse().join("/")} · <SensitiveMoney value={o.planned} hidden={hideValues} /></small></div><PaymentAccessPanel paymentId={o.id} name={o.name} /></div>)}
+            </details>)}
+            {!cardPayments.length && <p className="muted">Nenhuma cobrança de cartão para exibir.</p>}
+          </div>
+        </details>
+        <details className="payment-subgroup" {...disclosureProps("completed")}>
+          <summary><span>Pagamentos confirmados e dispensados</span><small>{completedPayments.length} cobrança(s) · <SensitiveMoney value={completedPayments.reduce((sum, o) => sum + (o.status === "Dispensada" ? 0 : o.paidAmount ?? o.planned), 0)} hidden={hideValues} /></small></summary>
+          <div className="payment-section-content">
+            {completedPayments.slice().sort((a, b) => b.dueDate.localeCompare(a.dueDate)).map(o => <div className="confirmed-row" key={paymentOccurrenceKey(o)}>
+              <div><b>{o.name}</b><small>{o.dueDate.split("-").reverse().join("/")} · <SensitiveMoney value={o.paidAmount ?? o.planned} hidden={hideValues} /> · {o.status}</small></div>
+              {o.paymentUrl && <a className="icon-button" href={o.paymentUrl} target="_blank" rel="noreferrer" aria-label={`Abrir pagamento de ${o.name}`}><ExternalLink size={18} /></a>}
+              <PaymentAccessPanel paymentId={o.id} name={o.name} /><button onClick={() => unconfirmPayment(o)}>Desconfirmar</button>
+            </div>)}
+            {!completedPayments.length && <p className="muted">Nenhum pagamento confirmado neste mês.</p>}
+          </div>
+        </details>
+      </div>
       {!data.obligations.length && <Empty />}
     </section>
   );

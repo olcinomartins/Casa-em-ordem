@@ -3,6 +3,11 @@ import type { CashView } from "./domain";
 export const UI_PREFERENCES_STORAGE_KEY = "casa-em-ordem-ui-preferences";
 export const UI_PREFERENCES_VERSION = 1 as const;
 
+export function compactMonthLabel(month: string) {
+  const names = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
+  return `${names[Number(month.slice(5, 7)) - 1]}/${month.slice(2, 4)}`;
+}
+
 export type AnalyticsMode = "cash" | "accrual";
 export type AnalyticsReport = "budget" | "reserve" | "final";
 

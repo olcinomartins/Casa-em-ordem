@@ -369,10 +369,19 @@ header p,
   gap: 0.6rem;
   align-items: center;
 }
-.period { flex-wrap: wrap; }
+.period { flex-wrap: nowrap; }
 .month-selector { display: flex; align-items: center; gap: .4rem; min-width: 0; }
 .month-selector input { min-width: 0; }
 .month-today { flex-shrink: 0; min-height: 44px; padding: .55rem .65rem; font-weight: 600; white-space: nowrap; }
+.month-picker { position: relative; display: grid; place-items: center; min-width: 0; width: 96px; height: 44px; padding: .5rem; border: 1px solid var(--line); border-radius: 10px; background: #fff; font-weight: 600; white-space: nowrap; }
+.month-picker input[type="month"] { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+.month-picker:focus-within { outline: 2px solid var(--sage); outline-offset: 2px; }
+.payment-month-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .65rem; margin: .85rem 0 1rem; }
+.payment-month-summary > div { display: grid; gap: .3rem; padding: .8rem; border: 1px solid var(--line); border-radius: 12px; background: #f5f7f1; }
+.payment-month-summary span, .payment-month-summary small { color: #64746b; font-size: .75rem; }
+.payment-month-summary strong { font-size: 1.1rem; }
+.payment-secondary-groups { margin-top: .8rem; }
+.payment-section-content { display: grid; gap: .65rem; padding: 0 .7rem .7rem; }
 .toast {
   background: #e6f0e8;
   border: 1px solid #bfd0c3;
@@ -1732,6 +1741,19 @@ button.attention-item { justify-content: initial; }
   .payment-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 720px) {
+  main > header > div:first-child { display: none; }
+  main > header .period { display: grid; width: 100%; grid-template-columns: minmax(0, 1fr) repeat(3, 40px); gap: .4rem; }
+  main > header .month-selector { width: 100%; gap: .25rem; }
+  main > header .month-picker { flex: 1; width: auto; padding: .35rem; font-size: .9rem; }
+  main > header .month-today { padding: .4rem; font-size: .8rem; }
+  main > header .page-order-button, main > header .privacy-toggle, main > header .notification-button { width: 40px; min-width: 40px; height: 44px; min-height: 44px; padding: .4rem; }
+  .payment-month-summary { grid-template-columns: minmax(0, 1fr); gap: .4rem; }
+  .payment-month-summary > div { grid-template-columns: minmax(0, 1fr) auto; align-items: center; padding: .65rem .75rem; }
+  .payment-month-summary small { grid-column: 1 / -1; }
+  .payment-subgroup > summary { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .3rem .6rem; }
+  .payment-subgroup > summary > span { grid-column: 1; }
+  .payment-subgroup > summary small { grid-column: 1; grid-row: 2; margin-left: 0; text-align: left; }
+  .payment-subgroup > summary::after { grid-column: 2; grid-row: 1 / span 2; align-self: center; }
   /* O Safari só amplia a página ao focar controles com fonte menor que 16px. */
   input, select, textarea { font-size: 16px; }
   .app {
@@ -2032,16 +2054,6 @@ button.attention-item { justify-content: initial; }
   }
   header > div,
   header .period { width: 100%; min-width: 0; }
-  header .period {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) 48px;
-    gap: .5rem;
-  }
-  header .period input { width: 100%; }
-  header .period .month-selector { grid-column: 1 / -1; width: 100%; }
-  header .period .month-selector input { flex: 1; }
-  header .period .privacy-toggle { width: 48px; padding: .65rem; }
-  header .period > button:not(.privacy-toggle) { grid-column: 1 / -1; width: 100%; }
   .quick-action-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .quick-action-grid > button { min-height: 62px; }
   .quick-expense-row { grid-template-columns: minmax(0, 1fr); }

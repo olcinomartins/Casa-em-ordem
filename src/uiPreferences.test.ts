@@ -1,12 +1,17 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   defaultUiPreferences,
+  compactMonthLabel,
   loadUiPreferences,
   saveUiPreferences,
   UI_PREFERENCES_STORAGE_KEY,
 } from "./uiPreferences";
 
 describe("uiPreferences", () => {
+  it("formats the selected month compactly without losing the year", () => {
+    expect(compactMonthLabel("2026-11")).toBe("nov/26");
+    expect(compactMonthLabel("2027-02")).toBe("fev/27");
+  });
   it("opens in the local current month after manual selection and year rollover", () => {
     vi.useFakeTimers();
     try {

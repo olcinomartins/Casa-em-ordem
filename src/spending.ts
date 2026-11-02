@@ -7,6 +7,7 @@ import {
   normalize,
 } from "./domain";
 import { isExpenseTransaction, realized, suggest } from "./finance";
+import { paymentOccurrencesForMonth } from "./paymentSchedule";
 
 export type SpendingEntry = {
   id: string;
@@ -132,21 +133,6 @@ const transactionDate = (transaction: Transaction, view: "cash" | "accrual") =>
     ? transaction.paymentDate || transaction.date
     : transaction.purchaseDate || transaction.date;
 
-/** Retorna a ocorrência da recorrência que cai no mês consultado. */
-const occurrenceInMonth = (obligation: Obligation, month: string) => {
-  const months = obligation.recurrence === "monthly" ? 1
-    : obligation.recurrence === "quarterly" ? 3
-    : obligation.recurrence === "semiannual" ? 6
-    : obligation.recurrence === "yearly" ? 12 : 0;
-  const date = new Date(`${obligation.dueDate}T12:00:00`);
-  if (!Number.isFinite(date.getTime())) return undefined;
-  if (!months) return monthOf(obligation.dueDate) === month ? obligation.dueDate : undefined;
-  while (monthOf(date.toISOString().slice(0, 10)) < month) date.setMonth(date.getMonth() + months);
-  const occurrence = date.toISOString().slice(0, 10);
-  if (monthOf(occurrence) !== month || obligation.skippedDates?.includes(occurrence)) return undefined;
-  return occurrence;
-};
-
 /**
  * Consolida fatos e estimativas do mês. Estimativas conciliadas permanecem no
  * histórico para auditoria, mas deixam de compor o total assim que o fato chega.
@@ -263,12 +249,15 @@ export function monthlySpending(
     });
   }
 
-  for (const obligation of data.obligations) {
+  for (const storedObligation of data.obligations) {
+    const projected = paymentOccurrencesForMonth(storedObligation, month, data.transactions)
+      .find(item => item.dueDate.slice(0, 7) === month);
+    const obligation = projected || storedObligation;
     const amount = obligation.paidAmount ?? obligation.planned;
-    const occurrenceDate = occurrenceInMonth(obligation, month);
+    const occurrenceDate = projected?.status !== "Dispensada" ? projected?.dueDate : undefined;
     const actualForObligation = actualTransactions.find((transaction) =>
       transaction.obligationId === obligation.id &&
-      monthOf(transaction.paymentDate || transaction.purchaseDate || transaction.date) === month,
+      (transaction.purchaseDate || transaction.date) === (occurrenceDate || obligation.dueDate),
     );
     if (obligation.status === "Dispensada" || actualForObligation) continue;
 

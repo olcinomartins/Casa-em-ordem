@@ -84,6 +84,20 @@ const obligation = (
 });
 
 describe("acompanhamento em tempo real", () => {
+  it("includes the quarterly forecast in the month anchored by its first actual payment", () => {
+    const data = setup();
+    const payment = obligation(data, { recurrence: "quarterly", dueDate: "2026-11-02", status: "Paga", paidAt: "2026-11-01" });
+    data.obligations = [payment];
+    data.transactions = [transaction(data, { obligationId: payment.id, purchaseDate: "2026-11-02", paymentDate: "2026-11-01", date: "2026-11-01" })];
+    expect(monthlySpending(data, "2027-02", "cash").filter(entry => entry.source === "payment")).toMatchObject([{ date: "2027-02-01", amount: 200, state: "estimated" }]);
+  });
+  it("does not suppress the current monthly forecast when paying last month's bill", () => {
+    const data = setup();
+    const payment = obligation(data, { recurrence: "monthly", dueDate: "2026-11-01", status: "Paga", paidAt: "2026-12-03" });
+    data.obligations = [payment];
+    data.transactions = [transaction(data, { obligationId: payment.id, purchaseDate: "2026-11-01", paymentDate: "2026-12-03", date: "2026-12-03" })];
+    expect(monthlySpending(data, "2026-12", "cash").filter(entry => entry.source === "payment" && entry.state === "estimated")).toMatchObject([{ date: "2026-12-01", amount: 200 }]);
+  });
   it("soma nota, voz e pagamento previsto nas categorias", () => {
     const data = setup();
     data.receipts = [receipt()];
