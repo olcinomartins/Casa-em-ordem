@@ -4,7 +4,7 @@ import {
   Obligation,
   Transaction,
 } from "./domain";
-import { nextOutstandingPaymentDue } from "./paymentSchedule";
+import { nextOutstandingPaymentDue, paymentForMonth } from "./paymentSchedule";
 import { budgetValue } from "./finance";
 import { monthlySpending } from "./spending";
 
@@ -146,6 +146,7 @@ export function selectActionSummary(
     );
 
   const openPayments = data.obligations
+    .map((payment) => paymentForMonth(payment, month, data.transactions))
     .filter((payment) => !completedPaymentStatuses.has(payment.status))
     .map((payment) => ({ ...payment, dueDate: nextPaymentDue(payment, today) }));
   const overduePayments = openPayments

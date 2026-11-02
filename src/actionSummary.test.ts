@@ -85,6 +85,33 @@ const payment = (patch: Partial<Obligation> = {}): Obligation => ({
 });
 
 describe("selectActionSummary", () => {
+  it("reopens recurring payments in the selected month after a previous payment", () => {
+    const data = setup();
+    data.obligations = [payment({
+      recurrence: "monthly", dueDate: "2026-10-01", status: "Paga",
+      paidAt: "2026-10-01", paidAmount: 100,
+    })];
+    const result = selectActionSummary(data, {
+      month: "2026-11", view: "cash", today: "2026-11-02",
+    });
+    expect(result.overduePayments).toHaveLength(1);
+    expect(result.overduePayments[0]).toMatchObject({
+      dueDate: "2026-11-01", status: "A pagar", paidAmount: undefined,
+    });
+    expect(data.obligations[0].status).toBe("Paga");
+  });
+
+  it("does not alert for an occurrence paid in the selected month", () => {
+    const data = setup();
+    data.obligations = [payment({ recurrence: "monthly", dueDate: "2026-10-01" })];
+    data.transactions = [transaction({ obligationId: "payment", purchaseDate: "2026-11-01", paymentDate: "2026-11-02" })];
+    const result = selectActionSummary(data, {
+      month: "2026-11", view: "cash", today: "2026-11-02",
+    });
+    expect(result.overduePayments).toEqual([]);
+    expect(result.upcomingPayments).toEqual([]);
+  });
+
   it("encontra excessos usando gastos realizados e estimados", () => {
     const data = setup();
     const food = categoryId(data, "Alimentação");
