@@ -371,13 +371,11 @@ header p,
 }
 .period { flex-wrap: nowrap; }
 .month-selector { display: flex; align-items: center; gap: .4rem; min-width: 0; }
-.month-selector input { min-width: 0; }
 .month-today { flex-shrink: 0; min-height: 44px; padding: .55rem .65rem; font-weight: 600; white-space: nowrap; }
-.month-picker { position: relative; display: grid; place-items: center; min-width: 0; width: 96px; height: 44px; padding: .5rem; border: 1px solid var(--line); border-radius: 10px; background: #fff; font-weight: 600; white-space: nowrap; }
-.month-picker input[type="month"] { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
-.month-picker:focus-within { outline: 2px solid var(--sage); outline-offset: 2px; }
-.payment-secondary-groups { margin-top: .8rem; }
-.payment-section-content { display: grid; gap: .65rem; padding: 0 .7rem .7rem; }
+.month-navigation { display: grid; grid-template-columns: 28px minmax(0, 1fr) 28px; align-items: center; width: 148px; min-width: 0; min-height: 44px; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
+.month-navigation .month-step { width: 28px; min-width: 0; min-height: 42px; padding: 0; border: 0; background: transparent; }
+.month-label { text-align: center; white-space: nowrap; font-weight: 600; font-size: .85rem; }
+.month-step:focus-visible { outline: 2px solid var(--sage); outline-offset: -2px; }
 .toast {
   background: #e6f0e8;
   border: 1px solid #bfd0c3;
@@ -1740,7 +1738,9 @@ button.attention-item { justify-content: initial; }
   main > header > div:first-child { display: none; }
   main > header .period { display: grid; width: 100%; grid-template-columns: minmax(0, 1fr) repeat(3, 40px); gap: .4rem; }
   main > header .month-selector { width: 100%; gap: .25rem; }
-  main > header .month-picker { flex: 1; width: auto; padding: .35rem; font-size: .9rem; }
+  main > header .month-navigation { flex: 1; width: auto; grid-template-columns: 24px minmax(0, 1fr) 24px; }
+  main > header .month-step { width: 24px; }
+  main > header .month-label { font-size: clamp(.72rem, 3.1vw, .9rem); }
   main > header .month-today { padding: .4rem; font-size: .8rem; }
   main > header .page-order-button, main > header .privacy-toggle, main > header .notification-button { width: 40px; min-width: 40px; height: 44px; min-height: 44px; padding: .4rem; }
   .payment-subgroup > summary { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .3rem .6rem; }

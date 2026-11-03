@@ -1,4 +1,5 @@
 import { PaymentAccessFields, PaymentAccessPanel } from "./PaymentAccessPanel";
+import { MonthNavigator } from "./MonthNavigator";
 import { accessFromForm, loadPaymentAccess, savePaymentAccess, parsePaidAmount } from "./paymentAccess";
 import {
   Fragment,
@@ -75,6 +76,7 @@ import {
 import { transactionDescriptionPatch } from "./transactionEditDraft";
 import {
   groupPayments,
+  includePaymentInGroup,
   paymentGroupForDate,
   paymentDateForEdit,
   shouldResetNestedOnToggle,
@@ -131,7 +133,6 @@ import { isCardCommitment, planCheck, standaloneBudgetItems } from "./planCheck"
 import { mergeFamilySnapshots } from "./familyMerge";
 import {
   loadUiPreferences,
-  compactMonthLabel,
   saveUiPreferences,
   UI_PREFERENCES_STORAGE_KEY,
 } from "./uiPreferences";
@@ -879,19 +880,7 @@ export default function App() {
             </p>
           </div>
           <div className="period">
-            <div className="month-selector">
-            <label className="month-picker">
-            <span aria-hidden="true">{compactMonthLabel(month)}</span>
-            <input
-              type="month"
-              aria-label="Mês selecionado"
-              value={month}
-              onChange={(e) => setMonth(e.target.value)}
-            />
-            </label>
-            <button type="button" className="month-today" title="Voltar ao mês atual" aria-label="Selecionar mês atual"
-              onClick={() => setMonth(monthOf(dateOnly(new Date())))}>Hoje</button>
-            </div>
+            <MonthNavigator month={month} onChange={setMonth} />
             <button
               className="page-order-button"
               title={organizingPage ? "Concluir ajuste da ordem" : "Ajustar ordem dos blocos"}
@@ -4945,24 +4934,12 @@ function Payments({
     mutate((d) => { d.obligations = d.obligations.filter((item) => item.id !== deleting.id); });
     setDeleting(undefined);
   };
-  const unconfirmPayment = (payment: Obligation) => mutate(d => {
-    const item = d.obligations.find(o => o.id === payment.id);
-    if (!item) return;
-    item.status = "A pagar"; item.paidAt = undefined; item.paidAmount = undefined;
-    item.reconciledTransactionId = undefined; item.updatedAt = now(); item.version++;
-    item.skippedDates = item.skippedDates?.filter(date => date !== payment.dueDate);
-    const matches = (t: Transaction) => t.obligationId === payment.id && (t.purchaseDate || t.paymentDate || t.date) === payment.dueDate;
-    d.transactions = d.transactions.filter(t => !matches(t) || !t.provisional);
-    for (const transaction of d.transactions) if (matches(transaction)) transaction.obligationId = undefined;
-  });
-  const cardPayments = data.obligations.filter(o => isCardCommitment(o) && !["Paga", "Confirmada", "Dispensada"].includes(o.status));
-  const completedPayments = data.obligations.filter(o => ["Paga", "Confirmada", "Dispensada"].includes(o.status));
-  const cardGroups = groupPayments(cardPayments, paymentGroup, nextDueDate, o => o.planned);
   const paymentGroups = groupPayments(
     data.obligations.filter(
       (obligation) =>
         !["Paga", "Confirmada", "Dispensada"].includes(obligation.status) &&
-        !isCardCommitment(obligation),
+        !isCardCommitment(obligation) &&
+        includePaymentInGroup(obligation, month, dateOnly(new Date())),
     ),
     paymentGroup,
     nextDueDate,
@@ -5112,30 +5089,6 @@ function Payments({
         </dialog>
       )}
       {deleting && <div className="choice-dialog" role="dialog" aria-modal="true" aria-label="Excluir pagamento recorrente"><div><h3>Excluir {deleting.name}</h3><p>Escolha se vale somente para o próximo pagamento ou para toda a recorrência.</p><div className="actions"><button onClick={deleteOccurrence}>Apenas esta ocorrência</button><button className="danger-button" onClick={deleteRecurring}>Esta e próximas</button><button onClick={()=>setDeleting(undefined)}>Cancelar</button></div></div></div>}
-      <div className="payment-grid payment-grid-grouped payment-secondary-groups">
-        <details className="payment-subgroup" {...disclosureProps("cards")}>
-          <summary><span>Cartões: recorrências e parcelas</span><small>{cardPayments.length} cobrança(s) · <SensitiveMoney value={cardPayments.reduce((sum, o) => sum + o.planned, 0)} hidden={hideValues} /></small></summary>
-          <div className="payment-section-content">
-            <p className="muted">Previsões do cartão, separadas por vencimento. Confira o pagamento na fatura.</p>
-            {cardGroups.map(group => <details className="payment-subgroup" key={group.name} {...disclosureProps(`cards:${group.name}`)}>
-              <summary><span>{group.name}</span><small>{group.count} cobrança(s) · <SensitiveMoney value={group.total} hidden={hideValues} /></small></summary>
-              {group.items.map(o => <div className="confirmed-row" key={paymentOccurrenceKey(o)}><div><b>{o.name}</b><small>{o.dueDate.split("-").reverse().join("/")} · <SensitiveMoney value={o.planned} hidden={hideValues} /></small></div><PaymentAccessPanel paymentId={o.id} name={o.name} /></div>)}
-            </details>)}
-            {!cardPayments.length && <p className="muted">Nenhuma cobrança de cartão para exibir.</p>}
-          </div>
-        </details>
-        <details className="payment-subgroup" {...disclosureProps("completed")}>
-          <summary><span>Pagamentos confirmados e dispensados</span><small>{completedPayments.length} cobrança(s) · <SensitiveMoney value={completedPayments.reduce((sum, o) => sum + (o.status === "Dispensada" ? 0 : o.paidAmount ?? o.planned), 0)} hidden={hideValues} /></small></summary>
-          <div className="payment-section-content">
-            {completedPayments.slice().sort((a, b) => b.dueDate.localeCompare(a.dueDate)).map(o => <div className="confirmed-row" key={paymentOccurrenceKey(o)}>
-              <div><b>{o.name}</b><small>{o.dueDate.split("-").reverse().join("/")} · <SensitiveMoney value={o.paidAmount ?? o.planned} hidden={hideValues} /> · {o.status}</small></div>
-              {o.paymentUrl && <a className="icon-button" href={o.paymentUrl} target="_blank" rel="noreferrer" aria-label={`Abrir pagamento de ${o.name}`}><ExternalLink size={18} /></a>}
-              <PaymentAccessPanel paymentId={o.id} name={o.name} /><button onClick={() => unconfirmPayment(o)}>Desconfirmar</button>
-            </div>)}
-            {!completedPayments.length && <p className="muted">Nenhum pagamento confirmado neste mês.</p>}
-          </div>
-        </details>
-      </div>
       {!data.obligations.length && <Empty />}
     </section>
   );

@@ -1,9 +1,22 @@
 import { describe, expect, it } from "vitest";
-import { paymentGroupForDate } from "./paymentGroups";
+import { paymentGroupForDate, includePaymentInGroup } from "./paymentGroups";
 import { paymentForMonth } from "./paymentSchedule";
 import type { Obligation, Transaction } from "./domain";
 
 describe("payment groups for the selected month", () => {
+  it("excludes future monthly bills while keeping current, overdue, and non-monthly forecasts", () => {
+    const rows = [
+      { recurrence: "monthly", dueDate: "2026-11-10", planned: 100 },
+      { recurrence: "monthly", dueDate: "2026-10-10", planned: 100 },
+      { recurrence: "monthly", dueDate: "2026-12-10", planned: 100 },
+      { recurrence: "quarterly", dueDate: "2027-02-01", planned: 200 },
+      { recurrence: "yearly", dueDate: "2027-05-01", planned: 300 },
+      { recurrence: "none", dueDate: "2027-03-01", planned: 400 },
+    ];
+    const visible = rows.filter(row => includePaymentInGroup(row, "2026-11", "2026-11-02"));
+    expect(visible.map(row => row.dueDate)).toEqual(["2026-11-10", "2026-10-10", "2027-02-01", "2027-05-01", "2027-03-01"]);
+    expect(visible.filter(row => paymentGroupForDate(row.dueDate, "2026-11", "2026-11-02") === "Vence nos próximos meses").reduce((sum, row) => sum + row.planned, 0)).toBe(900);
+  });
   it("puts a quarterly occurrence in the selected future month instead of a collapsed future group", () => {
     const payment = { id: "quarterly", dueDate: "2026-11-02", recurrence: "quarterly", status: "Paga", paidAt: "2026-11-01" } as Obligation;
     const transactions = [{ obligationId: payment.id, purchaseDate: "2026-11-02", paymentDate: "2026-11-01", amount: 100 }] as Transaction[];

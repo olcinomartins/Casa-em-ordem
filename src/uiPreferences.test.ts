@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   defaultUiPreferences,
   compactMonthLabel,
+  shiftMonth,
   loadUiPreferences,
   saveUiPreferences,
   UI_PREFERENCES_STORAGE_KEY,
@@ -9,8 +10,15 @@ import {
 
 describe("uiPreferences", () => {
   it("formats the selected month compactly without losing the year", () => {
-    expect(compactMonthLabel("2026-11")).toBe("nov/26");
-    expect(compactMonthLabel("2027-02")).toBe("fev/27");
+    expect(compactMonthLabel("2026-11")).toBe("nov 2026");
+    expect(compactMonthLabel("2027-02")).toBe("fev 2027");
+  });
+  it("moves chronologically through months and changes the year automatically", () => {
+    expect(shiftMonth("2026-12", 1)).toBe("2027-01");
+    expect(shiftMonth("2027-01", -1)).toBe("2026-12");
+    let month = "2026-11";
+    for (let i = 0; i < 3; i++) month = shiftMonth(month, 1);
+    expect(month).toBe("2027-02");
   });
   it("opens in the local current month after manual selection and year rollover", () => {
     vi.useFakeTimers();

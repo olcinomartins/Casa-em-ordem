@@ -5,7 +5,13 @@ export const UI_PREFERENCES_VERSION = 1 as const;
 
 export function compactMonthLabel(month: string) {
   const names = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
-  return `${names[Number(month.slice(5, 7)) - 1]}/${month.slice(2, 4)}`;
+  return `${names[Number(month.slice(5, 7)) - 1]} ${month.slice(0, 4)}`;
+}
+
+export function shiftMonth(month: string, delta: number) {
+  const [year, index] = month.split("-").map(Number);
+  const total = year * 12 + index - 1 + delta;
+  return `${Math.floor(total / 12)}-${String((total % 12) + 1).padStart(2, "0")}`;
 }
 
 export type AnalyticsMode = "cash" | "accrual";

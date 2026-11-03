@@ -8,6 +8,10 @@ export const PAYMENT_GROUP_ORDER = [
 
 export type PaymentGroupName = (typeof PAYMENT_GROUP_ORDER)[number];
 
+export function includePaymentInGroup(payment: { dueDate: string; recurrence: string }, month: string, today: string) {
+  return payment.recurrence !== "monthly" || paymentGroupForDate(payment.dueDate, month, today) !== "Vence nos próximos meses";
+}
+
 export function paymentGroupForDate(dueDate: string, month: string, today: string): PaymentGroupName {
   if (month !== today.slice(0, 7)) {
     if (dueDate < `${month}-01`) return "Vencidos";
