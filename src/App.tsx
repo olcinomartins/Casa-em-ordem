@@ -79,7 +79,7 @@ import {
   paymentDateForEdit,
   shouldResetNestedOnToggle,
 } from "./paymentGroups";
-import { nextOutstandingPaymentDue, paymentOccurrenceKey, paymentOccurrencesForMonth, summarizePaymentOccurrences } from "./paymentSchedule";
+import { nextOutstandingPaymentDue, paymentOccurrenceKey, paymentOccurrencesForMonth } from "./paymentSchedule";
 import { normalizePaymentUrl } from "./paymentLinks";
 import {
   loadLocalIfPresent,
@@ -4819,7 +4819,6 @@ function Payments({
       setPaymentGroupsOpen(current => current[key] === open ? current : { ...current, [key]: open });
     },
   });
-  const overview = summarizePaymentOccurrences(data.obligations, month);
   const dueDateForDay = (baseMonth: string, rawDay: FormDataEntryValue | null) => {
     const day = Math.max(1, Math.min(31, Number(rawDay) || 10));
     const [year, monthNumber] = baseMonth.split("-").map(Number);
@@ -4978,11 +4977,6 @@ function Payments({
             Previsão por mês, contas vencidas e confirmação de pagamentos.
           </p>
         </div>
-      </div>
-      <div className="payment-month-summary">
-        <div><span>Previsto em {month.split("-").reverse().join("/")}</span><strong><SensitiveMoney value={overview.monthTotal} hidden={hideValues} /></strong><small>{overview.monthCount} cobrança(s) no mês</small></div>
-        <div><span>A pagar no mês</span><strong><SensitiveMoney value={overview.pendingTotal} hidden={hideValues} /></strong><small>{overview.pendingCount} pendente(s)</small></div>
-        <div><span>Atrasados anteriores</span><strong><SensitiveMoney value={overview.overdueTotal} hidden={hideValues} /></strong><small>{overview.overdueCount} pendente(s) acumulada(s)</small></div>
       </div>
       {creating && (
         <QuickForm
